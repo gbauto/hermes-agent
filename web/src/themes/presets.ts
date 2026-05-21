@@ -204,7 +204,84 @@ export const defaultLargeTheme: DashboardTheme = {
   },
 };
 
+/**
+ * GBAutomation brand theme.
+ *
+ * Ports the public site's palette (gb-automation-landing/src/index.css) to
+ * the dashboard: a light cream canvas, near-black text, terracotta accent.
+ * Inter for body copy, Newsreader for display headings.
+ *
+ * Unlike every other preset this is a LIGHT theme — the palette triplet is
+ * inverted (light background / dark midground). The DS `color-mix()` cascade
+ * is symmetric so the derived shadcn tokens still resolve; `colorOverrides`
+ * pins the exact brand hexes. `noiseOpacity` is dialled near-zero because the
+ * Backdrop's `color-dodge` grain layer blows out on a light canvas.
+ */
+export const gbautomationTheme: DashboardTheme = {
+  name: "gbautomation",
+  label: "GBAutomation",
+  description: "Cream canvas, terracotta accent — the GBAutomation brand",
+  palette: {
+    background: { hex: "#f3f1e7", alpha: 1 }, // --cream-bg
+    midground: { hex: "#191919", alpha: 1 }, // --text-main
+    foreground: { hex: "#ffffff", alpha: 0 },
+    warmGlow: "rgba(217, 119, 87, 0.5)", // --terracotta
+    noiseOpacity: 0.1,
+  },
+  typography: {
+    ...DEFAULT_TYPOGRAPHY,
+    fontSans: `"Inter", ${SYSTEM_SANS}`,
+    fontMono: `"JetBrains Mono", ${SYSTEM_MONO}`,
+    fontDisplay: `"Newsreader", Georgia, "Times New Roman", serif`,
+    fontUrl:
+      "https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Newsreader:opsz,wght@6..72,300;6..72,400;6..72,500;6..72,600&family=JetBrains+Mono:wght@400;500;700&display=swap",
+    letterSpacing: "-0.005em",
+  },
+  layout: {
+    ...DEFAULT_LAYOUT,
+    radius: "0.5rem",
+  },
+  colorOverrides: {
+    // Panels / surfaces — --cream-panel.
+    card: "#e6e4d9",
+    cardForeground: "#191919",
+    popover: "#e6e4d9",
+    popoverForeground: "#191919",
+    secondary: "#e6e4d9",
+    secondaryForeground: "#191919",
+    muted: "#e9e7dc",
+    mutedForeground: "#5c5c5c", // --text-muted
+    // Hover/active chrome — a touch warmer than the panel.
+    accent: "#e0ddcf",
+    accentForeground: "#191919",
+    // Hairlines — --border.
+    border: "#d6d4c8",
+    input: "#d6d4c8",
+    // Terracotta focus ring, mirroring the site's input :focus state.
+    ring: "#d97757",
+    destructive: "#c0392b",
+    destructiveForeground: "#ffffff",
+    success: "#4f7a52",
+    warning: "#d97757", // --terracotta
+  },
+  customCSS: `
+    /* Newsreader serif for display headings — mirrors the GBAutomation site. */
+    h1, h2, h3 {
+      font-family: var(--theme-font-display);
+      letter-spacing: -0.01em;
+    }
+    /* Warm scrollbar to match gb-automation-landing. */
+    ::-webkit-scrollbar { width: 8px; height: 8px; }
+    ::-webkit-scrollbar-thumb {
+      background: #d1cec3;
+      border-radius: 4px;
+    }
+    ::-webkit-scrollbar-thumb:hover { background: #b0ada5; }
+  `,
+};
+
 export const BUILTIN_THEMES: Record<string, DashboardTheme> = {
+  gbautomation: gbautomationTheme,
   default: defaultTheme,
   "default-large": defaultLargeTheme,
   midnight: midnightTheme,

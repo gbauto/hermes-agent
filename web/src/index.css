@@ -227,3 +227,76 @@ code { font-size: 0.875rem; }
   display: none;
 }
 
+/* ------------------------------------------------------------------ */
+/* GBAutomation logo mark — sits beside the "Hermes Agent" wordmark in  */
+/* the sidebar header. The gb monogram is rendered as a solid near-     */
+/* black fill clipped to the PNG's alpha mask (recolour = swap the      */
+/* fill; the PNG is shape-only, so the lightweight 25 KB asset works).  */
+/* A warm-white band sweeps across on `screen` blend for the shine.    */
+/* Technique from resources/skills/consulting-admin/assets/             */
+/* gb-logo-shine-demo.html.                                             */
+/* ------------------------------------------------------------------ */
+.gb-logo {
+  --gb-logo-url: url('/gb-mark.png');
+  position: relative;
+  display: block;
+  flex-shrink: 0;
+  width: 2rem;
+  aspect-ratio: 258 / 240;
+  isolation: isolate;
+  cursor: pointer;
+  transition: transform 0.18s ease;
+  /* the mark itself — solid near-black, clipped to the logo alpha shape */
+  background: #191919;
+  -webkit-mask-image: var(--gb-logo-url);
+  -webkit-mask-repeat: no-repeat;
+  -webkit-mask-size: contain;
+  -webkit-mask-position: center;
+  mask-image: var(--gb-logo-url);
+  mask-repeat: no-repeat;
+  mask-size: contain;
+  mask-position: center;
+  mask-mode: alpha;
+}
+
+/* subtle lift on hover — signals the mark is a link to the public site */
+.gb-logo:hover {
+  transform: scale(1.08);
+}
+
+/* the shine: a warm-white band sweeping across, clipped to the mark by
+   the parent's mask. `screen` lifts the black strokes into a highlight. */
+.gb-logo::after {
+  content: '';
+  position: absolute;
+  inset: -12%;
+  pointer-events: none;
+  background: linear-gradient(
+    75deg,
+    rgba(255, 255, 255, 0) 38%,
+    rgba(255, 236, 222, 0.95) 50%,
+    rgba(255, 255, 255, 0) 62%
+  );
+  mix-blend-mode: screen;
+  transform: translateX(-160%);
+  /* One ~1.8s sweep once a minute — the sweep occupies the first 3% of
+     the cycle, then the band rests off-screen for the remaining ~58s. */
+  animation: gb-logo-shine 60s ease-in-out infinite;
+}
+
+@keyframes gb-logo-shine {
+  0% {
+    transform: translateX(-160%);
+  }
+  3%,
+  100% {
+    transform: translateX(140%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .gb-logo::after {
+    animation: none;
+  }
+}
+

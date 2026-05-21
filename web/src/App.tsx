@@ -505,6 +505,19 @@ export default function App() {
                   <br />
                   Agent
                 </Typography>
+
+                {/* GBAutomation brand mark — the gb monogram as a solid
+                    black fill clipped to an alpha mask, with a sweeping
+                    shine. Technique from consulting-admin's
+                    gb-logo-shine-demo.html. Links to the public site. */}
+                <a
+                  href="https://www.gbautomation.xyz"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="gb-logo"
+                  aria-label="GBAutomation — open gbautomation.xyz"
+                  title="gbautomation.xyz"
+                />
               </div>
 
               <Button

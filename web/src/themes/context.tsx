@@ -306,8 +306,8 @@ function applyTheme(theme: DashboardTheme) {
 export function ThemeProvider({ children }: { children: ReactNode }) {
   /** Name of the currently active theme (built-in id or user YAML name). */
   const [themeName, setThemeName] = useState<string>(() => {
-    if (typeof window === "undefined") return "default";
-    return window.localStorage.getItem(STORAGE_KEY) ?? "default";
+    if (typeof window === "undefined") return "gbautomation";
+    return window.localStorage.getItem(STORAGE_KEY) ?? "gbautomation";
   });
 
   /** All selectable themes (shown in the picker). Starts with just the
