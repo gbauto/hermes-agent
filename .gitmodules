@@ -1,0 +1,6 @@
+[submodule "vendor/hermes-multi-agent-workflow"]
+	path = vendor/hermes-multi-agent-workflow
+	url = https://github.com/gbauto/hermes-multi-agent-workflow.git
+[submodule "vendor/hermes-webui"]
+	path = vendor/hermes-webui
+	url = https://github.com/nesquena/hermes-webui.git
