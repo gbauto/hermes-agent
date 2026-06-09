@@ -281,6 +281,24 @@ def clear_current_board() -> None:
         pass
 
 
+@contextlib.contextmanager
+def scoped_current_board(slug: Optional[str]):
+    """Temporarily pin board resolution to ``slug`` via HERMES_KANBAN_BOARD."""
+    if not slug:
+        yield
+        return
+    normed = _normalize_board_slug(slug)
+    prev = os.environ.get("HERMES_KANBAN_BOARD")
+    os.environ["HERMES_KANBAN_BOARD"] = normed
+    try:
+        yield
+    finally:
+        if prev is None:
+            os.environ.pop("HERMES_KANBAN_BOARD", None)
+        else:
+            os.environ["HERMES_KANBAN_BOARD"] = prev
+
+
 def board_dir(board: Optional[str] = None) -> Path:
     """Return the on-disk directory for ``board``.
 
