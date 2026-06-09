@@ -101,6 +101,50 @@ def _debug(message: str) -> None:
 _INIT_FAILED = object()
 
 
+def _clean_join_value(value: Any) -> str:
+    if value is None:
+        return ""
+    return str(value).strip()
+
+
+def _kanban_join_metadata(task_id: str = "") -> Dict[str, str]:
+    """Return Kanban/run identifiers exported by dispatcher workers.
+
+    These fields intentionally mirror the Supabase observability bridge keys
+    and tags so Langfuse traces can join to Hermes Kanban and agent-run rows.
+    """
+    kanban_task_id = _clean_join_value(os.environ.get("HERMES_KANBAN_TASK")) or _clean_join_value(task_id)
+    mapping = {
+        "kanban_task_id": kanban_task_id,
+        "kanban_run_id": _clean_join_value(os.environ.get("HERMES_KANBAN_RUN_ID")),
+        "kanban_board": _clean_join_value(os.environ.get("HERMES_KANBAN_BOARD")),
+        "kanban_workspace": _clean_join_value(os.environ.get("HERMES_KANBAN_WORKSPACE")),
+        "kanban_branch": _clean_join_value(os.environ.get("HERMES_KANBAN_BRANCH")),
+        "profile": _clean_join_value(os.environ.get("HERMES_PROFILE")),
+        "tenant": _clean_join_value(os.environ.get("HERMES_TENANT")),
+    }
+    return {key: value for key, value in mapping.items() if value}
+
+
+def _kanban_join_tags(metadata: Dict[str, str]) -> list[str]:
+    tags = ["hermes", "langfuse"]
+    task_id = metadata.get("kanban_task_id")
+    run_id = metadata.get("kanban_run_id")
+    if task_id:
+        tags.extend([f"task:{task_id}", f"task_id:{task_id}"])
+    if run_id:
+        tags.extend([f"run:{run_id}", f"run_id:{run_id}"])
+    for key, prefix in (
+        ("kanban_board", "board"),
+        ("profile", "profile"),
+        ("tenant", "tenant"),
+    ):
+        value = metadata.get(key)
+        if value:
+            tags.append(f"{prefix}:{value}")
+    return list(dict.fromkeys(tags))
+
+
 def _redact_key_preview(value: str) -> str:
     """Return a brief, log-safe preview of a credential value.
 
@@ -543,6 +587,7 @@ def _start_root_trace(task_key: str, *, task_id: str, session_id: str, platform:
                       api_mode: str, messages: Any, client: Langfuse) -> TraceState:
     trace_id = client.create_trace_id(seed=f"{session_id or 'sessionless'}::{task_id or task_key}")
     trace_input = _extract_last_user_message(messages)
+    join_metadata = _kanban_join_metadata(task_id)
     metadata = {
         "source": "hermes",
         "task_id": task_id,
@@ -550,7 +595,9 @@ def _start_root_trace(task_key: str, *, task_id: str, session_id: str, platform:
         "provider": provider,
         "model": model,
         "api_mode": api_mode,
+        **join_metadata,
     }
+    tags = _kanban_join_tags(join_metadata)
 
     # session_id must be passed in trace_context for Langfuse session grouping.
     trace_ctx: Dict[str, Any] = {"trace_id": trace_id}
@@ -562,7 +609,7 @@ def _start_root_trace(task_key: str, *, task_id: str, session_id: str, platform:
             with propagate_attributes(
                 session_id=session_id or task_key,
                 trace_name="Hermes turn",
-                tags=["hermes", "langfuse"],
+                tags=tags,
             ):
                 root_ctx = client.start_as_current_observation(
                     trace_context=trace_ctx,

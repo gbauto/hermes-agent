@@ -468,6 +468,48 @@ class TestRequestMessageCoercion:
         assert mod._coerce_request_messages(user_message="u") == [{"role": "user", "content": "u"}]
 
 
+class TestKanbanJoinMetadata:
+    def test_kanban_join_metadata_uses_worker_env(self, monkeypatch):
+        sys.modules.pop("plugins.observability.langfuse", None)
+        mod = importlib.import_module("plugins.observability.langfuse")
+
+        monkeypatch.setenv("HERMES_KANBAN_TASK", "task-123")
+        monkeypatch.setenv("HERMES_KANBAN_RUN_ID", "456")
+        monkeypatch.setenv("HERMES_KANBAN_BOARD", "gbautomation")
+        monkeypatch.setenv("HERMES_PROFILE", "kanban-worker")
+        monkeypatch.setenv("HERMES_TENANT", "gbautomation")
+
+        metadata = mod._kanban_join_metadata("fallback-task")
+        tags = mod._kanban_join_tags(metadata)
+
+        assert metadata["kanban_task_id"] == "task-123"
+        assert metadata["kanban_run_id"] == "456"
+        assert metadata["kanban_board"] == "gbautomation"
+        assert metadata["profile"] == "kanban-worker"
+        assert metadata["tenant"] == "gbautomation"
+        assert "task:task-123" in tags
+        assert "task_id:task-123" in tags
+        assert "run:456" in tags
+        assert "run_id:456" in tags
+        assert "board:gbautomation" in tags
+        assert "profile:kanban-worker" in tags
+        assert "tenant:gbautomation" in tags
+
+    def test_kanban_join_metadata_falls_back_to_task_id(self):
+        sys.modules.pop("plugins.observability.langfuse", None)
+        mod = importlib.import_module("plugins.observability.langfuse")
+
+        metadata = mod._kanban_join_metadata("task-from-hook")
+
+        assert metadata == {"kanban_task_id": "task-from-hook"}
+        assert mod._kanban_join_tags(metadata) == [
+            "hermes",
+            "langfuse",
+            "task:task-from-hook",
+            "task_id:task-from-hook",
+        ]
+
+
 class TestToolCallOutputBackfill:
     def test_post_tool_call_backfills_matching_turn_tool_call_output(self, monkeypatch):
         sys.modules.pop("plugins.observability.langfuse", None)
