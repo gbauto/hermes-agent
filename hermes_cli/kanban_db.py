@@ -3724,6 +3724,8 @@ class DispatchResult:
     available) from "correctly idle" (nothing spawnable in the queue)."""
     skipped_per_profile_capped: list[tuple[str, str, int]] = field(default_factory=list)
     """Compatibility bucket for newer CLIs with per-profile in-progress caps."""
+    auto_assigned_default: list[tuple[str, str]] = field(default_factory=list)
+    """Compatibility bucket for newer CLIs that auto-assign default profiles."""
     crashed: list[str] = field(default_factory=list)
     """Task ids reclaimed because their worker PID disappeared."""
     auto_blocked: list[str] = field(default_factory=list)
