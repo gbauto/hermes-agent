@@ -3722,6 +3722,8 @@ class DispatchResult:
     operator-actionable failure. Tracked separately so health telemetry
     can distinguish "real stuck" (nothing spawned but spawnable work
     available) from "correctly idle" (nothing spawnable in the queue)."""
+    skipped_per_profile_capped: list[tuple[str, str, int]] = field(default_factory=list)
+    """Compatibility bucket for newer CLIs with per-profile in-progress caps."""
     crashed: list[str] = field(default_factory=list)
     """Task ids reclaimed because their worker PID disappeared."""
     auto_blocked: list[str] = field(default_factory=list)
