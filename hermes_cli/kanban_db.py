@@ -1084,6 +1084,15 @@ def connect(
     return conn
 
 
+def connect_closing(
+    db_path: Optional[Path] = None,
+    *,
+    board: Optional[str] = None,
+):
+    """Open a kanban DB connection and close it on context exit."""
+    return contextlib.closing(connect(db_path, board=board))
+
+
 def init_db(
     db_path: Optional[Path] = None,
     *,
