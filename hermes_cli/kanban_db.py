@@ -4734,6 +4734,8 @@ def dispatch_once(
     dry_run: bool = False,
     max_spawn: Optional[int] = None,
     max_in_progress: Optional[int] = None,
+    default_assignee: Optional[str] = None,
+    max_in_progress_per_profile: Optional[int] = None,
     failure_limit: int = DEFAULT_SPAWN_FAILURE_LIMIT,
     stale_timeout_seconds: int = 0,
     board: Optional[str] = None,
