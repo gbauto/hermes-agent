@@ -5351,6 +5351,7 @@ def _default_spawn(
     # what the tool reads — set it explicitly here so comments are
     # attributed correctly regardless of how the child loads config.
     env["HERMES_PROFILE"] = profile_arg
+    env.update(_worker_observability_env(task, board=board))
 
     cmd = [
         *_resolve_hermes_argv(),
@@ -5429,6 +5430,57 @@ def _default_spawn(
     # reference goes out of scope and is GC'd, but the OS-level FD stays
     # open in the child until the child exits.
     return proc.pid
+
+
+def _worker_observability_env(task: Task, *, board: Optional[str] = None) -> dict[str, str]:
+    """Build retry/debug env vars inherited by worker traces and telemetry."""
+    out: dict[str, str] = {
+        "HERMES_KANBAN_CONTEXT_SOURCE": "kanban_show",
+        "HERMES_KANBAN_SESSION_ID": task.session_id or f"kanban:{task.id}",
+        "HERMES_KANBAN_RETRY_ATTEMPT": "1",
+        "HERMES_KANBAN_PRIOR_ATTEMPT_COUNT": "0",
+    }
+    if task.last_failure_error:
+        out["HERMES_KANBAN_LAST_FAILURE_ERROR"] = task.last_failure_error
+    if task.session_id:
+        out.setdefault("HERMES_SESSION_ID", task.session_id)
+
+    try:
+        with connect(board=board) as conn:
+            runs = list_runs(conn, task.id, include_active=True)
+            prior = [
+                r for r in runs
+                if r.ended_at is not None and r.id != task.current_run_id
+            ]
+            out["HERMES_KANBAN_PRIOR_ATTEMPT_COUNT"] = str(len(prior))
+            out["HERMES_KANBAN_RETRY_ATTEMPT"] = str(len(prior) + 1)
+            if prior:
+                out["HERMES_KANBAN_PRIOR_RUN_IDS"] = ",".join(str(r.id) for r in prior[-12:])
+                last = prior[-1]
+                if last.error and "HERMES_KANBAN_LAST_FAILURE_ERROR" not in out:
+                    out["HERMES_KANBAN_LAST_FAILURE_ERROR"] = last.error
+                if last.outcome == "blocked" and last.summary:
+                    out["HERMES_KANBAN_LAST_BLOCK_REASON"] = last.summary
+
+            row = conn.execute(
+                "SELECT payload FROM task_events "
+                "WHERE task_id = ? AND kind = 'blocked' "
+                "ORDER BY id DESC LIMIT 1",
+                (task.id,),
+            ).fetchone()
+            if row and row["payload"]:
+                try:
+                    payload = json.loads(row["payload"])
+                    reason = payload.get("reason") if isinstance(payload, dict) else None
+                    if reason:
+                        out["HERMES_KANBAN_LAST_BLOCK_REASON"] = str(reason)
+                except Exception:
+                    pass
+    except Exception:
+        # Observability metadata must never prevent worker spawn.
+        pass
+
+    return {k: v for k, v in out.items() if v}
 
 
 # ---------------------------------------------------------------------------

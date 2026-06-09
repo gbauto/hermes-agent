@@ -475,6 +475,13 @@ class TestKanbanJoinMetadata:
 
         monkeypatch.setenv("HERMES_KANBAN_TASK", "task-123")
         monkeypatch.setenv("HERMES_KANBAN_RUN_ID", "456")
+        monkeypatch.setenv("HERMES_KANBAN_SESSION_ID", "kanban:task-123")
+        monkeypatch.setenv("HERMES_KANBAN_RETRY_ATTEMPT", "3")
+        monkeypatch.setenv("HERMES_KANBAN_PRIOR_ATTEMPT_COUNT", "2")
+        monkeypatch.setenv("HERMES_KANBAN_PRIOR_RUN_IDS", "111,222")
+        monkeypatch.setenv("HERMES_KANBAN_LAST_FAILURE_ERROR", "blocked by turnstile")
+        monkeypatch.setenv("HERMES_KANBAN_LAST_BLOCK_REASON", "manual auth needed")
+        monkeypatch.setenv("HERMES_KANBAN_CONTEXT_SOURCE", "kanban_show")
         monkeypatch.setenv("HERMES_KANBAN_BOARD", "gbautomation")
         monkeypatch.setenv("HERMES_PROFILE", "kanban-worker")
         monkeypatch.setenv("HERMES_TENANT", "gbautomation")
@@ -484,6 +491,13 @@ class TestKanbanJoinMetadata:
 
         assert metadata["kanban_task_id"] == "task-123"
         assert metadata["kanban_run_id"] == "456"
+        assert metadata["kanban_session_id"] == "kanban:task-123"
+        assert metadata["kanban_retry_attempt"] == "3"
+        assert metadata["kanban_prior_attempt_count"] == "2"
+        assert metadata["kanban_prior_run_ids"] == "111,222"
+        assert metadata["kanban_last_failure_error"] == "blocked by turnstile"
+        assert metadata["kanban_last_block_reason"] == "manual auth needed"
+        assert metadata["kanban_context_source"] == "kanban_show"
         assert metadata["kanban_board"] == "gbautomation"
         assert metadata["profile"] == "kanban-worker"
         assert metadata["tenant"] == "gbautomation"
@@ -491,6 +505,7 @@ class TestKanbanJoinMetadata:
         assert "task_id:task-123" in tags
         assert "run:456" in tags
         assert "run_id:456" in tags
+        assert "retry:3" in tags
         assert "board:gbautomation" in tags
         assert "profile:kanban-worker" in tags
         assert "tenant:gbautomation" in tags

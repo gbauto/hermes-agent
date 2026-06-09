@@ -117,6 +117,13 @@ def _kanban_join_metadata(task_id: str = "") -> Dict[str, str]:
     mapping = {
         "kanban_task_id": kanban_task_id,
         "kanban_run_id": _clean_join_value(os.environ.get("HERMES_KANBAN_RUN_ID")),
+        "kanban_session_id": _clean_join_value(os.environ.get("HERMES_KANBAN_SESSION_ID")),
+        "kanban_retry_attempt": _clean_join_value(os.environ.get("HERMES_KANBAN_RETRY_ATTEMPT")),
+        "kanban_prior_attempt_count": _clean_join_value(os.environ.get("HERMES_KANBAN_PRIOR_ATTEMPT_COUNT")),
+        "kanban_prior_run_ids": _clean_join_value(os.environ.get("HERMES_KANBAN_PRIOR_RUN_IDS")),
+        "kanban_last_failure_error": _clean_join_value(os.environ.get("HERMES_KANBAN_LAST_FAILURE_ERROR")),
+        "kanban_last_block_reason": _clean_join_value(os.environ.get("HERMES_KANBAN_LAST_BLOCK_REASON")),
+        "kanban_context_source": _clean_join_value(os.environ.get("HERMES_KANBAN_CONTEXT_SOURCE")),
         "kanban_board": _clean_join_value(os.environ.get("HERMES_KANBAN_BOARD")),
         "kanban_workspace": _clean_join_value(os.environ.get("HERMES_KANBAN_WORKSPACE")),
         "kanban_branch": _clean_join_value(os.environ.get("HERMES_KANBAN_BRANCH")),
@@ -134,6 +141,9 @@ def _kanban_join_tags(metadata: Dict[str, str]) -> list[str]:
         tags.extend([f"task:{task_id}", f"task_id:{task_id}"])
     if run_id:
         tags.extend([f"run:{run_id}", f"run_id:{run_id}"])
+    retry_attempt = metadata.get("kanban_retry_attempt")
+    if retry_attempt:
+        tags.append(f"retry:{retry_attempt}")
     for key, prefix in (
         ("kanban_board", "board"),
         ("profile", "profile"),
@@ -598,16 +608,21 @@ def _start_root_trace(task_key: str, *, task_id: str, session_id: str, platform:
         **join_metadata,
     }
     tags = _kanban_join_tags(join_metadata)
+    effective_session_id = (
+        join_metadata.get("kanban_session_id")
+        or session_id
+        or join_metadata.get("kanban_task_id")
+    )
 
     # session_id must be passed in trace_context for Langfuse session grouping.
     trace_ctx: Dict[str, Any] = {"trace_id": trace_id}
-    if session_id:
-        trace_ctx["session_id"] = session_id
+    if effective_session_id:
+        trace_ctx["session_id"] = effective_session_id
 
     if propagate_attributes is not None:
         try:
             with propagate_attributes(
-                session_id=session_id or task_key,
+                session_id=effective_session_id or task_key,
                 trace_name="Hermes turn",
                 tags=tags,
             ):

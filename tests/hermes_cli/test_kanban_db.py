@@ -1881,11 +1881,44 @@ class TestSharedBoardPaths:
         )
         assert env["HERMES_KANBAN_TASK"] == "t_dispatch_env"
         assert env["HERMES_KANBAN_BRANCH"] == "wt/t_dispatch_env"
+        assert env["HERMES_KANBAN_SESSION_ID"] == "kanban:t_dispatch_env"
+        assert env["HERMES_KANBAN_CONTEXT_SOURCE"] == "kanban_show"
+        assert env["HERMES_KANBAN_RETRY_ATTEMPT"] == "1"
+        assert env["HERMES_KANBAN_PRIOR_ATTEMPT_COUNT"] == "0"
 
 
 # ---------------------------------------------------------------------------
 # latest_summary / latest_summaries — surface task_runs.summary handoffs
 # ---------------------------------------------------------------------------
+
+def test_worker_observability_env_exports_retry_context(kanban_home):
+    with kb.connect() as conn:
+        t = kb.create_task(
+            conn,
+            title="retry me",
+            assignee="coder",
+            session_id="chat-session-1",
+        )
+        claimed = kb.claim_task(conn, t)
+        assert claimed is not None
+        assert kb.block_task(
+            conn,
+            t,
+            reason="cloudflare turnstile",
+            expected_run_id=claimed.current_run_id,
+        )
+        assert kb.unblock_task(conn, t)
+        claimed_retry = kb.claim_task(conn, t)
+        assert claimed_retry is not None
+        env = kb._worker_observability_env(claimed_retry)
+
+    assert env["HERMES_KANBAN_SESSION_ID"] == "chat-session-1"
+    assert env["HERMES_SESSION_ID"] == "chat-session-1"
+    assert env["HERMES_KANBAN_RETRY_ATTEMPT"] == "2"
+    assert env["HERMES_KANBAN_PRIOR_ATTEMPT_COUNT"] == "1"
+    assert env["HERMES_KANBAN_PRIOR_RUN_IDS"]
+    assert env["HERMES_KANBAN_LAST_BLOCK_REASON"] == "cloudflare turnstile"
+
 
 def test_latest_summary_returns_none_when_no_runs(kanban_home):
     """A freshly-created task has no runs and therefore no summary."""
