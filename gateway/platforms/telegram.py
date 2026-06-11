@@ -15,6 +15,7 @@ import os
 import tempfile
 import html as _html
 import re
+import shutil
 from datetime import datetime, timezone
 from typing import Dict, List, Optional, Any
 
@@ -106,6 +107,43 @@ _TELEGRAM_IMAGE_EXT_TO_MIME = {
 
 
 MAX_COMMANDS_PER_SCOPE = 30
+
+
+def _telegram_reply_markup_from_metadata(metadata: Optional[Dict[str, Any]]) -> Any:
+    """Build an InlineKeyboardMarkup from adapter metadata, if present.
+
+    Expected shape:
+      metadata["telegram_inline_keyboard"] = [
+        [{"text": "✅ Promote", "callback_data": "kbp:p:board:t_123"}],
+        [{"text": "Open", "url": "https://..."}],
+      ]
+    """
+    if not metadata:
+        return None
+    existing = metadata.get("reply_markup")
+    if existing is not None:
+        return existing
+    keyboard = metadata.get("telegram_inline_keyboard")
+    if not keyboard:
+        return None
+    rows = []
+    for row in keyboard:
+        buttons = []
+        for item in row or []:
+            if not isinstance(item, dict):
+                continue
+            text = str(item.get("text") or "").strip()[:64]
+            callback_data = item.get("callback_data")
+            url = item.get("url")
+            if not text:
+                continue
+            if callback_data:
+                buttons.append(InlineKeyboardButton(text, callback_data=str(callback_data)[:64]))
+            elif url:
+                buttons.append(InlineKeyboardButton(text, url=str(url)))
+        if buttons:
+            rows.append(buttons)
+    return InlineKeyboardMarkup(rows) if rows else None
 
 
 def check_telegram_requirements() -> bool:
@@ -1700,6 +1738,7 @@ class TelegramAdapter(BasePlatformAdapter):
                 ]
             
             message_ids = []
+            reply_markup = _telegram_reply_markup_from_metadata(metadata)
             thread_id = self._metadata_thread_id(metadata)
             requested_thread_id = self._message_thread_id_for_send(thread_id)
             used_thread_fallback = False
@@ -1759,6 +1798,7 @@ class TelegramAdapter(BasePlatformAdapter):
                                 **thread_kwargs,
                                 **self._link_preview_kwargs(),
                                 **self._notification_kwargs(metadata),
+                                **({"reply_markup": reply_markup} if reply_markup is not None and i == 0 else {}),
                             )
                         except Exception as md_error:
                             # Markdown parsing failed, try plain text
@@ -1773,6 +1813,7 @@ class TelegramAdapter(BasePlatformAdapter):
                                     **thread_kwargs,
                                     **self._link_preview_kwargs(),
                                     **self._notification_kwargs(metadata),
+                                    **({"reply_markup": reply_markup} if reply_markup is not None and i == 0 else {}),
                                 )
                             else:
                                 raise
@@ -2915,6 +2956,18 @@ class TelegramAdapter(BasePlatformAdapter):
                 await self._handle_model_picker_callback(query, data, chat_id)
             return
 
+        # --- Kanban proposal callbacks (kbp:<p|s|o>:<board>:<task_id>) ---
+        if data.startswith("kbp:"):
+            await self._handle_kanban_proposal_callback(
+                query,
+                data,
+                query_chat_id=query_chat_id,
+                query_chat_type=query_chat_type,
+                query_thread_id=query_thread_id,
+                query_user_name=query_user_name,
+            )
+            return
+
         # --- Gmail-triage callbacks (gt:verb:arg) ---
         if data.startswith("gt:"):
             await self._handle_gmail_triage_callback(
@@ -3354,6 +3407,104 @@ class TelegramAdapter(BasePlatformAdapter):
                 await query.edit_message_text(text=appended, reply_markup=None)
         except Exception:
             pass
+
+
+    async def _handle_kanban_proposal_callback(
+        self,
+        query,
+        data: str,
+        *,
+        query_chat_id,
+        query_chat_type,
+        query_thread_id,
+        query_user_name,
+    ) -> None:
+        """Handle actionable Kanban Telegram buttons.
+
+        Callback shape: kbp:<p|s|o>:<board>:<task_id>
+        p = promote todo/blocked task to ready; s = keep blocked/dismiss;
+        o = show a CLI board hint.
+        """
+        parts = data.split(":", 3)
+        if len(parts) != 4:
+            await query.answer(text="Invalid Kanban proposal data.")
+            return
+        action, board, task_id = parts[1], parts[2], parts[3]
+        if action not in {"p", "s", "o"} or not re.fullmatch(r"[A-Za-z0-9_.-]+", board) or not re.fullmatch(r"t_[A-Za-z0-9]+", task_id):
+            await query.answer(text="Invalid Kanban proposal action.")
+            return
+
+        caller_id = str(getattr(query.from_user, "id", ""))
+        if not self._is_callback_user_authorized(
+            caller_id,
+            chat_id=query_chat_id,
+            chat_type=str(query_chat_type) if query_chat_type is not None else None,
+            thread_id=str(query_thread_id) if query_thread_id is not None else None,
+            user_name=query_user_name,
+        ):
+            await query.answer(text="⛔ You are not authorized to act on Kanban proposals.")
+            return
+
+        user_display = getattr(query.from_user, "first_name", "User")
+        original_text = (query.message.text or "") if query.message else ""
+
+        if action == "s":
+            label = f"⏭ Kept blocked {task_id}"
+            await query.answer(text=label)
+            try:
+                await query.edit_message_text(text=f"{original_text}\n-- {label} by {user_display}", reply_markup=None)
+            except Exception:
+                pass
+            return
+
+        if action == "o":
+            await query.answer(
+                text=f"Board {board}: hermes kanban --board {board} show {task_id}",
+                show_alert=True,
+            )
+            return
+
+        hermes_bin = _Path(sys.executable).with_name("hermes")
+        if not hermes_bin.exists():
+            hermes_path = shutil.which("hermes")
+            if not hermes_path:
+                await query.answer(text="❌ Promote error: hermes executable not found")
+                return
+            hermes_bin = _Path(hermes_path)
+        cmd = [str(hermes_bin), "kanban", "--board", board, "promote", task_id]
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            stdout_bytes, stderr_bytes = await asyncio.wait_for(proc.communicate(), timeout=45)
+        except asyncio.TimeoutError:
+            await query.answer(text=f"❌ Promote timed out: {task_id}")
+            return
+        except Exception as exc:
+            logger.error("[%s] Kanban proposal promote error: %s", self.name, exc, exc_info=True)
+            await query.answer(text=f"❌ Promote error: {exc}")
+            return
+
+        stdout_text = stdout_bytes.decode("utf-8", errors="replace").strip()
+        stderr_text = stderr_bytes.decode("utf-8", errors="replace").strip()
+        if proc.returncode != 0:
+            last_line = (stderr_text or stdout_text or f"exit {proc.returncode}").splitlines()[-1]
+            await query.answer(text=f"❌ Promote failed: {last_line[:80]}")
+            logger.error(
+                "[%s] Kanban proposal promote failed: task=%s board=%s rc=%s stdout=%s stderr=%s",
+                self.name, task_id, board, proc.returncode, stdout_text, stderr_text,
+            )
+            return
+
+        label = f"✅ Promoted {task_id}"
+        await query.answer(text=label)
+        try:
+            await query.edit_message_text(text=f"{original_text}\n-- {label} by {user_display}", reply_markup=None)
+        except Exception:
+            pass
+        logger.info("[%s] Kanban proposal promoted task=%s board=%s by=%s", self.name, task_id, board, user_display)
 
     def _missing_media_path_error(self, label: str, path: str) -> str:
         """Build an actionable file-not-found error for gateway MEDIA delivery.
