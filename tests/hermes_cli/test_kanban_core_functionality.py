@@ -4419,3 +4419,93 @@ def test_dispatch_once_stale_disabled_when_timeout_zero(kanban_home, monkeypatch
         )
         assert res.stale == [], "stale_timeout_seconds=0 should disable detection"
         assert kb.get_task(conn, t).status == "running"
+
+
+def test_detect_crashed_workers_death_note_includes_log_tail(kanban_home):
+    """A crashed worker's run error carries a sanitized tail of its
+    worker log — the actual cause (traceback / provider error) instead
+    of a bare ``pid N not alive``. Regression for the 2026-06 sprint
+    window where 8.8k bare death-notes were undiagnosable."""
+    conn = kb.connect()
+    try:
+        tid = kb.create_task(conn, title="crashy", assignee="worker")
+        kb.claim_task(conn, tid)
+        kb._set_worker_pid(conn, tid, 99999)  # fake pid — not alive
+
+        log_dir = kb.worker_logs_dir()
+        log_dir.mkdir(parents=True, exist_ok=True)
+        (log_dir / f"{tid}.log").write_bytes(
+            b"earlier noise\n\x1b[31mRuntimeError: provider returned "
+            b"HTTP 429\x1b[0m\n"
+        )
+
+        kb.detect_crashed_workers(conn)
+
+        run = kb.latest_run(conn, tid)
+        assert run is not None
+        assert "log tail:" in (run.error or "")
+        assert "RuntimeError: provider returned HTTP 429" in run.error
+        # ANSI escapes stripped, newlines collapsed to one line.
+        assert "\x1b" not in run.error
+        assert "\n" not in run.error
+    finally:
+        conn.close()
+
+
+def test_detect_crashed_workers_no_log_keeps_bare_death_note(kanban_home):
+    """No worker log on disk → death-note stays the bare liveness fact
+    (no trailing separator), and the reaper never raises."""
+    conn = kb.connect()
+    try:
+        tid = kb.create_task(conn, title="crashy", assignee="worker")
+        kb.claim_task(conn, tid)
+        kb._set_worker_pid(conn, tid, 99999)
+
+        kb.detect_crashed_workers(conn)
+
+        run = kb.latest_run(conn, tid)
+        assert run is not None
+        assert run.error.startswith("pid 99999")
+        assert "log tail:" not in run.error
+    finally:
+        conn.close()
+
+
+def test_block_task_persists_reason_on_task_row(kanban_home):
+    """``block_task`` writes the reason to ``tasks.last_failure_error``
+    so board mirrors surface why a card is blocked without joining run
+    history. Reason-less mirrors made blocked cards untriageable."""
+    conn = kb.connect()
+    try:
+        tid = kb.create_task(conn, title="needs input", assignee="worker")
+        kb.claim_task(conn, tid)
+
+        assert kb.block_task(conn, tid, reason="need operator decision on target URL")
+
+        task = kb.get_task(conn, tid)
+        assert task.status == "blocked"
+        assert task.last_failure_error == "need operator decision on target URL"
+    finally:
+        conn.close()
+
+
+def test_block_task_without_reason_preserves_prior_error(kanban_home):
+    """Blocking with no reason must not blank an earlier failure error
+    (COALESCE keeps the prior value)."""
+    conn = kb.connect()
+    try:
+        tid = kb.create_task(conn, title="x", assignee="worker")
+        kb.claim_task(conn, tid)
+        with kb.write_txn(conn):
+            conn.execute(
+                "UPDATE tasks SET last_failure_error = ? WHERE id = ?",
+                ("earlier crash", tid),
+            )
+
+        assert kb.block_task(conn, tid)
+
+        task = kb.get_task(conn, tid)
+        assert task.status == "blocked"
+        assert task.last_failure_error == "earlier crash"
+    finally:
+        conn.close()
