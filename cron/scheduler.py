@@ -721,6 +721,61 @@ def _send_media_via_adapter(
             logger.warning("Job '%s': failed to send media %s: %s", job.get("id", "?"), media_path, e)
 
 
+def _format_delivery_excerpt(content: str, *, max_lines: int = 8, max_chars: int = 1200) -> str:
+    """Return a short mobile-safe excerpt from cron stdout/final response."""
+    text = (content or "").strip()
+    if not text:
+        return ""
+    lines = [line.rstrip() for line in text.splitlines()]
+    trimmed = "\n".join(lines[:max_lines]).strip()
+    if len(lines) > max_lines:
+        trimmed += "\n• More output saved in cron run artifacts."
+    if len(trimmed) > max_chars:
+        trimmed = trimmed[: max_chars - 1].rstrip() + "…"
+    return trimmed
+
+
+def _format_cron_delivery(job: dict, content: str) -> str:
+    """Wrap cron output in a concise, channel-agnostic mobile digest.
+
+    Old wrapper looked like a raw system receipt ("Cronjob Response", job_id,
+    divider, management boilerplate).  Keep the job identity and proof, but make
+    the message readable in Telegram/Yuanbao/Discord: status first, bullets, no
+    JSON-ish ceremony.
+    """
+    task_name = str(job.get("name") or job.get("id") or "cron job")
+    job_id = str(job.get("id") or "")
+    schedule = str(job.get("schedule") or job.get("schedule_display") or "").strip()
+    script = str(job.get("script") or "").strip()
+    profile = str(job.get("profile") or "").strip()
+    workdir = str(job.get("workdir") or "").strip()
+
+    excerpt = _format_delivery_excerpt(content)
+    lower = excerpt.lower()
+    if "failed" in lower or "error" in lower or "traceback" in lower:
+        status = "failed"
+    elif "skipped" in lower:
+        status = "skipped"
+    else:
+        status = "completed"
+
+    lines = [f"{task_name}: {status}."]
+    if job_id:
+        lines.append(f"• Job: `{job_id}`")
+    if schedule:
+        lines.append(f"• Schedule: {schedule}")
+    if script:
+        lines.append(f"• Script: `{script}`")
+    if profile:
+        lines.append(f"• Profile: `{profile}`")
+    if workdir:
+        lines.append(f"• Workdir: `{workdir}`")
+    if excerpt:
+        lines.append("")
+        lines.append(excerpt)
+    return "\n".join(lines).strip()
+
+
 def _deliver_result(job: dict, content: str, adapters=None, loop=None) -> Optional[str]:
     """
     Deliver job output to the configured target(s) (origin chat, specific platform, etc.).
@@ -743,9 +798,9 @@ def _deliver_result(job: dict, content: str, adapters=None, loop=None) -> Option
     from tools.send_message_tool import _send_to_platform
     from gateway.config import load_gateway_config, Platform
 
-    # Optionally wrap the content with a header/footer so the user knows this
-    # is a cron delivery.  Wrapping is on by default; set cron.wrap_response: false
-    # in config.yaml for clean output.
+    # Optionally wrap the content with a concise, mobile-safe cron header so
+    # the user knows which scheduled job emitted it. Wrapping is on by default;
+    # set cron.wrap_response: false in config.yaml for raw script/agent output.
     wrap_response = True
     try:
         user_cfg = load_config()
@@ -753,18 +808,7 @@ def _deliver_result(job: dict, content: str, adapters=None, loop=None) -> Option
     except Exception:
         pass
 
-    if wrap_response:
-        task_name = job.get("name", job["id"])
-        job_id = job.get("id", "")
-        delivery_content = (
-            f"Cronjob Response: {task_name}\n"
-            f"(job_id: {job_id})\n"
-            f"-------------\n\n"
-            f"{content}\n\n"
-            f"To stop or manage this job, send me a new message (e.g. \"stop reminder {task_name}\")."
-        )
-    else:
-        delivery_content = content
+    delivery_content = _format_cron_delivery(job, content) if wrap_response else content
 
     # Extract MEDIA: tags so attachments are forwarded as files, not raw text
     from gateway.platforms.base import BasePlatformAdapter
