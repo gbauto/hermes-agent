@@ -4,11 +4,11 @@ Traces Hermes conversations, LLM calls, and tool usage to Langfuse.
 
 Activation is handled by the Hermes plugin system — standalone plugins only
 load when listed in ``plugins.enabled`` (via ``hermes plugins enable
-observability/langfuse`` or ``hermes tools → Langfuse Observability``). At
-runtime the plugin also requires the ``langfuse`` SDK and credentials; if
-either is missing the hooks are inert.
+observability/langfuse``, or by checking the box in the interactive
+``hermes plugins`` UI). At runtime the plugin also requires the
+``langfuse`` SDK and credentials; if either is missing the hooks are inert.
 
-Required env vars (set via ``hermes tools`` or ~/.hermes/.env):
+Required env vars (set in ~/.hermes/.env):
   HERMES_LANGFUSE_PUBLIC_KEY  - Langfuse project public key (pk-lf-...)
   HERMES_LANGFUSE_SECRET_KEY  - Langfuse project secret key (sk-lf-...)
   HERMES_LANGFUSE_BASE_URL    - Langfuse server URL (default: https://cloud.langfuse.com)
@@ -99,6 +99,60 @@ def _debug(message: str) -> None:
 # dedicated reset function. Runtime callers cannot reset the cache; if an
 # operator fixes a misconfigured credential they must restart the process.
 _INIT_FAILED = object()
+
+
+def _clean_join_value(value: Any) -> str:
+    if value is None:
+        return ""
+    return str(value).strip()
+
+
+def _kanban_join_metadata(task_id: str = "") -> Dict[str, str]:
+    """Return Kanban/run identifiers exported by dispatcher workers.
+
+    These fields intentionally mirror the Supabase observability bridge keys
+    and tags so Langfuse traces can join to Hermes Kanban and agent-run rows.
+    """
+    kanban_task_id = _clean_join_value(os.environ.get("HERMES_KANBAN_TASK")) or _clean_join_value(task_id)
+    mapping = {
+        "kanban_task_id": kanban_task_id,
+        "kanban_run_id": _clean_join_value(os.environ.get("HERMES_KANBAN_RUN_ID")),
+        "kanban_session_id": _clean_join_value(os.environ.get("HERMES_KANBAN_SESSION_ID")),
+        "kanban_retry_attempt": _clean_join_value(os.environ.get("HERMES_KANBAN_RETRY_ATTEMPT")),
+        "kanban_prior_attempt_count": _clean_join_value(os.environ.get("HERMES_KANBAN_PRIOR_ATTEMPT_COUNT")),
+        "kanban_prior_run_ids": _clean_join_value(os.environ.get("HERMES_KANBAN_PRIOR_RUN_IDS")),
+        "kanban_last_failure_error": _clean_join_value(os.environ.get("HERMES_KANBAN_LAST_FAILURE_ERROR")),
+        "kanban_last_block_reason": _clean_join_value(os.environ.get("HERMES_KANBAN_LAST_BLOCK_REASON")),
+        "kanban_context_source": _clean_join_value(os.environ.get("HERMES_KANBAN_CONTEXT_SOURCE")),
+        "kanban_board": _clean_join_value(os.environ.get("HERMES_KANBAN_BOARD")),
+        "kanban_workspace": _clean_join_value(os.environ.get("HERMES_KANBAN_WORKSPACE")),
+        "kanban_branch": _clean_join_value(os.environ.get("HERMES_KANBAN_BRANCH")),
+        "profile": _clean_join_value(os.environ.get("HERMES_PROFILE")),
+        "tenant": _clean_join_value(os.environ.get("HERMES_TENANT")),
+    }
+    return {key: value for key, value in mapping.items() if value}
+
+
+def _kanban_join_tags(metadata: Dict[str, str]) -> list[str]:
+    tags = ["hermes", "langfuse"]
+    task_id = metadata.get("kanban_task_id")
+    run_id = metadata.get("kanban_run_id")
+    if task_id:
+        tags.extend([f"task:{task_id}", f"task_id:{task_id}"])
+    if run_id:
+        tags.extend([f"run:{run_id}", f"run_id:{run_id}"])
+    retry_attempt = metadata.get("kanban_retry_attempt")
+    if retry_attempt:
+        tags.append(f"retry:{retry_attempt}")
+    for key, prefix in (
+        ("kanban_board", "board"),
+        ("profile", "profile"),
+        ("tenant", "tenant"),
+    ):
+        value = metadata.get(key)
+        if value:
+            tags.append(f"{prefix}:{value}")
+    return list(dict.fromkeys(tags))
 
 
 def _redact_key_preview(value: str) -> str:
@@ -421,9 +475,155 @@ def _coerce_request_messages(
     return [{"role": "user", "content": user_message}]
 
 
-def _serialize_messages(messages: Any) -> list[dict[str, Any]]:
+def _responses_content_value(content: Any) -> Any:
+    """Return a readable value for OpenAI/Codex Responses content parts."""
+    if not isinstance(content, list):
+        return _safe_value(content)
+
+    rendered: list[Any] = []
+    for part in content:
+        if isinstance(part, str):
+            rendered.append(part)
+            continue
+        if not isinstance(part, dict):
+            rendered.append(_safe_value(part))
+            continue
+
+        part_type = part.get("type")
+        text = part.get("text")
+        if isinstance(text, str):
+            rendered.append(text)
+            continue
+
+        if part_type in {"input_image", "image_url"}:
+            image = {"type": part_type}
+            if part.get("detail"):
+                image["detail"] = part.get("detail")
+            rendered.append(image)
+            continue
+
+        rendered.append(_safe_value(part))
+
+    if not rendered:
+        return None
+    if len(rendered) == 1:
+        return rendered[0]
+    return rendered
+
+
+def _responses_item_to_message(item: dict[str, Any]) -> Optional[dict[str, Any]]:
+    """Project a Codex/OpenAI Responses input item into Langfuse-readable rows.
+
+    Responses API items are not all chat messages. Tool calls, tool outputs,
+    reasoning summaries, and some internal context records do not have top-level
+    ``role``/``content`` fields. Serializing those as chat messages produced
+    noisy ``{"role": null, "content": null}`` rows in Langfuse input overview.
+    """
+    item_type = item.get("type")
+    role = item.get("role")
+    content = item.get("content")
+
+    if role is not None or content is not None:
+        projected = {
+            "role": role or ("assistant" if item_type in {"message", "reasoning"} else None),
+            "content": _responses_content_value(content),
+        }
+        if item_type:
+            projected["type"] = item_type
+        if item.get("id"):
+            projected["id"] = item.get("id")
+        if projected["content"] is None and not item.get("tool_calls"):
+            return None
+        if projected["role"] is None and projected["content"] is None:
+            return None
+        return projected
+
+    if item_type in {"function_call", "custom_tool_call"} or (
+        item.get("name") and item.get("arguments") is not None
+    ):
+        projected = {
+            "role": "assistant",
+            "type": item_type or "function_call",
+            "tool_call_id": item.get("call_id") or item.get("id"),
+            "name": item.get("name"),
+            "arguments": _safe_value(item.get("arguments"), parse_json_strings=True),
+        }
+        return {k: v for k, v in projected.items() if v is not None}
+
+    if item_type in {"function_call_output", "tool_result"} or item.get("output") is not None:
+        output = item.get("output")
+        projected = {
+            "role": "tool",
+            "type": item_type or "function_call_output",
+            "tool_call_id": item.get("call_id") or item.get("id"),
+            "content": _safe_value(output, parse_json_strings=True),
+        }
+        return {k: v for k, v in projected.items() if v is not None}
+
+    if item_type == "reasoning":
+        summary = item.get("summary")
+        if summary:
+            return {
+                "role": "assistant",
+                "type": "reasoning",
+                "content": _safe_value(summary),
+            }
+        return None
+
+    # Keep unknown but meaningful Responses records debuggable, while dropping
+    # empty/internal placeholders that would only render as null rows.
+    meaningful = {
+        key: value for key, value in item.items()
+        if value not in (None, "", [], {})
+    }
+    if not meaningful:
+        return None
+    if set(meaningful) == {"type"}:
+        return None
+    return {
+        "role": "assistant",
+        "type": item_type or "response_item",
+        "content": _safe_value(meaningful, parse_json_strings=True),
+    }
+
+
+def _looks_like_responses_input(messages: list[Any]) -> bool:
+    for message in messages[-12:]:
+        if not isinstance(message, dict):
+            continue
+        item_type = message.get("type")
+        if item_type in {
+            "message",
+            "function_call",
+            "custom_tool_call",
+            "function_call_output",
+            "tool_result",
+            "reasoning",
+        }:
+            return True
+        content = message.get("content")
+        if isinstance(content, list) and any(
+            isinstance(part, dict)
+            and part.get("type") in {"input_text", "output_text", "input_image"}
+            for part in content
+        ):
+            return True
+    return False
+
+
+def _serialize_messages(messages: Any, *, api_mode: str = "") -> list[dict[str, Any]]:
     if not isinstance(messages, list):
         return []
+    if api_mode == "codex_responses" or _looks_like_responses_input(messages):
+        projected = []
+        for message in messages[-12:]:
+            if not isinstance(message, dict):
+                continue
+            item = _responses_item_to_message(message)
+            if item is not None:
+                projected.append(item)
+        return projected
+
     serialized = []
     for message in messages[-12:]:
         if not isinstance(message, dict):
@@ -543,6 +743,7 @@ def _start_root_trace(task_key: str, *, task_id: str, session_id: str, platform:
                       api_mode: str, messages: Any, client: Langfuse) -> TraceState:
     trace_id = client.create_trace_id(seed=f"{session_id or 'sessionless'}::{task_id or task_key}")
     trace_input = _extract_last_user_message(messages)
+    join_metadata = _kanban_join_metadata(task_id)
     metadata = {
         "source": "hermes",
         "task_id": task_id,
@@ -550,19 +751,26 @@ def _start_root_trace(task_key: str, *, task_id: str, session_id: str, platform:
         "provider": provider,
         "model": model,
         "api_mode": api_mode,
+        **join_metadata,
     }
+    tags = _kanban_join_tags(join_metadata)
+    effective_session_id = (
+        join_metadata.get("kanban_session_id")
+        or session_id
+        or join_metadata.get("kanban_task_id")
+    )
 
     # session_id must be passed in trace_context for Langfuse session grouping.
     trace_ctx: Dict[str, Any] = {"trace_id": trace_id}
-    if session_id:
-        trace_ctx["session_id"] = session_id
+    if effective_session_id:
+        trace_ctx["session_id"] = effective_session_id
 
     if propagate_attributes is not None:
         try:
             with propagate_attributes(
-                session_id=session_id or task_key,
+                session_id=effective_session_id or task_key,
                 trace_name="Hermes turn",
-                tags=["hermes", "langfuse"],
+                tags=tags,
             ):
                 root_ctx = client.start_as_current_observation(
                     trace_context=trace_ctx,
@@ -786,7 +994,7 @@ def on_pre_llm_request(
             client=client,
             name=f"LLM call {api_call_count}",
             as_type="generation",
-            input_value=_serialize_messages(input_messages),
+            input_value=_serialize_messages(input_messages, api_mode=api_mode),
             metadata={
                 "provider": provider,
                 "platform": platform,
@@ -837,16 +1045,8 @@ def on_post_llm_call(*, task_id: str = "", session_id: str = "", provider: str =
     if output.get("tool_calls"):
         state.turn_tool_calls.extend(output["tool_calls"])
 
-    # Extract usage: prefer a real response object that carries usage, else
-    # fall back to the usage summary dict from post_api_request.
-    #
-    # post_api_request passes `response` as a SANITIZED dict (no ``.usage``
-    # attribute) alongside a separate `usage` summary dict. Gating on
-    # ``response is not None`` here took the response-object path on that dict,
-    # where ``getattr(response, "usage", None)`` is always None — so usage and
-    # cost were silently dropped for every gateway turn. Gate on a real
-    # ``.usage`` attribute instead so the usage-dict fallback below is reached.
-    if getattr(response, "usage", None) is not None:
+    # Extract usage: prefer response object, fall back to usage dict from post_api_request
+    if response is not None:
         usage_details, cost_details = _usage_and_cost(
             response,
             provider=provider,

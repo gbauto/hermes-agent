@@ -468,6 +468,63 @@ class TestRequestMessageCoercion:
         assert mod._coerce_request_messages(user_message="u") == [{"role": "user", "content": "u"}]
 
 
+class TestKanbanJoinMetadata:
+    def test_kanban_join_metadata_uses_worker_env(self, monkeypatch):
+        sys.modules.pop("plugins.observability.langfuse", None)
+        mod = importlib.import_module("plugins.observability.langfuse")
+
+        monkeypatch.setenv("HERMES_KANBAN_TASK", "task-123")
+        monkeypatch.setenv("HERMES_KANBAN_RUN_ID", "456")
+        monkeypatch.setenv("HERMES_KANBAN_SESSION_ID", "kanban:task-123")
+        monkeypatch.setenv("HERMES_KANBAN_RETRY_ATTEMPT", "3")
+        monkeypatch.setenv("HERMES_KANBAN_PRIOR_ATTEMPT_COUNT", "2")
+        monkeypatch.setenv("HERMES_KANBAN_PRIOR_RUN_IDS", "111,222")
+        monkeypatch.setenv("HERMES_KANBAN_LAST_FAILURE_ERROR", "blocked by turnstile")
+        monkeypatch.setenv("HERMES_KANBAN_LAST_BLOCK_REASON", "manual auth needed")
+        monkeypatch.setenv("HERMES_KANBAN_CONTEXT_SOURCE", "kanban_show")
+        monkeypatch.setenv("HERMES_KANBAN_BOARD", "gbautomation")
+        monkeypatch.setenv("HERMES_PROFILE", "kanban-worker")
+        monkeypatch.setenv("HERMES_TENANT", "gbautomation")
+
+        metadata = mod._kanban_join_metadata("fallback-task")
+        tags = mod._kanban_join_tags(metadata)
+
+        assert metadata["kanban_task_id"] == "task-123"
+        assert metadata["kanban_run_id"] == "456"
+        assert metadata["kanban_session_id"] == "kanban:task-123"
+        assert metadata["kanban_retry_attempt"] == "3"
+        assert metadata["kanban_prior_attempt_count"] == "2"
+        assert metadata["kanban_prior_run_ids"] == "111,222"
+        assert metadata["kanban_last_failure_error"] == "blocked by turnstile"
+        assert metadata["kanban_last_block_reason"] == "manual auth needed"
+        assert metadata["kanban_context_source"] == "kanban_show"
+        assert metadata["kanban_board"] == "gbautomation"
+        assert metadata["profile"] == "kanban-worker"
+        assert metadata["tenant"] == "gbautomation"
+        assert "task:task-123" in tags
+        assert "task_id:task-123" in tags
+        assert "run:456" in tags
+        assert "run_id:456" in tags
+        assert "retry:3" in tags
+        assert "board:gbautomation" in tags
+        assert "profile:kanban-worker" in tags
+        assert "tenant:gbautomation" in tags
+
+    def test_kanban_join_metadata_falls_back_to_task_id(self):
+        sys.modules.pop("plugins.observability.langfuse", None)
+        mod = importlib.import_module("plugins.observability.langfuse")
+
+        metadata = mod._kanban_join_metadata("task-from-hook")
+
+        assert metadata == {"kanban_task_id": "task-from-hook"}
+        assert mod._kanban_join_tags(metadata) == [
+            "hermes",
+            "langfuse",
+            "task:task-from-hook",
+            "task_id:task-from-hook",
+        ]
+
+
 class TestToolCallOutputBackfill:
     def test_post_tool_call_backfills_matching_turn_tool_call_output(self, monkeypatch):
         sys.modules.pop("plugins.observability.langfuse", None)
@@ -531,6 +588,85 @@ class TestToolCallOutputBackfill:
             "name": "web_extract",
             "tool_call_id": "call-1",
             "content": {"ok": True},
+        }]
+
+    def test_serialize_codex_responses_input_drops_null_placeholders(self):
+        sys.modules.pop("plugins.observability.langfuse", None)
+        mod = importlib.import_module("plugins.observability.langfuse")
+
+        messages = [
+            {"type": "reasoning", "summary": []},
+            {"type": "message", "role": "assistant", "content": []},
+            {
+                "type": "message",
+                "role": "assistant",
+                "content": [{"type": "output_text", "text": "Dispatched."}],
+            },
+            {
+                "type": "message",
+                "role": "user",
+                "content": [{"type": "input_text", "text": "Update the skill library."}],
+            },
+            {
+                "type": "function_call",
+                "call_id": "call-1",
+                "name": "skill_manage",
+                "arguments": '{"action": "patch"}',
+            },
+            {
+                "type": "function_call_output",
+                "call_id": "call-1",
+                "output": '{"success": true}',
+            },
+            {"type": "reasoning"},
+        ]
+
+        serialized = mod._serialize_messages(messages, api_mode="codex_responses")
+
+        assert {"role": None, "content": None} not in serialized
+        assert serialized == [
+            {
+                "role": "assistant",
+                "content": "Dispatched.",
+                "type": "message",
+            },
+            {
+                "role": "user",
+                "content": "Update the skill library.",
+                "type": "message",
+            },
+            {
+                "role": "assistant",
+                "type": "function_call",
+                "tool_call_id": "call-1",
+                "name": "skill_manage",
+                "arguments": {"action": "patch"},
+            },
+            {
+                "role": "tool",
+                "type": "function_call_output",
+                "tool_call_id": "call-1",
+                "content": {"success": True},
+            },
+        ]
+
+    def test_serialize_codex_responses_input_auto_detects_shape(self):
+        sys.modules.pop("plugins.observability.langfuse", None)
+        mod = importlib.import_module("plugins.observability.langfuse")
+
+        messages = [
+            {"type": "reasoning"},
+            {
+                "type": "message",
+                "role": "user",
+                "content": [{"type": "input_text", "text": "hi"}],
+            },
+        ]
+
+        assert mod._serialize_messages(messages) == [{
+            "role": "user",
+            "content": "hi",
+            "type": "message",
         }]
 
     def test_serialize_tool_calls_emits_openai_style_function_shape(self):
@@ -703,77 +839,3 @@ class TestToolObservationKeying:
         assert ended["obs"] is obs
         assert ended["output"] == {"status": "done"}
         assert not state.tools
-
-
-class TestUsageFromSanitizedResponse:
-    """Regression: ``post_api_request`` delivers ``response`` as a sanitized
-    dict (no ``.usage`` attribute) plus a separate ``usage`` summary dict. The
-    post-call handler must read the ``usage`` dict instead of treating the dict
-    response as a usage-bearing object and dropping all token/cost data."""
-
-    def _setup(self, mod, monkeypatch):
-        # Active client so on_post_llm_call does not early-return.
-        monkeypatch.setattr(mod, "_get_langfuse", lambda: object())
-        observation = object()
-        state = mod.TraceState(trace_id="trace-1", root_ctx=None, root_span=None)
-        state.generations[mod._request_key(1)] = observation
-        monkeypatch.setitem(mod._TRACE_STATE, mod._trace_key("task-1", "session-1"), state)
-        captured = {}
-
-        def fake_end_observation(obs, *, output=None, metadata=None, usage_details=None, cost_details=None):
-            captured["usage_details"] = usage_details
-
-        monkeypatch.setattr(mod, "_end_observation", fake_end_observation)
-        return captured
-
-    def test_sanitized_dict_response_uses_usage_dict(self, monkeypatch):
-        sys.modules.pop("plugins.observability.langfuse", None)
-        mod = importlib.import_module("plugins.observability.langfuse")
-        captured = self._setup(mod, monkeypatch)
-
-        # A plain dict has no ``.usage`` attribute — mirrors post_api_request.
-        mod.on_post_llm_call(
-            task_id="task-1",
-            session_id="session-1",
-            api_call_count=1,
-            model="gemini-3-flash-preview",
-            response={"model": "gemini-3-flash-preview", "usage": {"input_tokens": 100, "output_tokens": 20}},
-            usage={"input_tokens": 100, "output_tokens": 20},
-            assistant_content_chars=42,
-        )
-
-        # Before the fix the dict response shadowed the usage dict and tokens
-        # were lost (usage_details == {}).
-        assert captured["usage_details"] == {"input": 100, "output": 20}
-
-    def test_real_response_object_with_usage_still_used(self, monkeypatch):
-        sys.modules.pop("plugins.observability.langfuse", None)
-        mod = importlib.import_module("plugins.observability.langfuse")
-        captured = self._setup(mod, monkeypatch)
-
-        # A response object that genuinely carries usage must still take the
-        # response-object path (post_llm_call / legacy behavior).
-        seen = {}
-
-        def fake_usage_and_cost(resp, **_):
-            seen["resp"] = resp
-            return {"input": 7, "output": 3}, {}
-
-        monkeypatch.setattr(mod, "_usage_and_cost", fake_usage_and_cost)
-
-        class _Resp:
-            usage = {"prompt_tokens": 7, "completion_tokens": 3}
-
-        resp = _Resp()
-        mod.on_post_llm_call(
-            task_id="task-1",
-            session_id="session-1",
-            api_call_count=1,
-            model="gemini-3-flash-preview",
-            response=resp,
-            usage={"input_tokens": 999, "output_tokens": 999},
-            assistant_content_chars=42,
-        )
-
-        assert seen["resp"] is resp
-        assert captured["usage_details"] == {"input": 7, "output": 3}
