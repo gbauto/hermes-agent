@@ -721,11 +721,68 @@ def _send_media_via_adapter(
             logger.warning("Job '%s': failed to send media %s: %s", job.get("id", "?"), media_path, e)
 
 
+def _strip_legacy_cron_wrapper(content: str) -> str:
+    """Remove the old raw cron receipt wrapper when nested in job output."""
+    text = (content or "").strip()
+    if not text.startswith("Cronjob Response:"):
+        return text
+
+    lines = text.splitlines()
+    start = 0
+    for index, line in enumerate(lines):
+        if line.strip().startswith("-------------"):
+            start = index + 1
+            break
+    body = lines[start:] if start else lines
+    cleaned: list[str] = []
+    for line in body:
+        if line.strip().startswith("To stop or manage this job"):
+            break
+        cleaned.append(line)
+    return "\n".join(cleaned).strip()
+
+
+def _json_to_bullets(text: str, *, max_items: int = 8) -> Optional[str]:
+    """Convert compact JSON stdout into bullets instead of raw objects."""
+    stripped = text.strip()
+    if not stripped or stripped[0] not in "[{":
+        return None
+    try:
+        parsed = json.loads(stripped)
+    except Exception:
+        return None
+
+    def short(value) -> str:
+        if isinstance(value, (dict, list)):
+            rendered = json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+        else:
+            rendered = str(value)
+        return rendered if len(rendered) <= 180 else rendered[:177].rstrip() + "…"
+
+    lines: list[str] = []
+    if isinstance(parsed, dict):
+        for key, value in parsed.items():
+            if len(lines) >= max_items:
+                lines.append("• More fields saved in cron artifacts.")
+                break
+            label = str(key).replace("_", " ").strip().capitalize()
+            lines.append(f"• {label}: {short(value)}")
+    elif isinstance(parsed, list):
+        for item in parsed[:max_items]:
+            lines.append(f"• {short(item)}")
+        if len(parsed) > max_items:
+            lines.append("• More items saved in cron artifacts.")
+    return "\n".join(lines) if lines else None
+
+
 def _format_delivery_excerpt(content: str, *, max_lines: int = 8, max_chars: int = 1200) -> str:
     """Return a short mobile-safe excerpt from cron stdout/final response."""
-    text = (content or "").strip()
+    text = _strip_legacy_cron_wrapper(content)
     if not text:
         return ""
+    json_bullets = _json_to_bullets(text)
+    if json_bullets:
+        text = json_bullets
     lines = [line.rstrip() for line in text.splitlines()]
     trimmed = "\n".join(lines[:max_lines]).strip()
     if len(lines) > max_lines:
@@ -738,17 +795,19 @@ def _format_delivery_excerpt(content: str, *, max_lines: int = 8, max_chars: int
 def _format_cron_delivery(job: dict, content: str) -> str:
     """Wrap cron output in a concise, channel-agnostic mobile digest.
 
-    Old wrapper looked like a raw system receipt ("Cronjob Response", job_id,
-    divider, management boilerplate).  Keep the job identity and proof, but make
-    the message readable in Telegram/Yuanbao/Discord: status first, bullets, no
-    JSON-ish ceremony.
+    Keep the job identity and proof, but make the message readable in
+    Telegram/Yuanbao/Discord: status first, bullets, no JSON/raw receipt
+    ceremony.
     """
     task_name = str(job.get("name") or job.get("id") or "cron job")
     job_id = str(job.get("id") or "")
-    schedule = str(job.get("schedule") or job.get("schedule_display") or "").strip()
+    schedule = str(job.get("schedule_display") or job.get("schedule") or "").strip()
     script = str(job.get("script") or "").strip()
     profile = str(job.get("profile") or "").strip()
     workdir = str(job.get("workdir") or "").strip()
+    description = str(job.get("description") or job.get("prompt") or "").strip()
+    if description:
+        description = " ".join(description.split())[:220]
 
     excerpt = _format_delivery_excerpt(content)
     lower = excerpt.lower()
@@ -761,7 +820,9 @@ def _format_cron_delivery(job: dict, content: str) -> str:
 
     lines = [f"{task_name}: {status}."]
     if job_id:
-        lines.append(f"• Job: `{job_id}`")
+        lines.append(f"• Job: {task_name} (`{job_id}`)")
+    if description and status in {"failed", "skipped"}:
+        lines.append(f"• What: {description}")
     if schedule:
         lines.append(f"• Schedule: {schedule}")
     if script:
