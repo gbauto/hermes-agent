@@ -121,11 +121,19 @@ class MemoryStore:
         Tool responses always reflect this live state.
     """
 
-    def __init__(self, memory_char_limit: int = 2200, user_char_limit: int = 1375):
+    def __init__(
+        self,
+        memory_char_limit: int = 4400,
+        user_char_limit: int = 2000,
+        compact_target_ratio: float = 0.75,
+        auto_compact_threshold: float = 0.90,
+    ):
         self.memory_entries: List[str] = []
         self.user_entries: List[str] = []
         self.memory_char_limit = memory_char_limit
         self.user_char_limit = user_char_limit
+        self.compact_target_ratio = compact_target_ratio
+        self.auto_compact_threshold = auto_compact_threshold
         # Frozen snapshot for system prompt -- set once at load_from_disk()
         self._system_prompt_snapshot: Dict[str, str] = {"memory": "", "user": ""}
 
@@ -294,6 +302,94 @@ class MemoryStore:
             return self.user_char_limit
         return self.memory_char_limit
 
+    @staticmethod
+    def _joined_len(entries: List[str]) -> int:
+        if not entries:
+            return 0
+        return len(ENTRY_DELIMITER.join(entries))
+
+    def _archive_entries(self, target: str, entries: List[str]) -> str:
+        archive_dir = get_memory_dir() / "archive"
+        archive_dir.mkdir(parents=True, exist_ok=True)
+        path = archive_dir / f"{target.upper()}-compact-{time.strftime('%Y%m%d-%H%M%S')}-{time.time_ns()}.md"
+        header = (
+            f"# {target.upper()} memory compaction archive\n\n"
+            f"Archived {len(entries)} entr{'y' if len(entries) == 1 else 'ies'} from "
+            f"{self._path_for(target).name}.\n\n"
+        )
+        path.write_text(header + ENTRY_DELIMITER.join(entries), encoding="utf-8")
+        return str(path)
+
+    def _compact_entries_for_budget(
+        self,
+        target: str,
+        pending_entries: Optional[List[str]] = None,
+        target_ratio: Optional[float] = None,
+    ) -> Dict[str, Any]:
+        """Archive oldest entries until kept + pending fits the compact budget."""
+        pending_entries = pending_entries or []
+        entries = self._entries_for(target)
+        limit = self._char_limit(target)
+        ratio = self.compact_target_ratio if target_ratio is None else target_ratio
+        ratio = max(0.05, min(1.0, ratio))
+        budget = max(int(limit * ratio), self._joined_len(pending_entries))
+        budget = min(limit, budget)
+
+        if self._joined_len(entries + pending_entries) <= budget:
+            return {"compacted": False, "archived_entries": 0}
+
+        if self._joined_len(pending_entries) > limit:
+            return {
+                "compacted": False,
+                "archived_entries": 0,
+                "error": (
+                    f"Pending memory content is {self._joined_len(pending_entries):,} chars, "
+                    f"which exceeds the {limit:,} char limit. Shorten it before retrying."
+                ),
+            }
+
+        keep_start = 0
+        while keep_start < len(entries):
+            kept = entries[keep_start:]
+            if self._joined_len(kept + pending_entries) <= budget:
+                break
+            keep_start += 1
+
+        archived = entries[:keep_start]
+        kept = entries[keep_start:]
+        if not archived and self._joined_len(kept + pending_entries) > limit:
+            return {
+                "compacted": False,
+                "archived_entries": 0,
+                "error": "Unable to compact memory enough to fit the new content.",
+            }
+
+        archive_path = self._archive_entries(target, archived) if archived else None
+        self._set_entries(target, kept)
+        return {
+            "compacted": bool(archived),
+            "archived_entries": len(archived),
+            "archive_path": archive_path,
+        }
+
+    def compact(self, target: str, target_ratio: Optional[float] = None) -> Dict[str, Any]:
+        """Archive oldest entries until the store is below target_ratio of its cap."""
+        with self._file_lock(self._path_for(target)):
+            bak = self._reload_target(target)
+            if bak:
+                return _drift_error(self._path_for(target), bak)
+
+            compact_result = self._compact_entries_for_budget(
+                target, pending_entries=[], target_ratio=target_ratio
+            )
+            if compact_result.get("error"):
+                return {"success": False, "error": compact_result["error"]}
+            self.save_to_disk(target)
+
+        response = self._success_response(target, "Memory compacted." if compact_result.get("compacted") else "Memory already under compact target.")
+        response.update(compact_result)
+        return response
+
     def add(self, target: str, content: str) -> Dict[str, Any]:
         """Append a new entry. Returns error if it would exceed the char limit."""
         content = content.strip()
@@ -326,25 +422,49 @@ class MemoryStore:
             new_total = len(ENTRY_DELIMITER.join(new_entries))
 
             if new_total > limit:
-                current = self._char_count(target)
-                return {
-                    "success": False,
-                    "error": (
-                        f"Memory at {current:,}/{limit:,} chars. "
-                        f"Adding this entry ({len(content)} chars) would exceed the limit. "
-                        f"Consolidate now: use 'replace' to merge overlapping entries into "
-                        f"shorter ones or 'remove' stale or less important entries (see "
-                        f"current_entries below), then retry this add — all in this turn."
-                    ),
-                    "current_entries": entries,
-                    "usage": f"{current:,}/{limit:,}",
-                }
+                compact_result = self._compact_entries_for_budget(
+                    target, pending_entries=[content]
+                )
+                if compact_result.get("error"):
+                    current = self._char_count(target)
+                    return {
+                        "success": False,
+                        "error": compact_result["error"],
+                        "current_entries": entries,
+                        "usage": f"{current:,}/{limit:,}",
+                    }
+                entries = self._entries_for(target)
+                new_entries = entries + [content]
+                new_total = len(ENTRY_DELIMITER.join(new_entries))
+                if new_total > limit:
+                    current = self._char_count(target)
+                    return {
+                        "success": False,
+                        "error": (
+                            f"Memory at {current:,}/{limit:,} chars after compaction. "
+                            f"Adding this entry ({len(content)} chars) would still exceed the limit. "
+                            f"Shorten it, or run compact/remove manually and retry."
+                        ),
+                        "current_entries": entries,
+                        "usage": f"{current:,}/{limit:,}",
+                    }
+            elif limit > 0 and new_total >= int(limit * self.auto_compact_threshold):
+                compact_result = self._compact_entries_for_budget(
+                    target, pending_entries=[content]
+                )
+                if compact_result.get("error"):
+                    return {"success": False, "error": compact_result["error"]}
+                entries = self._entries_for(target)
+            else:
+                compact_result = {"compacted": False, "archived_entries": 0}
 
             entries.append(content)
             self._set_entries(target, entries)
             self.save_to_disk(target)
 
-        return self._success_response(target, "Entry added.")
+        response = self._success_response(target, "Entry added.")
+        response.update(compact_result)
+        return response
 
     def replace(self, target: str, old_text: str, new_content: str) -> Dict[str, Any]:
         """Find entry containing old_text substring, replace it with new_content."""
@@ -641,8 +761,11 @@ def memory_tool(
             return tool_error("old_text is required for 'remove' action.", success=False)
         result = store.remove(target, old_text)
 
+    elif action == "compact":
+        result = store.compact(target)
+
     else:
-        return tool_error(f"Unknown action '{action}'. Use: add, replace, remove", success=False)
+        return tool_error(f"Unknown action '{action}'. Use: add, replace, remove, compact", success=False)
 
     return json.dumps(result, ensure_ascii=False)
 
@@ -678,7 +801,9 @@ MEMORY_SCHEMA = {
         "- 'user': who the user is -- name, role, preferences, communication style, pet peeves\n"
         "- 'memory': your notes -- environment facts, project conventions, tool quirks, lessons learned\n\n"
         "ACTIONS: add (new entry), replace (update existing -- old_text identifies it), "
-        "remove (delete -- old_text identifies it).\n\n"
+        "remove (delete -- old_text identifies it), compact (archive oldest entries "
+        "when the store is near full). Adds automatically compact before the cap "
+        "when possible and report archive_path when entries move to an archive.\n\n"
         "SKIP: trivial/obvious info, things easily re-discovered, raw data dumps, and temporary task state."
     ),
     "parameters": {
@@ -686,7 +811,7 @@ MEMORY_SCHEMA = {
         "properties": {
             "action": {
                 "type": "string",
-                "enum": ["add", "replace", "remove"],
+                "enum": ["add", "replace", "remove", "compact"],
                 "description": "The action to perform."
             },
             "target": {

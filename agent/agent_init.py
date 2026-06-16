@@ -1117,8 +1117,10 @@ def init_agent(
             if agent._memory_enabled or agent._user_profile_enabled:
                 from tools.memory_tool import MemoryStore
                 agent._memory_store = MemoryStore(
-                    memory_char_limit=mem_config.get("memory_char_limit", 2200),
-                    user_char_limit=mem_config.get("user_char_limit", 1375),
+                    memory_char_limit=mem_config.get("memory_char_limit", 4400),
+                    user_char_limit=mem_config.get("user_char_limit", 2000),
+                    compact_target_ratio=mem_config.get("compact_target_ratio", 0.75),
+                    auto_compact_threshold=mem_config.get("auto_compact_threshold", 0.90),
                 )
                 agent._memory_store.load_from_disk()
         except Exception:
