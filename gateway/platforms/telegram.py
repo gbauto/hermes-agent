@@ -12,6 +12,7 @@ import dataclasses
 import json
 import logging
 import os
+import subprocess
 import tempfile
 import html as _html
 import re
@@ -3278,6 +3279,18 @@ class TelegramAdapter(BasePlatformAdapter):
             )
             return
 
+        # --- Kanban proposal callbacks (kbp:p|s:board:task_id) ---
+        if data.startswith("kbp:"):
+            await self._handle_kanban_proposal_callback(
+                query,
+                data,
+                query_chat_id=query_chat_id,
+                query_chat_type=query_chat_type,
+                query_thread_id=query_thread_id,
+                query_user_name=query_user_name,
+            )
+            return
+
         # --- Exec approval callbacks (ea:choice:id) ---
         if data.startswith("ea:"):
             parts = data.split(":", 2)
@@ -3705,6 +3718,91 @@ class TelegramAdapter(BasePlatformAdapter):
                 await query.edit_message_text(text=appended, reply_markup=None)
         except Exception:
             pass
+
+    async def _handle_kanban_proposal_callback(
+        self,
+        query,
+        data: str,
+        *,
+        query_chat_id,
+        query_chat_type,
+        query_thread_id,
+        query_user_name,
+    ) -> None:
+        """Handle ready-zero Kanban proposal buttons.
+
+        Callback shape: kbp:<p|s>:<board>:<task_id>
+        p = promote todo/blocked task to ready; s = skip/dismiss this proposal.
+        """
+        parts = data.split(":", 3)
+        if len(parts) != 4:
+            await query.answer(text="Invalid Kanban proposal data.")
+            return
+        action, board, task_id = parts[1], parts[2], parts[3]
+        if action not in {"p", "s"} or not re.fullmatch(r"[A-Za-z0-9_.-]+", board) or not re.fullmatch(r"t_[A-Za-z0-9]+", task_id):
+            await query.answer(text="Invalid Kanban proposal action.")
+            return
+
+        caller_id = str(getattr(query.from_user, "id", ""))
+        if not self._is_callback_user_authorized(
+            caller_id,
+            chat_id=query_chat_id,
+            chat_type=str(query_chat_type) if query_chat_type is not None else None,
+            thread_id=str(query_thread_id) if query_thread_id is not None else None,
+            user_name=query_user_name,
+        ):
+            await query.answer(text="⛔ You are not authorized to act on Kanban proposals.")
+            return
+
+        user_display = getattr(query.from_user, "first_name", "User")
+        original_text = (query.message.text or "") if query.message else ""
+
+        if action == "s":
+            label = f"⏭ Skipped {task_id}"
+            await query.answer(text=label)
+            try:
+                await query.edit_message_text(text=f"{original_text}\n— {label} by {user_display}", reply_markup=None)
+            except Exception:
+                pass
+            return
+
+        hermes_bin = _Path(sys.executable).with_name("hermes")
+        if not hermes_bin.exists():
+            hermes_bin = _Path("/Users/greg/.openclaw/workspace/hermes-agent/venv/bin/hermes")
+        cmd = [str(hermes_bin), "kanban", "--board", board, "promote", task_id]
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            stdout_bytes, stderr_bytes = await asyncio.wait_for(proc.communicate(), timeout=45)
+        except asyncio.TimeoutError:
+            await query.answer(text=f"❌ Promote timed out: {task_id}")
+            return
+        except Exception as exc:
+            logger.error("[%s] Kanban proposal promote error: %s", self.name, exc, exc_info=True)
+            await query.answer(text=f"❌ Promote error: {exc}")
+            return
+
+        stdout_text = stdout_bytes.decode("utf-8", errors="replace").strip()
+        stderr_text = stderr_bytes.decode("utf-8", errors="replace").strip()
+        if proc.returncode != 0:
+            last_line = (stderr_text or stdout_text or f"exit {proc.returncode}").splitlines()[-1]
+            await query.answer(text=f"❌ Promote failed: {last_line[:80]}")
+            logger.error(
+                "[%s] Kanban proposal promote failed: task=%s board=%s rc=%s stdout=%s stderr=%s",
+                self.name, task_id, board, proc.returncode, stdout_text, stderr_text,
+            )
+            return
+
+        label = f"✅ Promoted {task_id} to ready"
+        await query.answer(text=label)
+        try:
+            await query.edit_message_text(text=f"{original_text}\n— {label} by {user_display}", reply_markup=None)
+        except Exception:
+            pass
+        logger.info("[%s] Kanban proposal promoted task=%s board=%s by=%s", self.name, task_id, board, user_display)
 
     def _missing_media_path_error(self, label: str, path: str) -> str:
         """Build an actionable file-not-found error for gateway MEDIA delivery.
