@@ -4709,8 +4709,15 @@ class GatewayRunner:
                         elif kind == "blocked":
                             reason = ""
                             if ev.payload and ev.payload.get("reason"):
-                                reason = f": {str(ev.payload['reason'])[:160]}"
-                            msg = f"⏸ {tag}Kanban {sub['task_id']} blocked{reason}"
+                                reason = str(ev.payload["reason"])
+                            try:
+                                from gateway.kanban_watchers import kanban_blocked_digest
+                                msg = kanban_blocked_digest(
+                                    sub["task_id"], title, who, reason,
+                                )
+                            except Exception:
+                                suffix = f": {reason[:160]}" if reason else ""
+                                msg = f"⏸ {tag}Kanban {sub['task_id']} blocked{suffix}"
                         elif kind == "gave_up":
                             err = ""
                             if ev.payload and ev.payload.get("error"):
@@ -4737,6 +4744,23 @@ class GatewayRunner:
                         metadata: dict[str, Any] = {}
                         if sub.get("thread_id"):
                             metadata["thread_id"] = sub["thread_id"]
+                        if kind == "blocked" and platform_str == "telegram":
+                            try:
+                                from gateway.kanban_watchers import kanban_blocker_keyboard_metadata
+                                metadata.update(
+                                    kanban_blocker_keyboard_metadata(
+                                        board_slug or "default",
+                                        sub["task_id"],
+                                        chat_id=str(sub["chat_id"]),
+                                        thread_id=str(sub.get("thread_id") or ""),
+                                        event_id=getattr(ev, "id", None),
+                                    )
+                                )
+                            except Exception:
+                                logger.debug(
+                                    "kanban notifier: blocker keyboard metadata unavailable",
+                                    exc_info=True,
+                                )
                         sub_key = (
                             sub["task_id"], sub["platform"],
                             sub["chat_id"], sub.get("thread_id") or "",

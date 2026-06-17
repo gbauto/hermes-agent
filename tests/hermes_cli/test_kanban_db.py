@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import concurrent.futures
+import json
 import os
 import sqlite3
 import time
@@ -980,6 +981,127 @@ def test_events_capture_lifecycle(kanban_home):
     assert "created" in kinds
     assert "claimed" in kinds
     assert "completed" in kinds
+
+
+def _terminal_event_payload(conn, task_id, kind):
+    row = conn.execute(
+        "SELECT payload FROM task_events WHERE task_id = ? AND kind = ? "
+        "ORDER BY id DESC LIMIT 1",
+        (task_id, kind),
+    ).fetchone()
+    assert row is not None
+    return json.loads(row["payload"])
+
+
+def test_completed_event_includes_normalized_receipt_payload(kanban_home):
+    with kb.connect() as conn:
+        t = kb.create_task(conn, title="ship receipts", assignee="builder")
+        kb.claim_task(conn, t, claimer="host:worker")
+        run_id = kb.latest_run(conn, t).id
+
+        assert kb.complete_task(
+            conn,
+            t,
+            summary="done safely\nlonger private details stay on run row",
+            metadata={"tests_run": 3},
+        )
+
+        payload = _terminal_event_payload(conn, t, "completed")
+
+    assert payload["summary"] == "done safely"
+    receipt = payload["receipt"]
+    assert receipt == {
+        "schema_version": 1,
+        "type": "kanban.lifecycle_receipt",
+        "source": "hermes-kanban",
+        "source_table": "task_events",
+        "source_id": str(run_id),
+        "task_id": t,
+        "run_id": run_id,
+        "kind": "completed",
+        "outcome": "completed",
+        "status": "done",
+        "created_at": receipt["created_at"],
+        "summary": "done safely",
+        "metadata": {"tests_run": 3},
+    }
+    assert isinstance(receipt["created_at"], int)
+
+
+def test_blocked_crashed_and_timed_out_events_include_receipts(kanban_home, monkeypatch):
+    monkeypatch.setattr(kb, "_pid_alive", lambda _pid: False)
+
+    with kb.connect() as conn:
+        blocked = kb.create_task(conn, title="blocked", assignee="builder")
+        kb.claim_task(conn, blocked, claimer="host:block")
+        blocked_run_id = kb.latest_run(conn, blocked).id
+        assert kb.block_task(conn, blocked, reason="needs review")
+        blocked_receipt = _terminal_event_payload(conn, blocked, "blocked")["receipt"]
+
+        host = kb._claimer_id().split(":", 1)[0]
+        crashed = kb.create_task(conn, title="crashed", assignee="builder")
+        kb.claim_task(conn, crashed, claimer=f"{host}:crash")
+        kb._set_worker_pid(conn, crashed, 999991)
+        crashed_run_id = kb.latest_run(conn, crashed).id
+        assert kb.detect_crashed_workers(conn) == [crashed]
+        crashed_receipt = _terminal_event_payload(conn, crashed, "crashed")["receipt"]
+
+        timed = kb.create_task(
+            conn, title="timed", assignee="builder", max_runtime_seconds=1,
+        )
+        kb.claim_task(conn, timed, claimer=f"{host}:timeout")
+        kb._set_worker_pid(conn, timed, 999992)
+        timed_run_id = kb.latest_run(conn, timed).id
+        conn.execute(
+            "UPDATE task_runs SET started_at = ? WHERE id = ?",
+            (int(time.time()) - 5, timed_run_id),
+        )
+        assert kb.enforce_max_runtime(conn, signal_fn=lambda _pid, _sig: None) == [timed]
+        timed_receipt = _terminal_event_payload(conn, timed, "timed_out")["receipt"]
+
+    assert blocked_receipt["kind"] == "blocked"
+    assert blocked_receipt["run_id"] == blocked_run_id
+    assert blocked_receipt["reason"] == "needs review"
+    assert blocked_receipt["status"] == "blocked"
+
+    assert crashed_receipt["kind"] == "crashed"
+    assert crashed_receipt["run_id"] == crashed_run_id
+    assert crashed_receipt["error"] == "pid 999991 not alive"
+    assert crashed_receipt["metadata"]["pid"] == 999991
+
+    assert timed_receipt["kind"] == "timed_out"
+    assert timed_receipt["run_id"] == timed_run_id
+    assert timed_receipt["metadata"]["limit_seconds"] == 1
+    assert "elapsed" in timed_receipt["error"]
+
+
+def test_lifecycle_receipt_redacts_secret_like_metadata(kanban_home):
+    with kb.connect() as conn:
+        t = kb.create_task(conn, title="secret hygiene", assignee="builder")
+        kb.claim_task(conn, t, claimer="host:worker")
+        assert kb.complete_task(
+            conn,
+            t,
+            summary="safe handoff",
+            metadata={
+                "api_key": "sk-thi...7890",
+                "nested": {
+                    "authorization": "Bearer abcdefghijklmnopqrstuvwxyz123456",
+                    "safe": "kept",
+                },
+                "values": ["github...WXYZ", "ok"],
+            },
+        )
+        receipt = _terminal_event_payload(conn, t, "completed")["receipt"]
+
+    rendered = json.dumps(receipt, sort_keys=True)
+    assert "sk-thisIsASecretKey1234567890" not in rendered
+    assert "Bearer abc" not in rendered
+    assert "github_pat_11" not in rendered
+    assert receipt["metadata"]["api_key"] == "[REDACTED]"
+    assert receipt["metadata"]["nested"]["authorization"] == "[REDACTED]"
+    assert receipt["metadata"]["nested"]["safe"] == "kept"
+    assert receipt["metadata"]["values"] == ["[REDACTED]", "ok"]
 
 
 def test_worker_context_includes_parent_results_and_comments(kanban_home):

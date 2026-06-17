@@ -10422,7 +10422,7 @@ _BUILTIN_SUBCOMMANDS = frozenset(
         "config", "cron", "curator", "dashboard", "debug", "doctor",
         "dump", "fallback", "gateway", "hooks", "import", "insights",
         "kanban", "login", "logout", "logs", "lsp", "mcp", "memory", "migrate",
-        "model", "pairing", "plugins", "postinstall", "profile", "proxy",
+        "model", "pairing", "plugins", "postinstall", "profile", "prompts", "proxy",
         "send", "sessions", "setup",
         "skills", "slack", "status", "tools", "uninstall", "update",
         "version", "webhook", "whatsapp", "chat", "secrets",
@@ -10635,6 +10635,14 @@ def main():
         help="Disable TLS verification for Nous login (testing only)",
     )
     model_parser.set_defaults(func=cmd_model)
+
+    # =========================================================================
+    # prompts command — render/apply hermes.prompt_profile.v1 manifests
+    # =========================================================================
+    from hermes_cli.prompts import build_prompts_parser, prompts_command
+
+    prompts_parser = build_prompts_parser(subparsers)
+    prompts_parser.set_defaults(func=lambda args: sys.exit(prompts_command(args)))
 
     # =========================================================================
     # fallback command — manage the fallback provider chain

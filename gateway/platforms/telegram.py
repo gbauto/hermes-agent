@@ -108,6 +108,44 @@ _TELEGRAM_IMAGE_EXT_TO_MIME = {
 MAX_COMMANDS_PER_SCOPE = 30
 
 
+def _telegram_reply_markup_from_metadata(metadata: Optional[Dict[str, Any]]) -> Any:
+    """Build an InlineKeyboardMarkup from adapter metadata, if present.
+
+    Expected shape::
+
+        metadata["telegram_inline_keyboard"] = [
+            [{"text": "✅ Promote", "callback_data": "kb:ub:shortid:sig"}],
+            [{"text": "Open", "url": "https://..."}],
+        ]
+    """
+    if not metadata:
+        return None
+    existing = metadata.get("reply_markup")
+    if existing is not None:
+        return existing
+    keyboard = metadata.get("telegram_inline_keyboard")
+    if not keyboard:
+        return None
+    rows = []
+    for row in keyboard:
+        buttons = []
+        for item in row or []:
+            if not isinstance(item, dict):
+                continue
+            text = str(item.get("text") or "").strip()[:64]
+            callback_data = item.get("callback_data")
+            url = item.get("url")
+            if not text:
+                continue
+            if callback_data:
+                buttons.append(InlineKeyboardButton(text, callback_data=str(callback_data)[:64]))
+            elif url:
+                buttons.append(InlineKeyboardButton(text, url=str(url)))
+        if buttons:
+            rows.append(buttons)
+    return InlineKeyboardMarkup(rows) if rows else None
+
+
 def check_telegram_requirements() -> bool:
     """Check if Telegram dependencies are available.
 
@@ -1700,6 +1738,7 @@ class TelegramAdapter(BasePlatformAdapter):
                 ]
             
             message_ids = []
+            reply_markup = _telegram_reply_markup_from_metadata(metadata)
             thread_id = self._metadata_thread_id(metadata)
             requested_thread_id = self._message_thread_id_for_send(thread_id)
             used_thread_fallback = False
@@ -1759,6 +1798,7 @@ class TelegramAdapter(BasePlatformAdapter):
                                 **thread_kwargs,
                                 **self._link_preview_kwargs(),
                                 **self._notification_kwargs(metadata),
+                                **({"reply_markup": reply_markup} if reply_markup is not None and i == 0 else {}),
                             )
                         except Exception as md_error:
                             # Markdown parsing failed, try plain text
@@ -1773,6 +1813,7 @@ class TelegramAdapter(BasePlatformAdapter):
                                     **thread_kwargs,
                                     **self._link_preview_kwargs(),
                                     **self._notification_kwargs(metadata),
+                                    **({"reply_markup": reply_markup} if reply_markup is not None and i == 0 else {}),
                                 )
                             else:
                                 raise
@@ -2927,6 +2968,18 @@ class TelegramAdapter(BasePlatformAdapter):
             )
             return
 
+        # --- Kanban blocker/proposal callbacks (kb:<action>:<sid>:<sig>) ---
+        if data.startswith("kb:"):
+            await self._handle_kanban_proposal_callback(
+                query,
+                data,
+                query_chat_id=query_chat_id,
+                query_chat_type=query_chat_type,
+                query_thread_id=query_thread_id,
+                query_user_name=query_user_name,
+            )
+            return
+
         # --- Exec approval callbacks (ea:choice:id) ---
         if data.startswith("ea:"):
             parts = data.split(":", 2)
@@ -3240,6 +3293,163 @@ class TelegramAdapter(BasePlatformAdapter):
                         answer, getattr(query.from_user, "id", "unknown"))
         except Exception as exc:
             logger.error("Failed to write update response from callback: %s", exc)
+
+    async def _handle_kanban_proposal_callback(
+        self,
+        query,
+        data: str,
+        *,
+        query_chat_id,
+        query_chat_type,
+        query_thread_id,
+        query_user_name,
+    ) -> None:
+        """Handle actionable Kanban blocker buttons.
+
+        Callback shape: ``kb:<ub|ack|open>:<sid>:<sig>``.  The callback data
+        contains only short opaque tokens; task ids, board slugs, titles,
+        block reasons, comments, paths, and secrets are kept server-side in the
+        Kanban DB callback table.
+        """
+        parts = data.split(":", 3)
+        if len(parts) != 4:
+            await query.answer(text="Invalid or expired Kanban action.")
+            return
+        action, sid, sig = parts[1], parts[2], parts[3]
+        if action not in {"ub", "ack", "open"} or not sid or not sig:
+            await query.answer(text="Invalid or expired Kanban action.")
+            return
+
+        caller_id = str(getattr(query.from_user, "id", ""))
+        if not self._is_callback_user_authorized(
+            caller_id,
+            chat_id=query_chat_id,
+            chat_type=str(query_chat_type) if query_chat_type is not None else None,
+            thread_id=str(query_thread_id) if query_thread_id is not None else None,
+            user_name=query_user_name,
+        ):
+            await query.answer(text="⛔ You are not authorized to act on this Kanban task.")
+            return
+
+        user_display = getattr(query.from_user, "first_name", "User")
+        original_text = (query.message.text or "") if query.message else ""
+
+        try:
+            result = await asyncio.to_thread(
+                self._resolve_kanban_callback_action,
+                action,
+                sid,
+                sig,
+                caller_id or user_display,
+            )
+        except Exception as exc:
+            logger.error(
+                "[%s] Kanban proposal callback error: action=%s sid=%s err=%s",
+                self.name,
+                action,
+                sid,
+                exc,
+                exc_info=True,
+            )
+            await query.answer(text=f"❌ Kanban action error: {str(exc)[:80]}")
+            return
+
+        if result is None:
+            await query.answer(text="Invalid or expired Kanban action.")
+            return
+
+        board = result["board"] or "default"
+        task_id = result["task_id"]
+
+        if action == "ack":
+            label = f"⏭ Kept blocked {task_id}"
+            await query.answer(text=label)
+            try:
+                await query.edit_message_text(text=f"{original_text}\n— {label} by {user_display}", reply_markup=None)
+            except Exception:
+                pass
+            return
+
+        if action == "open":
+            await query.answer(
+                text=f"Board {board}: hermes kanban --board {board} show {task_id}",
+                show_alert=True,
+            )
+            return
+
+        promoted = bool(result.get("promoted"))
+        new_status = result.get("status")
+        if not promoted:
+            await query.answer(text=f"ℹ️ {task_id} is not blocked or already resolved.")
+            return
+
+        label = f"✅ Promoted {task_id} to {new_status or 'ready'}"
+        await query.answer(text=label)
+        try:
+            await query.edit_message_text(text=f"{original_text}\n— {label} by {user_display}", reply_markup=None)
+        except Exception:
+            pass
+        logger.info(
+            "[%s] Kanban proposal promoted task=%s board=%s status=%s by=%s",
+            self.name,
+            task_id,
+            board,
+            new_status,
+            user_display,
+        )
+
+    @staticmethod
+    def _resolve_kanban_callback_action(
+        action: str,
+        sid: str,
+        signature: str,
+        used_by: str,
+    ) -> Optional[dict[str, Any]]:
+        """Resolve a signed Kanban callback through canonical Kanban DB APIs."""
+        from hermes_cli import kanban_db as _kb
+
+        boards = [b.get("slug") for b in _kb.list_boards(include_archived=False)]
+        if "default" not in boards:
+            boards.insert(0, "default")
+        for board in [b for b in boards if b]:
+            with _kb.connect_closing(board=board) as conn:
+                if action == "open":
+                    cb = _kb.get_callback_action(
+                        conn, sid=sid, action=action, signature=signature,
+                    )
+                    if cb is None:
+                        continue
+                    return {"board": cb.board or board, "task_id": cb.task_id}
+                cb = _kb.consume_callback_action(
+                    conn,
+                    sid=sid,
+                    action=action,
+                    signature=signature,
+                    used_by=used_by,
+                )
+                if cb is None:
+                    continue
+                if action == "ack":
+                    return {"board": cb.board or board, "task_id": cb.task_id}
+                changed = _kb.unblock_task(conn, cb.task_id)
+                task = _kb.get_task(conn, cb.task_id)
+                return {
+                    "board": cb.board or board,
+                    "task_id": cb.task_id,
+                    "promoted": changed,
+                    "status": task.status if task else None,
+                }
+        return None
+
+    @staticmethod
+    def _promote_kanban_blocker_task(board: str, task_id: str) -> tuple[bool, Optional[str]]:
+        """Promote a blocked/scheduled task using the canonical Kanban DB API."""
+        from hermes_cli import kanban_db as _kb
+
+        with _kb.connect_closing(board=board) as conn:
+            changed = _kb.unblock_task(conn, task_id)
+            task = _kb.get_task(conn, task_id)
+            return changed, (task.status if task else None)
 
     # Maps `gt:<verb>` -> (script-name, extra-args, success-label, is_state).
     # Scripts live in ~/.hermes/scripts/gmail-triage/. `arg` from the callback

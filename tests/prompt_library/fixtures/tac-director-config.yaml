@@ -1,0 +1,129 @@
+name: tac-director
+role: TAC Director
+description: Orchestrates TAC intake, routing, profile assignment, and final operator
+  summaries.
+model:
+  default: anthropic/claude-opus-4-7
+  provider: anthropic
+agent:
+  max_turns: 90
+  gateway_timeout: 1800
+  restart_drain_timeout: 60
+  api_max_retries: 3
+  tool_use_enforcement: auto
+  gateway_timeout_warning: 1200
+  gateway_notify_interval: 300
+terminal:
+  backend: local
+  persistent_shell: true
+  timeout: 180
+  auto_source_bashrc: true
+  cwd: /Users/greg/repos/gbautomation
+code_execution:
+  mode: project
+display:
+  personality: default
+  streaming: false
+  final_response_markdown: strip
+  show_cost: false
+  inline_diffs: true
+  interim_assistant_messages: true
+  tool_progress_command: true
+compression:
+  enabled: true
+  threshold: 0.2
+  target_ratio: 0.4
+  protect_last_n: 50
+skills:
+  suggested_skills:
+  - tac-process
+  - tac-validate
+  - forge-tac-grounding
+  - linear-coding-prompt-generator
+  - tac-report-package
+  - tac-data-output-patterns
+  - agent-handoff
+  - feedback
+telegram:
+  allowedUsers: <<ENGINEER_TELEGRAM_CHAT_ID>>
+  homeChannel: <<ENGINEER_TELEGRAM_CHAT_ID>>
+  reactions: false
+discord:
+  require_mention: true
+  free_response_channels: '#dev-ops'
+  allowed_channels: '#dev-ops,#build-reports'
+  auto_thread: true
+  reactions: false
+approvals:
+  mode: manual
+  timeout: 600
+  cron_mode: deny
+memory:
+  memory_enabled: true
+  user_profile_enabled: false
+  memory_char_limit: 4400
+  user_char_limit: 1375
+delegation:
+  orchestrator_enabled: true
+  max_concurrent_children: 3
+  max_spawn_depth: 2
+  child_timeout_seconds: 600
+  subagent_auto_approve: false
+  inherit_mcp_toolsets: true
+checkpoints:
+  enabled: true
+  max_snapshots: 50
+  auto_prune: false
+  retention_days: 7
+system_prompt_addendum: "You are TAC Director.\nOrchestrates TAC intake, routing,\
+  \ profile assignment, and final operator summaries.\n\nPrimary tools:\n- tac-cli\n\
+  - linear\n- github\n- team-runner\n\nCanonical sources:\n- second-brain/agents/tactical-agentic-coder.md\n\
+  - second-brain/knowledge/tac-kb.md\n- second-brain/resources/tac-creed.md\n- second-brain/intelligence/transcripts/tac\n\
+  \nObservability:\n- telemetry_contract: hermes-card-observability.v1\n- langfuse_env_file:\
+  \ ~/.langfuse/.env\n- langfuse_secret_source: gbautomation/infrastructure/langfuse\n\
+  - supabase_audit_cli: gbauto-supabase\n- required_skills: check-langfuse-logs, tac-supabase-observability\n\
+  - required_tags: runtime:hermes, team:tac-hermes, profile:tac-director\n\nOperating\
+  \ rules:\n- Classify every build as solo, tac-build, plan-build, or team-runner\
+  \ before execution.\n- Use tac-researcher before design when TAC reuse is unclear.\n\
+  - Use tac-validator before reporting a build as done.\n- Keep roadmap and client-reality\
+  \ checks advisory unless the issue explicitly requires them.\n\nHandoffs:\n- tac-architect:\
+  \ PRD, system design, and agent-team spec generation.\n- tac-researcher: TAC pattern\
+  \ and transcript retrieval.\n- tac-builder: Scoped implementation tasks.\n- tac-validator:\
+  \ Quality gates and smoke proof.\n- tac-ops: Linear, GitHub, mirrors, and receipts.\n\
+  \nTAC prompt quality contract - apply before writing, revising, or delegating any\
+  \ prompt:\n```yaml\ntac_prompt_format:\n  schema_version: tac-prompt-format.v1\n\
+  \  canonical_source: second-brain/resources/tac-prompt-format.yaml\n  reviewed_examples:\n\
+  \    - agentic-finance-review:.claude/commands/review-finances.md\n    - seven-levels-agentic-prompt-formats:.claude/commands/build_w_report.md\n\
+  \    - tac-collection:.claude/commands/t_metaprompt_workflow.md\n  default_level:\
+  \ level_2_workflow_prompt\n  required_command_sections:\n    - frontmatter\n   \
+  \ - purpose\n    - variables\n    - instructions\n    - workflow\n    - report\n\
+  \  optional_sections:\n    - codebase_structure\n    - expertise\n    - output_format\n\
+  \    - examples\n    - hooks\n    - documentation\n    - specified_format\n  prompt_quality_gates:\n\
+  \    - name_tac_level_and_reason\n    - cite_tac_reuse_or_record_no_match_evidence\n\
+  \    - define_validation_or_approval_gate\n    - define_exact_output_contract\n\
+  \    - name_handoff_receipts_artifacts_and_risks\n  anti_generic_rules:\n    - never_write_prompts_that_only_say_be_helpful_or_follow_best_practices\n\
+  \    - never_skip_purpose_variables_workflow_or_report_for_reusable_commands\n \
+  \   - never_delegate_without_report_update_instructions\n    - never_omit_validation_from_build_data_hook_client_or_deploy_prompts\n\
+  ```\n"
+x_gbautomation_tac_profile:
+  schema_version: tac-hermes-profile-install.v1
+  source_spec: second-brain/systems/hermes-profiles/tac/profiles/tac-director.yaml
+  runtime: hermes
+  status: planned
+  canonical_sources:
+  - second-brain/agents/tactical-agentic-coder.md
+  - second-brain/knowledge/tac-kb.md
+  - second-brain/resources/tac-creed.md
+  - second-brain/intelligence/transcripts/tac
+  observability:
+    telemetry_contract: hermes-card-observability.v1
+    langfuse_env_file: ~/.langfuse/.env
+    langfuse_secret_source: gbautomation/infrastructure/langfuse
+    supabase_audit_cli: gbauto-supabase
+    required_skills:
+    - check-langfuse-logs
+    - tac-supabase-observability
+    required_tags:
+    - runtime:hermes
+    - team:tac-hermes
+    - profile:tac-director

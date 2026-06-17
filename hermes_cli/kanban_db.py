@@ -819,6 +819,45 @@ class Event:
     run_id: Optional[int] = None
 
 
+@dataclass
+class KanbanCallbackAction:
+    sid: str
+    task_id: str
+    board: Optional[str]
+    action: str
+    platform: str
+    chat_id: str
+    thread_id: str
+    user_id: Optional[str]
+    event_id: Optional[int]
+    signature: str
+    created_at: int
+    expires_at: int
+    used_at: Optional[int] = None
+    used_by: Optional[str] = None
+
+    @classmethod
+    def from_row(cls, row: Optional[sqlite3.Row]) -> Optional["KanbanCallbackAction"]:
+        if row is None:
+            return None
+        return cls(
+            sid=row["sid"],
+            task_id=row["task_id"],
+            board=row["board"],
+            action=row["action"],
+            platform=row["platform"],
+            chat_id=row["chat_id"],
+            thread_id=row["thread_id"],
+            user_id=row["user_id"],
+            event_id=row["event_id"],
+            signature=row["signature"],
+            created_at=int(row["created_at"]),
+            expires_at=int(row["expires_at"]),
+            used_at=(int(row["used_at"]) if row["used_at"] is not None else None),
+            used_by=row["used_by"],
+        )
+
+
 # ---------------------------------------------------------------------------
 # Schema
 # ---------------------------------------------------------------------------
@@ -950,6 +989,25 @@ CREATE TABLE IF NOT EXISTS kanban_notify_subs (
     last_event_id INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (task_id, platform, chat_id, thread_id)
 );
+
+CREATE TABLE IF NOT EXISTS kanban_callback_actions (
+    sid          TEXT PRIMARY KEY,
+    task_id      TEXT NOT NULL,
+    board        TEXT,
+    action       TEXT NOT NULL,
+    platform     TEXT NOT NULL,
+    chat_id      TEXT NOT NULL,
+    thread_id    TEXT NOT NULL DEFAULT '',
+    user_id      TEXT,
+    event_id     INTEGER,
+    signature    TEXT NOT NULL,
+    created_at   INTEGER NOT NULL,
+    expires_at   INTEGER NOT NULL,
+    used_at      INTEGER,
+    used_by      TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_kanban_callback_task ON kanban_callback_actions(task_id);
+CREATE INDEX IF NOT EXISTS idx_kanban_callback_expiry ON kanban_callback_actions(expires_at);
 
 CREATE INDEX IF NOT EXISTS idx_tasks_assignee_status ON tasks(assignee, status);
 CREATE INDEX IF NOT EXISTS idx_tasks_status          ON tasks(status);
@@ -1664,6 +1722,117 @@ def get_task(conn: sqlite3.Connection, task_id: str) -> Optional[Task]:
     return Task.from_row(row) if row else None
 
 
+VALID_KANBAN_CALLBACK_ACTIONS = {"ub", "ack", "open"}
+
+
+def create_callback_action(
+    conn: sqlite3.Connection,
+    *,
+    task_id: str,
+    action: str,
+    board: Optional[str] = None,
+    platform: str = "telegram",
+    chat_id: str = "",
+    thread_id: str = "",
+    user_id: Optional[str] = None,
+    event_id: Optional[int] = None,
+    ttl_seconds: int = 24 * 60 * 60,
+) -> str:
+    """Persist an opaque, signed Kanban callback and return its payload.
+
+    The Telegram callback payload is shaped ``kb:<action>:<sid>:<sig>``.
+    ``sid`` and ``sig`` are random short tokens; task IDs, titles, block
+    reasons, board paths, comments, and secrets remain server-side in this
+    table.
+    """
+    if action not in VALID_KANBAN_CALLBACK_ACTIONS:
+        raise ValueError(f"unsupported callback action: {action}")
+    if not re.fullmatch(r"t_[A-Za-z0-9]+", task_id or ""):
+        raise ValueError("invalid task_id for callback action")
+    now = int(time.time())
+    expires_at = now + max(60, int(ttl_seconds))
+    for _ in range(8):
+        sid = secrets.token_urlsafe(6).rstrip("=")
+        sig = secrets.token_urlsafe(5).rstrip("=")
+        try:
+            with write_txn(conn):
+                conn.execute(
+                    """
+                    INSERT INTO kanban_callback_actions (
+                        sid, task_id, board, action, platform, chat_id,
+                        thread_id, user_id, event_id, signature, created_at, expires_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        sid, task_id, board, action, platform, str(chat_id or ""),
+                        str(thread_id or ""), user_id, event_id, sig, now, expires_at,
+                    ),
+                )
+            return f"kb:{action}:{sid}:{sig}"
+        except sqlite3.IntegrityError:
+            continue
+    raise RuntimeError("could not allocate unique Kanban callback id")
+
+
+def consume_callback_action(
+    conn: sqlite3.Connection,
+    *,
+    sid: str,
+    action: str,
+    signature: str,
+    used_by: str,
+    now: Optional[int] = None,
+) -> Optional[KanbanCallbackAction]:
+    """Validate and mark a Kanban callback action used.
+
+    Returns ``None`` for unknown, mismatched, expired, or already-used
+    callbacks.  Callers perform the authoritative Kanban mutation after this
+    succeeds.
+    """
+    if action not in VALID_KANBAN_CALLBACK_ACTIONS:
+        return None
+    now_i = int(time.time()) if now is None else int(now)
+    with write_txn(conn):
+        row = conn.execute(
+            """
+            SELECT * FROM kanban_callback_actions
+             WHERE sid = ? AND action = ? AND signature = ?
+               AND used_at IS NULL AND expires_at >= ?
+            """,
+            (sid, action, signature, now_i),
+        ).fetchone()
+        if row is None:
+            return None
+        conn.execute(
+            "UPDATE kanban_callback_actions SET used_at = ?, used_by = ? WHERE sid = ?",
+            (now_i, str(used_by or ""), sid),
+        )
+        return KanbanCallbackAction.from_row(row)
+
+
+def get_callback_action(
+    conn: sqlite3.Connection,
+    *,
+    sid: str,
+    action: str,
+    signature: str,
+    now: Optional[int] = None,
+) -> Optional[KanbanCallbackAction]:
+    """Validate a Kanban callback action without consuming it."""
+    if action not in VALID_KANBAN_CALLBACK_ACTIONS:
+        return None
+    now_i = int(time.time()) if now is None else int(now)
+    row = conn.execute(
+        """
+        SELECT * FROM kanban_callback_actions
+         WHERE sid = ? AND action = ? AND signature = ?
+           AND used_at IS NULL AND expires_at >= ?
+        """,
+        (sid, action, signature, now_i),
+    ).fetchone()
+    return KanbanCallbackAction.from_row(row)
+
+
 # Canonical sort-order mappings for ``hermes kanban list --sort``.
 # Each value is a raw SQL fragment appended after ``ORDER BY``.
 VALID_SORT_ORDERS: dict[str, str] = {
@@ -1939,6 +2108,99 @@ def list_events(conn: sqlite3.Connection, task_id: str) -> list[Event]:
     return out
 
 
+_RECEIPT_SCHEMA_VERSION = 1
+_RECEIPT_KIND_STATUSES = {
+    "completed": ("completed", "done"),
+    "blocked": ("blocked", "blocked"),
+    "crashed": ("crashed", "crashed"),
+    "timed_out": ("timed_out", "timed_out"),
+    "gave_up": ("gave_up", "blocked"),
+}
+_RECEIPT_SECRET_KEY_RE = re.compile(
+    r"(api[_-]?key|secret|token|password|authorization|bearer|oauth|"
+    r"credential|private[_-]?key|service[_-]?role)",
+    re.IGNORECASE,
+)
+_RECEIPT_SECRET_VALUE_RE = re.compile(
+    r"(Bearer\s+[A-Za-z0-9._\-]{20,}|ghp_[A-Za-z0-9_]{20,}|"
+    r"github_pat_[A-Za-z0-9_]{20,}|github\.\.\.[A-Za-z0-9_\-]{4,}|"
+    r"sk-[A-Za-z0-9_\-]{12,}|sk-[A-Za-z0-9_\-]{3,}\.\.\.[A-Za-z0-9_\-]{4,}|"
+    r"xox[baprs]-[A-Za-z0-9\-]{10,}|"
+    r"eyJ[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+)",
+    re.IGNORECASE,
+)
+_RECEIPT_MAX_TEXT = 500
+
+
+def _receipt_safe_text(value: Any, *, max_len: int = _RECEIPT_MAX_TEXT) -> str:
+    text = str(value or "")
+    text = text.strip()
+    if _RECEIPT_SECRET_VALUE_RE.search(text):
+        return "[REDACTED]"
+    if len(text) > max_len:
+        return text[:max_len] + "…"
+    return text
+
+
+def _receipt_sanitize(value: Any, *, key: Optional[str] = None) -> Any:
+    if key and _RECEIPT_SECRET_KEY_RE.search(str(key)):
+        return "[REDACTED]"
+    if isinstance(value, dict):
+        return {str(k): _receipt_sanitize(v, key=str(k)) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_receipt_sanitize(v) for v in value]
+    if isinstance(value, str):
+        return _receipt_safe_text(value)
+    if isinstance(value, (int, float, bool)) or value is None:
+        return value
+    return _receipt_safe_text(value)
+
+
+def _normalized_lifecycle_receipt(
+    *,
+    task_id: str,
+    run_id: Optional[int],
+    kind: str,
+    created_at: int,
+    summary: Optional[str] = None,
+    reason: Optional[str] = None,
+    error: Optional[str] = None,
+    metadata: Optional[dict] = None,
+    artifacts: Optional[Iterable[str]] = None,
+) -> dict[str, Any]:
+    outcome, status = _RECEIPT_KIND_STATUSES.get(kind, (kind, kind))
+    receipt: dict[str, Any] = {
+        "schema_version": _RECEIPT_SCHEMA_VERSION,
+        "type": "kanban.lifecycle_receipt",
+        "source": "hermes-kanban",
+        "source_table": "task_events",
+        "source_id": str(run_id) if run_id is not None else task_id,
+        "task_id": task_id,
+        "run_id": int(run_id) if run_id is not None else None,
+        "kind": kind,
+        "outcome": outcome,
+        "status": status,
+        "created_at": int(created_at),
+    }
+    if summary:
+        receipt["summary"] = _receipt_safe_text(summary, max_len=400)
+    if reason:
+        receipt["reason"] = _receipt_safe_text(reason, max_len=320)
+    if error:
+        receipt["error"] = _receipt_safe_text(error)
+    if metadata is not None:
+        receipt["metadata"] = _receipt_sanitize(metadata)
+    if artifacts:
+        cleaned = [
+            _receipt_safe_text(p, max_len=300)
+            for p in artifacts
+            if isinstance(p, str) and p.strip()
+        ]
+        if cleaned:
+            receipt["artifacts"] = cleaned
+    return receipt
+
+
 def _append_event(
     conn: sqlite3.Connection,
     task_id: str,
@@ -1946,6 +2208,7 @@ def _append_event(
     payload: Optional[dict] = None,
     *,
     run_id: Optional[int] = None,
+    receipt: Optional[dict] = None,
 ) -> None:
     """Record an event row.  Called from within an already-open txn.
 
@@ -1953,8 +2216,22 @@ def _append_event(
     events by attempt. For events that aren't scoped to a single run
     (task created/edited/archived, dependency promotion) leave it None
     and the row carries NULL.
+
+    ``receipt`` is optional normalized lifecycle metadata for terminal
+    event mirrors. It is embedded under ``payload['receipt']`` so existing
+    summary/metadata/comment behaviour and the task_events schema remain
+    unchanged.
     """
     now = int(time.time())
+    if receipt is not None:
+        payload = dict(payload or {})
+        payload["receipt"] = _normalized_lifecycle_receipt(
+            task_id=task_id,
+            run_id=run_id,
+            kind=kind,
+            created_at=now,
+            **receipt,
+        )
     pl = json.dumps(payload, ensure_ascii=False) if payload else None
     conn.execute(
         "INSERT INTO task_events (task_id, run_id, kind, payload, created_at) "
@@ -2893,6 +3170,11 @@ def complete_task(
             conn, task_id, "completed",
             completed_payload,
             run_id=run_id,
+            receipt={
+                "summary": ev_summary or None,
+                "metadata": metadata,
+                "artifacts": completed_payload.get("artifacts"),
+            },
         )
     # Prose-scan the summary + result for t_<hex> references that do
     # not resolve. Advisory — does not block the completion. Runs in
@@ -3106,7 +3388,14 @@ def block_task(
                 outcome="blocked",
                 summary=reason,
             )
-        _append_event(conn, task_id, "blocked", {"reason": reason}, run_id=run_id)
+        _append_event(
+            conn,
+            task_id,
+            "blocked",
+            {"reason": reason},
+            run_id=run_id,
+            receipt={"reason": reason},
+        )
         return True
 
 
@@ -4078,7 +4367,12 @@ def enforce_max_runtime(
                     metadata=payload,
                 )
                 _append_event(
-                    conn, tid, "timed_out", payload, run_id=run_id,
+                    conn,
+                    tid, "timed_out", payload, run_id=run_id,
+                    receipt={
+                        "error": f"elapsed {int(elapsed)}s > limit {int(row['max_runtime_seconds'])}s",
+                        "metadata": payload,
+                    },
                 )
                 timed_out.append(tid)
         # Increment the unified failure counter. Outside the write_txn
@@ -4341,6 +4635,10 @@ def detect_crashed_workers(conn: sqlite3.Connection) -> list[str]:
                     conn, row["id"], event_kind,
                     event_payload,
                     run_id=run_id,
+                    receipt={
+                        "error": error_text,
+                        "metadata": event_payload,
+                    } if event_kind == "crashed" else None,
                 )
                 crashed.append(row["id"])
                 crash_details.append(
@@ -4505,6 +4803,7 @@ def _record_task_failure(
                 payload.update(event_payload_extra)
             _append_event(
                 conn, task_id, "gave_up", payload, run_id=run_id,
+                receipt={"error": error[:500], "metadata": payload},
             )
             blocked = True
         else:
