@@ -780,21 +780,6 @@ function individualAgentArt(agent: LibraryAgent): IndividualArtEntry {
   };
 }
 
-function individualAuraSkillArt(skill: AuraSkill): IndividualArtEntry {
-  const entry =
-    skillIndividualArt.auraSkills[
-      skill.id as keyof typeof skillIndividualArt.auraSkills
-    ] as IndividualArtEntry | undefined;
-  if (entry) return entry;
-  const key = skillArtKey(skill.category);
-  return {
-    artId: `group-${key}`,
-    publicPath: `/skill-art/${key}.jpg`,
-    sourceFile: `${key}.jpg`,
-    sourceGroup: "group",
-  };
-}
-
 function SkillsContractPanel({
   index,
   view,
@@ -1081,17 +1066,8 @@ function AuraSkillsView({
         </Card>
       ) : (
         <div className="aura-skills-grid">
-          {visibleSkills.map((skill) => {
-            const art = individualAuraSkillArt(skill);
-            return (
+          {visibleSkills.map((skill) => (
               <article className="aura-skill-card" key={skill.id}>
-                <img
-                  alt={`${skill.title} MTG art`}
-                  className="aura-skill-art"
-                  decoding="async"
-                  loading="lazy"
-                  src={versionedArtPath(art.publicPath)}
-                />
                 <div className="library-card-topline">
                   <span>{prettyCategory(skill.category, "UI")}</span>
                   <span>{skill.authorName}</span>
@@ -1119,7 +1095,6 @@ function AuraSkillsView({
                     <span>Aura source</span>
                   )}
                   {skill.featured && <span>Featured</span>}
-                  <span>Art: {art.artId}</span>
                 </div>
 
                 <p className="aura-skill-preview">{skill.contentPreview}</p>
@@ -1133,8 +1108,7 @@ function AuraSkillsView({
                   Open source
                 </a>
               </article>
-            );
-          })}
+          ))}
         </div>
       )}
     </section>
