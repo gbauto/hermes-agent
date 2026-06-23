@@ -1,0 +1,1445 @@
+{
+  "schema_version": "kanban-team-index.v1",
+  "indexed_at": "2026-06-18T18:38:06+00:00",
+  "source_glob": "resources/skills/hermes-profile-templates/profile-teams/*.yaml",
+  "teams": [
+    {
+      "team_id": "aws-cloud-ops",
+      "display_name": "AWS Cloud Operations",
+      "runtime": "hermes",
+      "purpose": "Operate AWS accounts and microservices with a specialist team: account administration, billing/cost, IAM/security, DynamoDB, serverless integration, observability, and IaC release checks.\n",
+      "canonical_agent_team": "ai-library/teams/aws-cloud-ops/",
+      "canonical_profile_team": null,
+      "orchestrator_profile": "aws-account-admin",
+      "lead_profile": null,
+      "specialist_profiles": [
+        "aws-billing-ops",
+        "aws-iam-security",
+        "aws-dynamodb-operator",
+        "aws-serverless-operator",
+        "aws-observability",
+        "aws-iac-release"
+      ],
+      "existing_specialist_profiles": [],
+      "routing": {
+        "billing_cost_budget_anomaly": "aws-billing-ops",
+        "dynamodb_schema_capacity_streams_backups": "aws-dynamodb-operator",
+        "lambda_api_gateway_eventbridge_sqs_step_functions": "aws-serverless-operator",
+        "iam_sts_secrets_policy_boundary": "aws-iam-security",
+        "cloudwatch_xray_logs_metrics_alarms_runbooks": "aws-observability",
+        "terraform_cdk_cloudformation_sam_serverless_plan": "aws-iac-release",
+        "cross_service_deployment_or_account_policy": "aws-account-admin"
+      },
+      "workflows": {},
+      "runtime_policy": {},
+      "observability": {
+        "telemetry_contract": "hermes-card-observability.v1",
+        "card_event_kind": "telemetry_linked",
+        "langfuse": {
+          "env_file": "~/.langfuse/.env",
+          "secret_source": "gbautomation/infrastructure/langfuse",
+          "required_tags": [
+            "runtime:hermes",
+            "team:aws-cloud-ops",
+            "surface:aws-cloud-ops"
+          ]
+        },
+        "required_skills": [
+          "check-langfuse-logs"
+        ]
+      },
+      "receipts": {
+        "second_brain_base": "second-brain/intelligence/aws-cloud-ops/",
+        "supabase_table": "agent_feedback_events",
+        "langfuse_tags": [
+          "surface:aws-cloud-ops",
+          "team:aws-cloud-ops"
+        ],
+        "artifact_path_policy": "exact_paths_in_metadata_not_tags"
+      },
+      "source_path": "resources/skills/hermes-profile-templates/profile-teams/aws-cloud-ops.yaml",
+      "source_sha256": "3064c0574aeada88c5f860ce7c58cab6792a05a3fe675bb77d606244b2e2b5bc",
+      "source_updated_at": "2026-06-18T18:30:45+00:00",
+      "indexed_at": "2026-06-18T18:38:06+00:00",
+      "metadata": {
+        "canonical_agent_team": "ai-library/teams/aws-cloud-ops/",
+        "canonical_profile_team": null,
+        "claw_empire_registry_policy": null,
+        "required_common_skills": null
+      },
+      "schema_version": 1
+    },
+    {
+      "team_id": "ecom-intelligence",
+      "display_name": "Ecom Intelligence",
+      "runtime": "hermes",
+      "purpose": "Run ecommerce scanner workflows through Hermes: source discovery, adapter research, scrape profiles, endpoint/browser scrapes, Supabase contracts, change intelligence, alerts, scheduled jobs, read views, and verifier reports. The canonical operator phrase \"process website\" means create a gated Kanban workflow, not a monolithic CLI run.\n",
+      "canonical_agent_team": "ai-library/teams/ecom-intelligence/",
+      "canonical_profile_team": null,
+      "orchestrator_profile": "ecom",
+      "lead_profile": null,
+      "specialist_profiles": [
+        "source-discovery-mapper",
+        "platform-adapter-researcher",
+        "scraper-profile-builder",
+        "browser-harness-runner",
+        "anti-bot-deep-researcher",
+        "data-contract-steward",
+        "supabase-datafeed-manager",
+        "change-intelligence-analyst",
+        "alert-scheduler-operator",
+        "read-view-builder",
+        "verifier-reporter"
+      ],
+      "existing_specialist_profiles": [
+        "mall-scraper"
+      ],
+      "routing": {
+        "the_mall_client_work": "mall-scraper",
+        "generic_ecom_orchestration": "ecom",
+        "process_website": "ecom",
+        "source_discovery_platform_mapping": "source-discovery-mapper",
+        "adapter_docs_or_fixtures": "platform-adapter-researcher",
+        "scrape_profile": "scraper-profile-builder",
+        "endpoint_or_browser_scrape": "browser-harness-runner",
+        "anti_bot_deep_research": "anti-bot-deep-researcher",
+        "supabase_schema_writer_readback": "data-contract-steward",
+        "supabase_runtime_datafeed": "supabase-datafeed-manager",
+        "data_flowing_to_mall_scanner_app": "supabase-datafeed-manager",
+        "price_stock_catalog_diff": "change-intelligence-analyst",
+        "alerts_schedules_receipts": "alert-scheduler-operator",
+        "mall_scanner_read_view": "read-view-builder",
+        "final_verification": "verifier-reporter"
+      },
+      "workflows": {
+        "process_website": {
+          "description": "Map a new ecommerce website, build or update scraper profile artifacts, run a first dry-run scrape, verify Langfuse and Supabase receipts, then propose production promotion gates.\n",
+          "entry_profile": "ecom",
+          "runner_type": "hermes_multi_agent_workflow",
+          "default_mode": "dry_run",
+          "retry_policy": {
+            "max_stage_attempts_before_team_lead_escalation": 2,
+            "transient_failure_handling": "retry_quietly_in_kanban_with_same_run_id_and_artifact_dir",
+            "anti_bot_failure_handling": "route_to_anti_bot_handler_with_saved_context_before_terminal_report",
+            "checkpoint_required_before_retry": true,
+            "checkpoint_fields": [
+              "stage_key",
+              "attempt",
+              "failure_class",
+              "blocker_route",
+              "anti_bot_provider_guess",
+              "anti_bot_handler_stage",
+              "artifact_paths",
+              "browser_capture_report_path_or_deferred_reason",
+              "browser_evidence_manifest_path_or_deferred_reason",
+              "langfuse_trace_id_or_deferred_reason",
+              "langfuse_query_view",
+              "retry_context_path",
+              "next_retry_command"
+            ],
+            "retryable_failure_classes": [
+              "network_timeout",
+              "http_429_or_rate_limit",
+              "browser_session_crash",
+              "selector_timeout_with_alternate_path_available",
+              "temporary_supabase_or_langfuse_readback_error"
+            ],
+            "anti_bot_handler_retry_classes": [
+              "blocked_by_akamai_edgesuite_access_denied",
+              "blocked_by_fingerprint_fs_client_challenge",
+              "blocked_bot_wall",
+              "soft_block_500",
+              "unknown_anti_bot_challenge"
+            ],
+            "non_retryable_failure_classes": [
+              "missing_required_credentials",
+              "operator_approval_required",
+              "captcha_or_turnstile_requires_policy_decision",
+              "unsupported_platform_after_http_and_browser_mapping",
+              "deterministic_schema_contract_failure"
+            ],
+            "routing_contract": {
+              "classifier": "ecom_runtime.anti_bot_routing.classify_blocker",
+              "routes": {
+                "transient_retry_same_stage": "same_card_retry_with_same_run_id_and_artifact_dir",
+                "anti_bot_handler_retry": "same_worker_loads_anti_bot_deep_research_context_then_bounded_successor_discovery",
+                "policy_approval_required": "stop_for_operator_approval_no_captcha_solving_no_cookie_replay",
+                "terminal_excluded_platform": "report_only_until_explicit_platform_override"
+              }
+            }
+          },
+          "notification_policy": {
+            "team_lead": "ecom",
+            "telegram_recipient": "greg",
+            "scanner_channel_env": "ECOM_TELEGRAM_CHAT_ID",
+            "log_channel_env": "ECOM_TELEGRAM_LOG_CHAT_ID",
+            "telegram_send_policy": "team_lead_only",
+            "log_channel_send_policy": "one_line_internal_updates_for_commits_dispatch_kanban_and_sprints",
+            "send_telegram_only_when": [
+              "true_blocker_requires_operator_action",
+              "same_workflow_stage_failed_twice"
+            ],
+            "do_not_notify_for": [
+              "routine_progress",
+              "first_failure_with_retry_path",
+              "handled_anti_bot_evidence_with_next_step",
+              "no_match_evidence_recorded_with_report_or_unsupported_profile_path",
+              "deferred_readback_with_clear_next_validation_command"
+            ],
+            "telegram_format": "one_line_with_run_id_stage_verdict_and_kanban_or_artifact_link",
+            "log_channel_command": "python -m ecom_runtime.cli /log-update --kind <commit|dispatch|kanban|sprint|status> --ref <id> \"<one-line update>\" --real"
+          },
+          "true_blocker_definition": [
+            "credential_or_auth_material_missing",
+            "operator_approval_required_for_live_write_schedule_or_policy_escalation",
+            "anti_bot_wall_requires_operator_decision_proxy_or_manual_auth",
+            "required_infrastructure_unavailable",
+            "same_stage_failed_twice_without_new_retry_path",
+            "deterministic_contract_or_schema_failure_blocks_downstream_cards"
+          ],
+          "parent_card": {
+            "title_template": "Process website: {target_url}",
+            "required_fields": [
+              "target_url",
+              "client_context",
+              "schema_family",
+              "run_id",
+              "approval_state"
+            ]
+          },
+          "child_cards": [
+            {
+              "id": "intake-normalize-target",
+              "owner": "ecom",
+              "depends_on": [],
+              "purpose": "normalize target URL, slug, client context, run id, and artifact directory",
+              "required_outputs": [
+                "normalized_url",
+                "slug",
+                "run_id",
+                "artifact_dir"
+              ]
+            },
+            {
+              "id": "http-source-map",
+              "owner": "source-discovery-mapper",
+              "depends_on": [
+                "intake-normalize-target"
+              ],
+              "purpose": "run deterministic HTTP mapper and identify platform/API evidence",
+              "required_outputs": [
+                "endpoint_inventory",
+                "platform_evidence",
+                "no_api_found",
+                "langfuse_trace_id"
+              ]
+            },
+            {
+              "id": "browser-source-map",
+              "owner": "browser-harness-runner",
+              "depends_on": [
+                "http-source-map"
+              ],
+              "run_when": "http_source_map.no_api_found_or_low_confidence",
+              "purpose": "build browser runbook and collect screenshots, recordings, HAR, trace, and DOM snapshots when HTTP mapping is insufficient",
+              "required_outputs": [
+                "browser_runbook_path",
+                "selector_observations",
+                "evidence_artifacts",
+                "screenshot_paths",
+                "har_paths_or_deferred_reason",
+                "trace_paths_or_deferred_reason",
+                "recording_path_or_deferred_reason",
+                "live_url_or_deferred_reason",
+                "langfuse_trace_id"
+              ]
+            },
+            {
+              "id": "anti-bot-deep-research",
+              "owner": "anti-bot-deep-researcher",
+              "depends_on": [
+                "browser-source-map"
+              ],
+              "run_when": "browser_source_map.anti_bot_research_required_or_unknown_provider_or_blocker_route_is_anti_bot_handler_retry",
+              "purpose": "research observed anti-bot provider using public docs, safe search, prior ecom second-brain intel, and retry context from the failing worker",
+              "required_outputs": [
+                "provider_guess",
+                "blocker_route",
+                "retry_context_path",
+                "source_queue_path",
+                "provider_record_draft_path",
+                "safe_handling_policy",
+                "bounded_successor_discovery_command_or_deferred_reason",
+                "blocked_bypass_claims",
+                "langfuse_trace_id"
+              ]
+            },
+            {
+              "id": "scraper-profile-build",
+              "owner": "scraper-profile-builder",
+              "depends_on": [
+                "http-source-map",
+                "browser-source-map",
+                "anti-bot-deep-research"
+              ],
+              "purpose": "create or update scrape profile, fixture, and manifest from mapping evidence",
+              "required_outputs": [
+                "profile_path",
+                "fixture_path",
+                "component_reuse_or_no_match",
+                "anti_bot_stealth_or_source_selected"
+              ]
+            },
+            {
+              "id": "first-dry-run-scrape",
+              "owner": "browser-harness-runner",
+              "depends_on": [
+                "scraper-profile-build"
+              ],
+              "purpose": "run the first dry-run scrape through the ecom repo CLI/scripts",
+              "required_outputs": [
+                "receipt_json",
+                "extracted_item_sample",
+                "error_summary",
+                "langfuse_trace_id"
+              ]
+            },
+            {
+              "id": "browser-evidence-publish",
+              "owner": "browser-harness-runner",
+              "depends_on": [
+                "first-dry-run-scrape"
+              ],
+              "purpose": "collect browser recordings, traces, HAR/network logs, screenshots, DOM snapshots, command logs, and readback receipts into a manifest; optionally upload to GCS and send one-line Telegram only with explicit approval",
+              "required_outputs": [
+                "browser_evidence_manifest_path",
+                "browser_evidence_report_path",
+                "recording_paths_or_deferred_reason",
+                "gcs_upload_receipts_or_suppressed_reason",
+                "telegram_message_id_or_suppressed_reason",
+                "langfuse_trace_id_or_deferred_reason"
+              ]
+            },
+            {
+              "id": "mall-contract-verify",
+              "owner": "data-contract-steward",
+              "depends_on": [
+                "browser-evidence-publish"
+              ],
+              "purpose": "validate Mall Scanner or generic ecom schema contracts before any live persistence",
+              "required_outputs": [
+                "schema_validation_result",
+                "supabase_dry_run_rows",
+                "live_write_approval_state"
+              ]
+            },
+            {
+              "id": "supabase-datafeed-readback",
+              "owner": "supabase-datafeed-manager",
+              "depends_on": [
+                "mall-contract-verify"
+              ],
+              "purpose": "verify runtime datafeed health, scrape_runs linkage, Mall Scanner API visibility, and schedule/cadence consistency",
+              "required_outputs": [
+                "brand_or_shop_readback",
+                "item_count_readback",
+                "price_history_readback_or_not_emitted_reason",
+                "scrape_runs_receipt_or_gap",
+                "dashboard_api_readback",
+                "schedule_state",
+                "repair_plan_or_no_action_needed"
+              ]
+            },
+            {
+              "id": "langfuse-supabase-readback",
+              "owner": "verifier-reporter",
+              "depends_on": [
+                "supabase-datafeed-readback"
+              ],
+              "purpose": "verify trace visibility and Supabase readback receipts when writes are approved",
+              "required_outputs": [
+                "langfuse_trace_url_or_id",
+                "supabase_receipt_path",
+                "readback_rows_or_deferred_reason"
+              ]
+            },
+            {
+              "id": "production-promotion-gate",
+              "owner": "alert-scheduler-operator",
+              "depends_on": [
+                "langfuse-supabase-readback"
+              ],
+              "purpose": "propose cron/launchd, alert channel, and live-write activation without enabling them by default",
+              "required_outputs": [
+                "schedule_proposal",
+                "alert_channel_proposal",
+                "approval_text_required"
+              ]
+            },
+            {
+              "id": "operator-report",
+              "owner": "verifier-reporter",
+              "depends_on": [
+                "production-promotion-gate"
+              ],
+              "purpose": "produce final operator report with receipts, risks, and next approval needed",
+              "required_outputs": [
+                "artifact_paths",
+                "validation_commands",
+                "trace_ids",
+                "risks",
+                "next_approval_needed"
+              ]
+            }
+          ],
+          "card_requirements": [
+            "required_skills_check_langfuse_logs",
+            "supabase_skills_on_persistence_readback_reporting_or_promotion_cards",
+            "exact_artifact_paths",
+            "run_id",
+            "langfuse_trace_id_or_deferred_reason",
+            "validation_command_or_deferred_smoke_rationale",
+            "approval_state_for_writes_alerts_and_schedules",
+            "retry_checkpoint_or_non_retryable_blocker_verdict",
+            "retry_context_json_with_browser_evidence_and_langfuse_query_view",
+            "retry_context_jsonl_ledger_row",
+            "retry_context_created_kanban_event_when_task_id_available",
+            "telegram_alert_suppressed_or_sent_reason"
+          ]
+        }
+      },
+      "runtime_policy": {
+        "control_plane": "hermes",
+        "primary_runner_type": "hermes_multi_agent_workflow",
+        "primary_runner_skill": "tac-agent-team",
+        "primary_orchestrator_profile": "ecom",
+        "primary_agent_team_execution": [
+          "Hermes orchestrator profile ecom",
+          "Hermes multi-agent workflow",
+          "TAC agent-team routing"
+        ],
+        "optional_runner_type": "claude_code_tui_delegate",
+        "optional_runner_caveat": "Claude Code TUI is option B for intentional overflow or Claude Code credit usage. Do not make it the default team runner.\n",
+        "optional_agent_team_execution": [
+          "resources/skills/hermes-claude-code-tui/SKILL.md",
+          "scripts/claude_tmux_delegate.sh",
+          "/Users/ecom/.hermes/bin/claude_tmux_delegate.sh",
+          "/Users/greg/.hermes/bin/claude_tmux_delegate.sh"
+        ],
+        "optional_delegate_script": "/Users/ecom/.hermes/bin/claude_tmux_delegate.sh",
+        "optional_fallback_delegate_script": "/Users/greg/.hermes/bin/claude_tmux_delegate.sh",
+        "optional_activation_user": "greg",
+        "activation_caveat": "Primary agent teams run through the Hermes multi-agent workflow. Use the Claude Code TUI delegate only when Greg explicitly chooses option B. If the ecom service user lacks Claude Code executable/auth access, the optional greg-owned delegate can target --cwd /Users/ecom/repos/ecom. Do not copy Claude credentials between users.\n",
+        "ask_before_optional_lanes": [
+          "claude_code_tui_delegate",
+          "claude_p",
+          "agent_sdk",
+          "headless_anthropic_api_team_runner"
+        ],
+        "deprecated_control_plane": "openclaw",
+        "browser_automation": "optional_tool_under_hermes",
+        "dry_run_default": true,
+        "live_writes_require": [
+          "ECOM_DRY_RUN=0",
+          "explicit_operator_approval",
+          "gbauto-supabase_cli_only",
+          "readback_after_each_insert"
+        ],
+        "supabase_write_gate": {
+          "cli": "gbauto-supabase",
+          "dry_run_behavior": "write_local_row_json_and_supabase_receipt_only",
+          "approval_options": [
+            "--approve-supabase-writes",
+            "ECOM_SUPABASE_APPROVED=1",
+            "ECOM_WRITE_APPROVAL=<run_id>"
+          ],
+          "required_receipt": "supabase/supabase_receipt.json",
+          "required_tables": [
+            "ecom_shops",
+            "ecom_scrape_profiles",
+            "ecom_scrape_jobs",
+            "ecom_observations",
+            "ecom_changes"
+          ]
+        },
+        "live_alerts_require": [
+          "approved_channel",
+          "approved_recipient",
+          "explicit_operator_approval"
+        ],
+        "operational_alert_exception": "The ecom team lead may send Greg a one-line Telegram alert without a separate approval receipt only when a process_website stage is a true blocker requiring operator action or the same workflow stage has failed twice. Specialists should record routine progress, first failures, handled anti-bot evidence, and deferred readback rationale in Kanban/Langfuse/report artifacts without Telegram noise.\n"
+      },
+      "observability": {
+        "telemetry_contract": "hermes-card-observability.v1",
+        "card_event_kind": "telemetry_linked",
+        "langfuse": {
+          "env_file": "~/.langfuse/.env",
+          "secret_source": "gbautomation/infrastructure/langfuse",
+          "required_tags": [
+            "runtime:hermes",
+            "team:ecom-intelligence",
+            "surface:ecom"
+          ]
+        },
+        "required_skills": [
+          "check-langfuse-logs"
+        ]
+      },
+      "receipts": {
+        "second_brain_base": "second-brain/intelligence/ecom-intelligence/",
+        "mall_client_base": "second-brain/clients/the-mall/",
+        "langfuse_tags": [
+          "runtime:hermes",
+          "team:ecom-intelligence",
+          "surface:ecom"
+        ],
+        "artifact_path_policy": "exact_paths_in_metadata_not_tags"
+      },
+      "source_path": "resources/skills/hermes-profile-templates/profile-teams/ecom-intelligence.yaml",
+      "source_sha256": "343b893a7c40624d312e8e9132f1632442f3a49962ab040f0159f5f1c4331135",
+      "source_updated_at": "2026-06-18T18:30:45+00:00",
+      "indexed_at": "2026-06-18T18:38:06+00:00",
+      "metadata": {
+        "canonical_agent_team": "ai-library/teams/ecom-intelligence/",
+        "canonical_profile_team": null,
+        "claw_empire_registry_policy": null,
+        "required_common_skills": {
+          "all_agents": [
+            "check-langfuse-logs"
+          ],
+          "rule": "Every ecom specialist card must load Langfuse review/reporting context. Supabase skills are required only for cards that touch persistence, readback, schema contracts, read views, reporting, or production promotion. Supabase writes still require explicit approval and gbauto-supabase readback.\n"
+        }
+      },
+      "schema_version": 1
+    },
+    {
+      "team_id": "tac-hermes",
+      "display_name": "TAC Hermes Build Council",
+      "runtime": "hermes",
+      "purpose": "Route coding, PRD, validation, and agent-team work through TAC-primed Hermes profiles. The team grounds work in Tactical Agentic Coding sources before build, uses role-specialized handoffs, and produces validation receipts before dispatch or completion.\n",
+      "canonical_agent_team": ".claude/agents/teams/tac-hermes/",
+      "canonical_profile_team": "second-brain/systems/hermes-profiles/tac/team.yaml",
+      "orchestrator_profile": "tac-director",
+      "lead_profile": "tac-lead",
+      "specialist_profiles": [
+        "tac-lead",
+        "tac-architect",
+        "tac-researcher",
+        "tac-builder",
+        "tac-validator",
+        "tac-ops",
+        "tac-self-improve"
+      ],
+      "existing_specialist_profiles": [],
+      "routing": {
+        "tac_expert_qa": "tac-lead",
+        "tac_design_review": "tac-lead",
+        "zero_touch_engineering_strategy": "tac-lead",
+        "automation_tac_build": "tac-director",
+        "automation_plan_build": "tac-director",
+        "team_tac_hermes": "tac-director",
+        "tac_source_research": "tac-researcher",
+        "prd_or_architecture": "tac-architect",
+        "implementation": "tac-builder",
+        "validation_or_smoke_proof": "tac-validator",
+        "linear_github_receipts": "tac-ops",
+        "post_run_self_improvement": "tac-self-improve",
+        "all_coding_tasks": "tac-director"
+      },
+      "workflows": {},
+      "runtime_policy": {
+        "control_plane": "hermes",
+        "primary_runner_type": "hermes_multi_agent_workflow",
+        "primary_runner_cli": "python scripts/tac.py team dispatch",
+        "kanban_runner_cli": "python scripts/hermes_tac_team_runner.py",
+        "profile_installer_cli": "python scripts/install_tac_hermes_profiles.py",
+        "team_spec_cli": "python scripts/tac.py team spec --team tac-hermes",
+        "profile_list_cli": "python scripts/tac.py team profiles --team tac-hermes",
+        "primary_orchestrator_profile": "tac-director",
+        "dry_run_default": true,
+        "live_writes_require": [
+          "explicit_operator_approval",
+          "tac_validate_pass_or_deferred_smoke_proof",
+          "receipt_artifact_path"
+        ],
+        "hard_gates": [
+          "tac_source_reuse_present",
+          "tac_lead_consulted_for_agentic_engineering_north_star_when_applicable",
+          "validation_or_deferred_smoke_proof_present",
+          "self_improvement_receipt_present",
+          "secret_and_oauth_safety_checked",
+          "pr_or_receipt_created"
+        ],
+        "advisory_checks": [
+          "roadmap_alignment",
+          "client_reality",
+          "readme_standards"
+        ]
+      },
+      "observability": {
+        "telemetry_contract": "hermes-card-observability.v1",
+        "card_event_kind": "telemetry_linked",
+        "langfuse": {
+          "env_file": "~/.langfuse/.env",
+          "secret_source": "gbautomation/infrastructure/langfuse",
+          "required_tags": [
+            "runtime:hermes",
+            "team:tac-hermes",
+            "surface:tac"
+          ]
+        },
+        "supabase": {
+          "audit_cli": "gbauto-supabase",
+          "write_policy": "cli_only_with_explicit_approval"
+        },
+        "required_skills": [
+          "check-langfuse-logs",
+          "tac-supabase-observability"
+        ]
+      },
+      "receipts": {
+        "second_brain_base": "second-brain/intelligence/tac-cli/",
+        "validation_report_base": "second-brain/intelligence/tac-validations/",
+        "langfuse_observation_prefix": "agent.invoked.",
+        "langfuse_tags": [
+          "runtime:hermes",
+          "team:tac-hermes",
+          "surface:tac",
+          "taxonomy:claw-empire"
+        ],
+        "artifact_path_policy": "exact_paths_in_metadata_not_tags"
+      },
+      "source_path": "resources/skills/hermes-profile-templates/profile-teams/tac-hermes.yaml",
+      "source_sha256": "9a15a127f08371ab9b744af2aefae98c44a4e840ed9d04f84d00874c60a89349",
+      "source_updated_at": "2026-06-18T18:30:45+00:00",
+      "indexed_at": "2026-06-18T18:38:06+00:00",
+      "metadata": {
+        "canonical_agent_team": ".claude/agents/teams/tac-hermes/",
+        "canonical_profile_team": "second-brain/systems/hermes-profiles/tac/team.yaml",
+        "claw_empire_registry_policy": {
+          "role": "taxonomy_visibility_only",
+          "canonical_member_source": "ai_agent_kb_and_tac_profile_specs",
+          "registry_plan": "second-brain/inbox/plans/2026-06-05-unified-agent-registry-claw-empire.md",
+          "allowed_shape": {
+            "departments": [
+              "planning",
+              "development",
+              "design",
+              "qa",
+              "devsecops",
+              "operations"
+            ],
+            "workflow_packs": [
+              "requireTestEvidence",
+              "failWithoutCitations",
+              "requireRiskNotes",
+              "maxAutoFixPasses"
+            ]
+          },
+          "prohibited_runtime_members": [
+            "claw_empire_placeholder_agents",
+            "korean_placeholder_agents",
+            "generic_personality_only_agents"
+          ]
+        },
+        "required_common_skills": null
+      },
+      "schema_version": 1
+    }
+  ],
+  "members": [
+    {
+      "team_id": "aws-cloud-ops",
+      "profile": "aws-account-admin",
+      "member_kind": "orchestrator",
+      "route": null,
+      "template": "resources/skills/hermes-profile-templates/profiles/aws-account-admin.yaml",
+      "profile_template": null,
+      "canonical_agent": "ai-library/teams/aws-cloud-ops/aws-cloud-ops-account-administrator.md",
+      "deploy_user": null,
+      "deploy_path": null,
+      "owner_user": null,
+      "required_skills": [],
+      "metadata": {
+        "raw": {
+          "name": "aws-account-admin",
+          "template": "resources/skills/hermes-profile-templates/profiles/aws-account-admin.yaml",
+          "canonical_agent": "ai-library/teams/aws-cloud-ops/aws-cloud-ops-account-administrator.md"
+        }
+      },
+      "source_path": "resources/skills/hermes-profile-templates/profile-teams/aws-cloud-ops.yaml",
+      "indexed_at": "2026-06-18T18:38:06+00:00",
+      "schema_version": 1
+    },
+    {
+      "team_id": "aws-cloud-ops",
+      "profile": "aws-billing-ops",
+      "member_kind": "specialist",
+      "route": null,
+      "template": "resources/skills/hermes-profile-templates/profiles/aws-billing-ops.yaml",
+      "profile_template": null,
+      "canonical_agent": "ai-library/teams/aws-cloud-ops/aws-cloud-ops-billing-analyst.md",
+      "deploy_user": null,
+      "deploy_path": null,
+      "owner_user": null,
+      "required_skills": [],
+      "metadata": {
+        "raw": {
+          "name": "aws-billing-ops",
+          "template": "resources/skills/hermes-profile-templates/profiles/aws-billing-ops.yaml",
+          "canonical_agent": "ai-library/teams/aws-cloud-ops/aws-cloud-ops-billing-analyst.md",
+          "approval_boundary": "manual_for_plan_purchases_and_budget_mutations"
+        }
+      },
+      "source_path": "resources/skills/hermes-profile-templates/profile-teams/aws-cloud-ops.yaml",
+      "indexed_at": "2026-06-18T18:38:06+00:00",
+      "schema_version": 1
+    },
+    {
+      "team_id": "aws-cloud-ops",
+      "profile": "aws-iam-security",
+      "member_kind": "specialist",
+      "route": null,
+      "template": "resources/skills/hermes-profile-templates/profiles/aws-iam-security.yaml",
+      "profile_template": null,
+      "canonical_agent": "ai-library/teams/aws-cloud-ops/aws-cloud-ops-iam-security-steward.md",
+      "deploy_user": null,
+      "deploy_path": null,
+      "owner_user": null,
+      "required_skills": [],
+      "metadata": {
+        "raw": {
+          "name": "aws-iam-security",
+          "template": "resources/skills/hermes-profile-templates/profiles/aws-iam-security.yaml",
+          "canonical_agent": "ai-library/teams/aws-cloud-ops/aws-cloud-ops-iam-security-steward.md",
+          "approval_boundary": "manual_for_iam_secrets_trust_policy_or_access_boundary_mutation"
+        }
+      },
+      "source_path": "resources/skills/hermes-profile-templates/profile-teams/aws-cloud-ops.yaml",
+      "indexed_at": "2026-06-18T18:38:06+00:00",
+      "schema_version": 1
+    },
+    {
+      "team_id": "aws-cloud-ops",
+      "profile": "aws-dynamodb-operator",
+      "member_kind": "specialist",
+      "route": null,
+      "template": "resources/skills/hermes-profile-templates/profiles/aws-dynamodb-operator.yaml",
+      "profile_template": null,
+      "canonical_agent": "ai-library/teams/aws-cloud-ops/aws-cloud-ops-dynamodb-operator.md",
+      "deploy_user": null,
+      "deploy_path": null,
+      "owner_user": null,
+      "required_skills": [],
+      "metadata": {
+        "raw": {
+          "name": "aws-dynamodb-operator",
+          "template": "resources/skills/hermes-profile-templates/profiles/aws-dynamodb-operator.yaml",
+          "canonical_agent": "ai-library/teams/aws-cloud-ops/aws-cloud-ops-dynamodb-operator.md",
+          "approval_boundary": "manual_for_table_index_backup_or_data_mutation"
+        }
+      },
+      "source_path": "resources/skills/hermes-profile-templates/profile-teams/aws-cloud-ops.yaml",
+      "indexed_at": "2026-06-18T18:38:06+00:00",
+      "schema_version": 1
+    },
+    {
+      "team_id": "aws-cloud-ops",
+      "profile": "aws-serverless-operator",
+      "member_kind": "specialist",
+      "route": null,
+      "template": "resources/skills/hermes-profile-templates/profiles/aws-serverless-operator.yaml",
+      "profile_template": null,
+      "canonical_agent": "ai-library/teams/aws-cloud-ops/aws-cloud-ops-serverless-integrator.md",
+      "deploy_user": null,
+      "deploy_path": null,
+      "owner_user": null,
+      "required_skills": [],
+      "metadata": {
+        "raw": {
+          "name": "aws-serverless-operator",
+          "template": "resources/skills/hermes-profile-templates/profiles/aws-serverless-operator.yaml",
+          "canonical_agent": "ai-library/teams/aws-cloud-ops/aws-cloud-ops-serverless-integrator.md",
+          "approval_boundary": "manual_for_public_endpoints_deploys_and_secret_changes"
+        }
+      },
+      "source_path": "resources/skills/hermes-profile-templates/profile-teams/aws-cloud-ops.yaml",
+      "indexed_at": "2026-06-18T18:38:06+00:00",
+      "schema_version": 1
+    },
+    {
+      "team_id": "aws-cloud-ops",
+      "profile": "aws-observability",
+      "member_kind": "specialist",
+      "route": null,
+      "template": "resources/skills/hermes-profile-templates/profiles/aws-observability.yaml",
+      "profile_template": null,
+      "canonical_agent": "ai-library/teams/aws-cloud-ops/aws-cloud-ops-observability-engineer.md",
+      "deploy_user": null,
+      "deploy_path": null,
+      "owner_user": null,
+      "required_skills": [],
+      "metadata": {
+        "raw": {
+          "name": "aws-observability",
+          "template": "resources/skills/hermes-profile-templates/profiles/aws-observability.yaml",
+          "canonical_agent": "ai-library/teams/aws-cloud-ops/aws-cloud-ops-observability-engineer.md",
+          "approval_boundary": "manual_for_alarm_routing_retention_or_paging_policy_mutation"
+        }
+      },
+      "source_path": "resources/skills/hermes-profile-templates/profile-teams/aws-cloud-ops.yaml",
+      "indexed_at": "2026-06-18T18:38:06+00:00",
+      "schema_version": 1
+    },
+    {
+      "team_id": "aws-cloud-ops",
+      "profile": "aws-iac-release",
+      "member_kind": "specialist",
+      "route": null,
+      "template": "resources/skills/hermes-profile-templates/profiles/aws-iac-release.yaml",
+      "profile_template": null,
+      "canonical_agent": "ai-library/teams/aws-cloud-ops/aws-cloud-ops-iac-release-runner.md",
+      "deploy_user": null,
+      "deploy_path": null,
+      "owner_user": null,
+      "required_skills": [],
+      "metadata": {
+        "raw": {
+          "name": "aws-iac-release",
+          "template": "resources/skills/hermes-profile-templates/profiles/aws-iac-release.yaml",
+          "canonical_agent": "ai-library/teams/aws-cloud-ops/aws-cloud-ops-iac-release-runner.md",
+          "approval_boundary": "manual_for_apply_deploy_destroy_import_or_state_mutation"
+        }
+      },
+      "source_path": "resources/skills/hermes-profile-templates/profile-teams/aws-cloud-ops.yaml",
+      "indexed_at": "2026-06-18T18:38:06+00:00",
+      "schema_version": 1
+    },
+    {
+      "team_id": "ecom-intelligence",
+      "profile": "ecom",
+      "member_kind": "orchestrator",
+      "route": null,
+      "template": "resources/skills/hermes-profile-templates/profiles/ecom.yaml",
+      "profile_template": null,
+      "canonical_agent": "ai-library/teams/ecom-intelligence/ecom-intelligence-mall-scanner-orchestrator.md",
+      "deploy_user": "ecom",
+      "deploy_path": "/Users/ecom/.hermes/profiles/ecom/config.yaml",
+      "owner_user": null,
+      "required_skills": [
+        "check-langfuse-logs"
+      ],
+      "metadata": {
+        "raw": {
+          "name": "ecom",
+          "template": "resources/skills/hermes-profile-templates/profiles/ecom.yaml",
+          "canonical_agent": "ai-library/teams/ecom-intelligence/ecom-intelligence-mall-scanner-orchestrator.md",
+          "deploy_user": "ecom",
+          "deploy_path": "/Users/ecom/.hermes/profiles/ecom/config.yaml"
+        }
+      },
+      "source_path": "resources/skills/hermes-profile-templates/profile-teams/ecom-intelligence.yaml",
+      "indexed_at": "2026-06-18T18:38:06+00:00",
+      "schema_version": 1
+    },
+    {
+      "team_id": "ecom-intelligence",
+      "profile": "source-discovery-mapper",
+      "member_kind": "specialist",
+      "route": "source_map_platform_detection_url_inventory",
+      "template": null,
+      "profile_template": null,
+      "canonical_agent": "ai-library/teams/ecom-intelligence/ecom-intelligence-source-discovery-mapper.md",
+      "deploy_user": null,
+      "deploy_path": null,
+      "owner_user": null,
+      "required_skills": [
+        "check-langfuse-logs"
+      ],
+      "metadata": {
+        "raw": {
+          "name": "source-discovery-mapper",
+          "canonical_agent": "ai-library/teams/ecom-intelligence/ecom-intelligence-source-discovery-mapper.md",
+          "route": "source_map_platform_detection_url_inventory",
+          "required_skills": [
+            "check-langfuse-logs"
+          ]
+        }
+      },
+      "source_path": "resources/skills/hermes-profile-templates/profile-teams/ecom-intelligence.yaml",
+      "indexed_at": "2026-06-18T18:38:06+00:00",
+      "schema_version": 1
+    },
+    {
+      "team_id": "ecom-intelligence",
+      "profile": "platform-adapter-researcher",
+      "member_kind": "specialist",
+      "route": "instagram_shopify_woocommerce_schema_org_adapter_grounding",
+      "template": null,
+      "profile_template": null,
+      "canonical_agent": "ai-library/teams/ecom-intelligence/ecom-intelligence-platform-adapter-researcher.md",
+      "deploy_user": null,
+      "deploy_path": null,
+      "owner_user": null,
+      "required_skills": [
+        "check-langfuse-logs"
+      ],
+      "metadata": {
+        "raw": {
+          "name": "platform-adapter-researcher",
+          "canonical_agent": "ai-library/teams/ecom-intelligence/ecom-intelligence-platform-adapter-researcher.md",
+          "route": "instagram_shopify_woocommerce_schema_org_adapter_grounding",
+          "required_skills": [
+            "check-langfuse-logs"
+          ]
+        }
+      },
+      "source_path": "resources/skills/hermes-profile-templates/profile-teams/ecom-intelligence.yaml",
+      "indexed_at": "2026-06-18T18:38:06+00:00",
+      "schema_version": 1
+    },
+    {
+      "team_id": "ecom-intelligence",
+      "profile": "scraper-profile-builder",
+      "member_kind": "specialist",
+      "route": "scrape_profile_creation_or_update",
+      "template": null,
+      "profile_template": null,
+      "canonical_agent": "ai-library/teams/ecom-intelligence/ecom-intelligence-scraper-profile-builder.md",
+      "deploy_user": null,
+      "deploy_path": null,
+      "owner_user": null,
+      "required_skills": [
+        "check-langfuse-logs"
+      ],
+      "metadata": {
+        "raw": {
+          "name": "scraper-profile-builder",
+          "canonical_agent": "ai-library/teams/ecom-intelligence/ecom-intelligence-scraper-profile-builder.md",
+          "route": "scrape_profile_creation_or_update",
+          "required_skills": [
+            "check-langfuse-logs"
+          ]
+        }
+      },
+      "source_path": "resources/skills/hermes-profile-templates/profile-teams/ecom-intelligence.yaml",
+      "indexed_at": "2026-06-18T18:38:06+00:00",
+      "schema_version": 1
+    },
+    {
+      "team_id": "ecom-intelligence",
+      "profile": "browser-harness-runner",
+      "member_kind": "specialist",
+      "route": "endpoint_or_browser_scrape_artifact_capture",
+      "template": null,
+      "profile_template": null,
+      "canonical_agent": "ai-library/teams/ecom-intelligence/ecom-intelligence-browser-harness-runner.md",
+      "deploy_user": null,
+      "deploy_path": null,
+      "owner_user": null,
+      "required_skills": [
+        "check-langfuse-logs"
+      ],
+      "metadata": {
+        "raw": {
+          "name": "browser-harness-runner",
+          "canonical_agent": "ai-library/teams/ecom-intelligence/ecom-intelligence-browser-harness-runner.md",
+          "route": "endpoint_or_browser_scrape_artifact_capture",
+          "required_skills": [
+            "check-langfuse-logs"
+          ]
+        }
+      },
+      "source_path": "resources/skills/hermes-profile-templates/profile-teams/ecom-intelligence.yaml",
+      "indexed_at": "2026-06-18T18:38:06+00:00",
+      "schema_version": 1
+    },
+    {
+      "team_id": "ecom-intelligence",
+      "profile": "anti-bot-deep-researcher",
+      "member_kind": "specialist",
+      "route": "public_anti_bot_provider_research_detection_policy_fixtures",
+      "template": null,
+      "profile_template": null,
+      "canonical_agent": "ai-library/teams/ecom-intelligence/ecom-intelligence-anti-bot-deep-researcher.md",
+      "deploy_user": null,
+      "deploy_path": null,
+      "owner_user": null,
+      "required_skills": [
+        "check-langfuse-logs"
+      ],
+      "metadata": {
+        "raw": {
+          "name": "anti-bot-deep-researcher",
+          "canonical_agent": "ai-library/teams/ecom-intelligence/ecom-intelligence-anti-bot-deep-researcher.md",
+          "route": "public_anti_bot_provider_research_detection_policy_fixtures",
+          "required_skills": [
+            "check-langfuse-logs"
+          ]
+        }
+      },
+      "source_path": "resources/skills/hermes-profile-templates/profile-teams/ecom-intelligence.yaml",
+      "indexed_at": "2026-06-18T18:38:06+00:00",
+      "schema_version": 1
+    },
+    {
+      "team_id": "ecom-intelligence",
+      "profile": "data-contract-steward",
+      "member_kind": "specialist",
+      "route": "mall_schema_ecom_schema_supabase_writer_readback",
+      "template": null,
+      "profile_template": null,
+      "canonical_agent": "ai-library/teams/ecom-intelligence/ecom-intelligence-data-contract-steward.md",
+      "deploy_user": null,
+      "deploy_path": null,
+      "owner_user": null,
+      "required_skills": [
+        "supabase-cli-ops",
+        "tac-supabase-observability",
+        "check-langfuse-logs"
+      ],
+      "metadata": {
+        "raw": {
+          "name": "data-contract-steward",
+          "canonical_agent": "ai-library/teams/ecom-intelligence/ecom-intelligence-data-contract-steward.md",
+          "route": "mall_schema_ecom_schema_supabase_writer_readback",
+          "required_skills": [
+            "supabase-cli-ops",
+            "tac-supabase-observability",
+            "check-langfuse-logs"
+          ]
+        }
+      },
+      "source_path": "resources/skills/hermes-profile-templates/profile-teams/ecom-intelligence.yaml",
+      "indexed_at": "2026-06-18T18:38:06+00:00",
+      "schema_version": 1
+    },
+    {
+      "team_id": "ecom-intelligence",
+      "profile": "supabase-datafeed-manager",
+      "member_kind": "specialist",
+      "route": "runtime_supabase_dataflow_scrape_runs_dashboard_readback",
+      "template": null,
+      "profile_template": "resources/skills/hermes-profile-templates/profiles/ecom-supabase-datafeed-manager.yaml",
+      "canonical_agent": "ai-library/teams/ecom-intelligence/ecom-intelligence-supabase-datafeed-manager.md",
+      "deploy_user": null,
+      "deploy_path": null,
+      "owner_user": null,
+      "required_skills": [
+        "gbauto-supabase",
+        "supabase-cli-ops",
+        "tac-supabase-observability",
+        "check-langfuse-logs"
+      ],
+      "metadata": {
+        "raw": {
+          "name": "supabase-datafeed-manager",
+          "canonical_agent": "ai-library/teams/ecom-intelligence/ecom-intelligence-supabase-datafeed-manager.md",
+          "route": "runtime_supabase_dataflow_scrape_runs_dashboard_readback",
+          "profile_template": "resources/skills/hermes-profile-templates/profiles/ecom-supabase-datafeed-manager.yaml",
+          "required_skills": [
+            "gbauto-supabase",
+            "supabase-cli-ops",
+            "tac-supabase-observability",
+            "check-langfuse-logs"
+          ]
+        }
+      },
+      "source_path": "resources/skills/hermes-profile-templates/profile-teams/ecom-intelligence.yaml",
+      "indexed_at": "2026-06-18T18:38:06+00:00",
+      "schema_version": 1
+    },
+    {
+      "team_id": "ecom-intelligence",
+      "profile": "change-intelligence-analyst",
+      "member_kind": "specialist",
+      "route": "price_stock_catalog_change_detection",
+      "template": null,
+      "profile_template": null,
+      "canonical_agent": "ai-library/teams/ecom-intelligence/ecom-intelligence-change-intelligence-analyst.md",
+      "deploy_user": null,
+      "deploy_path": null,
+      "owner_user": null,
+      "required_skills": [
+        "supabase-cli-ops",
+        "tac-supabase-observability",
+        "check-langfuse-logs"
+      ],
+      "metadata": {
+        "raw": {
+          "name": "change-intelligence-analyst",
+          "canonical_agent": "ai-library/teams/ecom-intelligence/ecom-intelligence-change-intelligence-analyst.md",
+          "route": "price_stock_catalog_change_detection",
+          "required_skills": [
+            "supabase-cli-ops",
+            "tac-supabase-observability",
+            "check-langfuse-logs"
+          ]
+        }
+      },
+      "source_path": "resources/skills/hermes-profile-templates/profile-teams/ecom-intelligence.yaml",
+      "indexed_at": "2026-06-18T18:38:06+00:00",
+      "schema_version": 1
+    },
+    {
+      "team_id": "ecom-intelligence",
+      "profile": "alert-scheduler-operator",
+      "member_kind": "specialist",
+      "route": "schedules_telegram_alerts_dry_run_host_receipts",
+      "template": null,
+      "profile_template": null,
+      "canonical_agent": "ai-library/teams/ecom-intelligence/ecom-intelligence-alert-scheduler-operator.md",
+      "deploy_user": null,
+      "deploy_path": null,
+      "owner_user": null,
+      "required_skills": [
+        "supabase-cli-ops",
+        "tac-supabase-observability",
+        "check-langfuse-logs"
+      ],
+      "metadata": {
+        "raw": {
+          "name": "alert-scheduler-operator",
+          "canonical_agent": "ai-library/teams/ecom-intelligence/ecom-intelligence-alert-scheduler-operator.md",
+          "route": "schedules_telegram_alerts_dry_run_host_receipts",
+          "required_skills": [
+            "supabase-cli-ops",
+            "tac-supabase-observability",
+            "check-langfuse-logs"
+          ]
+        }
+      },
+      "source_path": "resources/skills/hermes-profile-templates/profile-teams/ecom-intelligence.yaml",
+      "indexed_at": "2026-06-18T18:38:06+00:00",
+      "schema_version": 1
+    },
+    {
+      "team_id": "ecom-intelligence",
+      "profile": "read-view-builder",
+      "member_kind": "specialist",
+      "route": "apps_mall_scanner_gallery_api_client_dashboard",
+      "template": null,
+      "profile_template": null,
+      "canonical_agent": "ai-library/teams/ecom-intelligence/ecom-intelligence-read-view-builder.md",
+      "deploy_user": null,
+      "deploy_path": null,
+      "owner_user": null,
+      "required_skills": [
+        "supabase-cli-ops",
+        "tac-supabase-observability",
+        "check-langfuse-logs"
+      ],
+      "metadata": {
+        "raw": {
+          "name": "read-view-builder",
+          "canonical_agent": "ai-library/teams/ecom-intelligence/ecom-intelligence-read-view-builder.md",
+          "route": "apps_mall_scanner_gallery_api_client_dashboard",
+          "required_skills": [
+            "supabase-cli-ops",
+            "tac-supabase-observability",
+            "check-langfuse-logs"
+          ]
+        }
+      },
+      "source_path": "resources/skills/hermes-profile-templates/profile-teams/ecom-intelligence.yaml",
+      "indexed_at": "2026-06-18T18:38:06+00:00",
+      "schema_version": 1
+    },
+    {
+      "team_id": "ecom-intelligence",
+      "profile": "verifier-reporter",
+      "member_kind": "specialist",
+      "route": "independent_verification_receipts_reports",
+      "template": null,
+      "profile_template": null,
+      "canonical_agent": "ai-library/teams/ecom-intelligence/ecom-intelligence-verifier-reporter.md",
+      "deploy_user": null,
+      "deploy_path": null,
+      "owner_user": null,
+      "required_skills": [
+        "supabase-cli-ops",
+        "tac-supabase-observability",
+        "check-langfuse-logs"
+      ],
+      "metadata": {
+        "raw": {
+          "name": "verifier-reporter",
+          "canonical_agent": "ai-library/teams/ecom-intelligence/ecom-intelligence-verifier-reporter.md",
+          "route": "independent_verification_receipts_reports",
+          "required_skills": [
+            "supabase-cli-ops",
+            "tac-supabase-observability",
+            "check-langfuse-logs"
+          ]
+        }
+      },
+      "source_path": "resources/skills/hermes-profile-templates/profile-teams/ecom-intelligence.yaml",
+      "indexed_at": "2026-06-18T18:38:06+00:00",
+      "schema_version": 1
+    },
+    {
+      "team_id": "ecom-intelligence",
+      "profile": "mall-scraper",
+      "member_kind": "existing_specialist",
+      "route": "the_mall_client_scanner",
+      "template": null,
+      "profile_template": null,
+      "canonical_agent": null,
+      "deploy_user": null,
+      "deploy_path": "/Users/greg/.hermes/profiles/mall-scraper/",
+      "owner_user": "greg",
+      "required_skills": [
+        "check-langfuse-logs",
+        "supabase-cli-ops",
+        "tac-supabase-observability"
+      ],
+      "metadata": {
+        "raw": {
+          "name": "mall-scraper",
+          "owner_user": "greg",
+          "deploy_path": "/Users/greg/.hermes/profiles/mall-scraper/",
+          "canonical_context": "second-brain/clients/the-mall/hermes/",
+          "role": "the_mall_client_scanner",
+          "required_common_skills": [
+            "check-langfuse-logs"
+          ],
+          "conditional_supabase_skills": [
+            "supabase-cli-ops",
+            "tac-supabase-observability"
+          ]
+        }
+      },
+      "source_path": "resources/skills/hermes-profile-templates/profile-teams/ecom-intelligence.yaml",
+      "indexed_at": "2026-06-18T18:38:06+00:00",
+      "schema_version": 1
+    },
+    {
+      "team_id": "tac-hermes",
+      "profile": "tac-lead",
+      "member_kind": "lead",
+      "route": "tac_expert_telegram_qa_zero_touch_design_review",
+      "template": "second-brain/systems/hermes-profiles/tac/profiles/tac-lead.yaml",
+      "profile_template": null,
+      "canonical_agent": ".claude/agents/teams/tac-hermes/tac-lead.md",
+      "deploy_user": "greg",
+      "deploy_path": "/Users/greg/.hermes/profiles/tac-lead/config.yaml",
+      "owner_user": null,
+      "required_skills": [],
+      "metadata": {
+        "raw": {
+          "name": "tac-lead",
+          "template": "second-brain/systems/hermes-profiles/tac/profiles/tac-lead.yaml",
+          "canonical_agent": ".claude/agents/teams/tac-hermes/tac-lead.md",
+          "route": "tac_expert_telegram_qa_zero_touch_design_review",
+          "deploy_user": "greg",
+          "deploy_path": "/Users/greg/.hermes/profiles/tac-lead/config.yaml"
+        }
+      },
+      "source_path": "resources/skills/hermes-profile-templates/profile-teams/tac-hermes.yaml",
+      "indexed_at": "2026-06-18T18:38:06+00:00",
+      "schema_version": 1
+    },
+    {
+      "team_id": "tac-hermes",
+      "profile": "tac-director",
+      "member_kind": "orchestrator",
+      "route": null,
+      "template": "second-brain/systems/hermes-profiles/tac/profiles/tac-director.yaml",
+      "profile_template": null,
+      "canonical_agent": ".claude/agents/teams/tac-hermes/tac-director.md",
+      "deploy_user": "greg",
+      "deploy_path": "/Users/greg/.hermes/profiles/tac-director/config.yaml",
+      "owner_user": null,
+      "required_skills": [],
+      "metadata": {
+        "raw": {
+          "name": "tac-director",
+          "template": "second-brain/systems/hermes-profiles/tac/profiles/tac-director.yaml",
+          "canonical_agent": ".claude/agents/teams/tac-hermes/tac-director.md",
+          "deploy_user": "greg",
+          "deploy_path": "/Users/greg/.hermes/profiles/tac-director/config.yaml"
+        }
+      },
+      "source_path": "resources/skills/hermes-profile-templates/profile-teams/tac-hermes.yaml",
+      "indexed_at": "2026-06-18T18:38:06+00:00",
+      "schema_version": 1
+    },
+    {
+      "team_id": "tac-hermes",
+      "profile": "tac-lead",
+      "member_kind": "specialist",
+      "route": "tac_expert_telegram_qa_zero_touch_design_review",
+      "template": "second-brain/systems/hermes-profiles/tac/profiles/tac-lead.yaml",
+      "profile_template": null,
+      "canonical_agent": ".claude/agents/teams/tac-hermes/tac-lead.md",
+      "deploy_user": null,
+      "deploy_path": null,
+      "owner_user": null,
+      "required_skills": [],
+      "metadata": {
+        "raw": {
+          "name": "tac-lead",
+          "template": "second-brain/systems/hermes-profiles/tac/profiles/tac-lead.yaml",
+          "canonical_agent": ".claude/agents/teams/tac-hermes/tac-lead.md",
+          "route": "tac_expert_telegram_qa_zero_touch_design_review"
+        }
+      },
+      "source_path": "resources/skills/hermes-profile-templates/profile-teams/tac-hermes.yaml",
+      "indexed_at": "2026-06-18T18:38:06+00:00",
+      "schema_version": 1
+    },
+    {
+      "team_id": "tac-hermes",
+      "profile": "tac-architect",
+      "member_kind": "specialist",
+      "route": "prd_system_design_agent_team_spec",
+      "template": "second-brain/systems/hermes-profiles/tac/profiles/tac-architect.yaml",
+      "profile_template": null,
+      "canonical_agent": ".claude/agents/teams/tac-hermes/tac-architect.md",
+      "deploy_user": null,
+      "deploy_path": null,
+      "owner_user": null,
+      "required_skills": [],
+      "metadata": {
+        "raw": {
+          "name": "tac-architect",
+          "template": "second-brain/systems/hermes-profiles/tac/profiles/tac-architect.yaml",
+          "canonical_agent": ".claude/agents/teams/tac-hermes/tac-architect.md",
+          "route": "prd_system_design_agent_team_spec"
+        }
+      },
+      "source_path": "resources/skills/hermes-profile-templates/profile-teams/tac-hermes.yaml",
+      "indexed_at": "2026-06-18T18:38:06+00:00",
+      "schema_version": 1
+    },
+    {
+      "team_id": "tac-hermes",
+      "profile": "tac-researcher",
+      "member_kind": "specialist",
+      "route": "tac_source_transcript_component_retrieval",
+      "template": "second-brain/systems/hermes-profiles/tac/profiles/tac-researcher.yaml",
+      "profile_template": null,
+      "canonical_agent": ".claude/agents/teams/tac-hermes/tac-researcher.md",
+      "deploy_user": null,
+      "deploy_path": null,
+      "owner_user": null,
+      "required_skills": [],
+      "metadata": {
+        "raw": {
+          "name": "tac-researcher",
+          "template": "second-brain/systems/hermes-profiles/tac/profiles/tac-researcher.yaml",
+          "canonical_agent": ".claude/agents/teams/tac-hermes/tac-researcher.md",
+          "route": "tac_source_transcript_component_retrieval"
+        }
+      },
+      "source_path": "resources/skills/hermes-profile-templates/profile-teams/tac-hermes.yaml",
+      "indexed_at": "2026-06-18T18:38:06+00:00",
+      "schema_version": 1
+    },
+    {
+      "team_id": "tac-hermes",
+      "profile": "tac-builder",
+      "member_kind": "specialist",
+      "route": "scoped_worktree_implementation",
+      "template": "second-brain/systems/hermes-profiles/tac/profiles/tac-builder.yaml",
+      "profile_template": null,
+      "canonical_agent": ".claude/agents/teams/tac-hermes/tac-builder.md",
+      "deploy_user": null,
+      "deploy_path": null,
+      "owner_user": null,
+      "required_skills": [],
+      "metadata": {
+        "raw": {
+          "name": "tac-builder",
+          "template": "second-brain/systems/hermes-profiles/tac/profiles/tac-builder.yaml",
+          "canonical_agent": ".claude/agents/teams/tac-hermes/tac-builder.md",
+          "route": "scoped_worktree_implementation"
+        }
+      },
+      "source_path": "resources/skills/hermes-profile-templates/profile-teams/tac-hermes.yaml",
+      "indexed_at": "2026-06-18T18:38:06+00:00",
+      "schema_version": 1
+    },
+    {
+      "team_id": "tac-hermes",
+      "profile": "tac-validator",
+      "member_kind": "specialist",
+      "route": "tac_validate_tests_readme_standards_smoke_proof",
+      "template": "second-brain/systems/hermes-profiles/tac/profiles/tac-validator.yaml",
+      "profile_template": null,
+      "canonical_agent": ".claude/agents/teams/tac-hermes/tac-validator.md",
+      "deploy_user": null,
+      "deploy_path": null,
+      "owner_user": null,
+      "required_skills": [],
+      "metadata": {
+        "raw": {
+          "name": "tac-validator",
+          "template": "second-brain/systems/hermes-profiles/tac/profiles/tac-validator.yaml",
+          "canonical_agent": ".claude/agents/teams/tac-hermes/tac-validator.md",
+          "route": "tac_validate_tests_readme_standards_smoke_proof"
+        }
+      },
+      "source_path": "resources/skills/hermes-profile-templates/profile-teams/tac-hermes.yaml",
+      "indexed_at": "2026-06-18T18:38:06+00:00",
+      "schema_version": 1
+    },
+    {
+      "team_id": "tac-hermes",
+      "profile": "tac-ops",
+      "member_kind": "specialist",
+      "route": "linear_github_receipts_mirrors_release_notes",
+      "template": "second-brain/systems/hermes-profiles/tac/profiles/tac-ops.yaml",
+      "profile_template": null,
+      "canonical_agent": ".claude/agents/teams/tac-hermes/tac-ops.md",
+      "deploy_user": null,
+      "deploy_path": null,
+      "owner_user": null,
+      "required_skills": [],
+      "metadata": {
+        "raw": {
+          "name": "tac-ops",
+          "template": "second-brain/systems/hermes-profiles/tac/profiles/tac-ops.yaml",
+          "canonical_agent": ".claude/agents/teams/tac-hermes/tac-ops.md",
+          "route": "linear_github_receipts_mirrors_release_notes"
+        }
+      },
+      "source_path": "resources/skills/hermes-profile-templates/profile-teams/tac-hermes.yaml",
+      "indexed_at": "2026-06-18T18:38:06+00:00",
+      "schema_version": 1
+    },
+    {
+      "team_id": "tac-hermes",
+      "profile": "tac-self-improve",
+      "member_kind": "specialist",
+      "route": "post_run_learning_skill_doc_profile_updates",
+      "template": "second-brain/systems/hermes-profiles/tac/profiles/tac-self-improve.yaml",
+      "profile_template": null,
+      "canonical_agent": ".claude/agents/teams/tac-hermes/tac-self-improve.md",
+      "deploy_user": null,
+      "deploy_path": null,
+      "owner_user": null,
+      "required_skills": [],
+      "metadata": {
+        "raw": {
+          "name": "tac-self-improve",
+          "template": "second-brain/systems/hermes-profiles/tac/profiles/tac-self-improve.yaml",
+          "canonical_agent": ".claude/agents/teams/tac-hermes/tac-self-improve.md",
+          "route": "post_run_learning_skill_doc_profile_updates"
+        }
+      },
+      "source_path": "resources/skills/hermes-profile-templates/profile-teams/tac-hermes.yaml",
+      "indexed_at": "2026-06-18T18:38:06+00:00",
+      "schema_version": 1
+    }
+  ],
+  "summary": {
+    "team_count": 3,
+    "member_count": 29,
+    "team_ids": [
+      "aws-cloud-ops",
+      "ecom-intelligence",
+      "tac-hermes"
+    ]
+  }
+}

@@ -21,6 +21,7 @@ import {
 } from "lucide-react";
 import { api } from "@/lib/api";
 import type { SkillInfo, ToolsetInfo } from "@/lib/api";
+import { auraSkills } from "@/generated/auraSkills";
 import { gbautoLibrary } from "@/generated/gbautoLibrary";
 import { useToast } from "@/hooks/useToast";
 import { Toast } from "@/components/Toast";
@@ -35,6 +36,16 @@ import { Input } from "@/components/ui/input";
 import { useI18n } from "@/i18n";
 import { usePageHeader } from "@/contexts/usePageHeader";
 import { PluginSlot } from "@/plugins";
+import {
+  contractsForObjects,
+  findSkillRegistryRow,
+  relatedContractsForSkill,
+  useSupabaseContractsIndex,
+} from "@/lib/gbautoSupabaseContracts";
+import type {
+  SupabaseContractRow,
+  SupabaseContractsIndex,
+} from "@/lib/gbautoSupabaseContracts";
 
 /* ------------------------------------------------------------------ */
 /*  Types & helpers                                                    */
@@ -55,6 +66,52 @@ const CATEGORY_LABELS: Record<string, string> = {
   ai: "AI",
   ux: "UX",
   ui: "UI",
+};
+
+const SKILL_ART_VERSION = "skill-groups-20260623";
+
+const SKILL_ART_KEYS = new Set([
+  "ai",
+  "design-system",
+  "general",
+  "marketing",
+  "mcp",
+  "media",
+  "mlops",
+  "mlops-cloud",
+  "mlops-evaluation",
+  "mlops-inference",
+  "mlops-models",
+  "mlops-training",
+  "mlops-vector-databases",
+  "motion",
+  "ocr",
+  "p5js",
+  "red-teaming",
+  "responsive",
+  "review",
+  "threejs",
+  "ui",
+  "ui-skill",
+  "ux",
+  "visual-effect",
+]);
+
+const TEAM_ART_GROUPS: Record<string, string> = {
+  "apollo-v2-build": "ai",
+  "aws-cloud-ops": "mlops-cloud",
+  "ceo-board": "ai",
+  database: "mlops-vector-databases",
+  design: "design-system",
+  development: "ui-skill",
+  devsecops: "red-teaming",
+  "eagle-ui-redesign": "ui",
+  "ecom-intelligence": "marketing",
+  "logomotion-v5": "motion",
+  operations: "mlops",
+  planning: "ai",
+  "qa-qc": "review",
+  "trader-bot-scaffold": "ai",
 };
 
 function prettyCategory(
@@ -94,6 +151,22 @@ function toolsetIcon(
   return Wrench;
 }
 
+function skillArtKey(raw: string | null | undefined): string {
+  const normalized =
+    raw
+      ?.trim()
+      .toLowerCase()
+      .replace(/&/g, "and")
+      .replace(/\./g, "")
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "") || "general";
+  return SKILL_ART_KEYS.has(normalized) ? normalized : "general";
+}
+
+function skillGroupArtUrl(raw: string | null | undefined): string {
+  return `/skill-art/${skillArtKey(raw)}.jpg?v=${SKILL_ART_VERSION}`;
+}
+
 /* ------------------------------------------------------------------ */
 /*  Component                                                          */
 /* ------------------------------------------------------------------ */
@@ -104,13 +177,14 @@ export default function SkillsPage() {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [view, setView] = useState<
-    "skills" | "toolsets" | "library" | "prompt-cards"
+    "skills" | "toolsets" | "library" | "prompt-cards" | "aura-skills"
   >("skills");
   const [activeCategory, setActiveCategory] = useState<string | null>(null);
   const [togglingSkills, setTogglingSkills] = useState<Set<string>>(new Set());
   const { toast, showToast } = useToast();
   const { t } = useI18n();
   const { setAfterTitle, setEnd } = usePageHeader();
+  const contractsIndex = useSupabaseContractsIndex();
 
   useEffect(() => {
     Promise.all([api.getSkills(), api.getToolsets()])
@@ -120,7 +194,7 @@ export default function SkillsPage() {
       })
       .catch(() => showToast(t.common.loading, "error"))
       .finally(() => setLoading(false));
-  }, []);
+  }, [showToast, t.common.loading]);
 
   /* ---- Toggle skill ---- */
   const handleToggleSkill = async (skill: SkillInfo) => {
@@ -223,6 +297,24 @@ export default function SkillsPage() {
       return `${team.displayName} ${team.leader} ${team.description} ${teamAgents}`
         .toLowerCase()
         .includes(lowerSearch);
+    });
+  }, [lowerSearch, search]);
+
+  const filteredAuraSkills = useMemo(() => {
+    return auraSkills.skills.filter((skill) => {
+      if (!search) return true;
+      const haystack = [
+        skill.title,
+        skill.description,
+        skill.category,
+        skill.authorName,
+        skill.repoOwner,
+        skill.repoName,
+        skill.contentPreview,
+      ]
+        .join(" ")
+        .toLowerCase();
+      return haystack.includes(lowerSearch);
     });
   }, [lowerSearch, search]);
 
@@ -340,6 +432,15 @@ export default function SkillsPage() {
                     setActiveCategory(null);
                   }}
                 />
+                <PanelItem
+                  icon={Paintbrush}
+                  label={`Aura Skills (${auraSkills.summary.total})`}
+                  active={view === "aura-skills"}
+                  onClick={() => {
+                    setView("aura-skills");
+                    setActiveCategory(null);
+                  }}
+                />
               </div>
 
               {view === "skills" &&
@@ -383,6 +484,8 @@ export default function SkillsPage() {
         </aside>
 
         <div className="flex-1 min-w-0">
+          <SkillsContractPanel index={contractsIndex} view={view} />
+
           {isSearching ? (
             <Card className="rounded-none">
               <CardHeader className="py-3 px-4">
@@ -411,6 +514,7 @@ export default function SkillsPage() {
                     {searchMatchedSkills.map((skill) => (
                       <SkillRow
                         key={skill.name}
+                        contractsIndex={contractsIndex}
                         skill={skill}
                         toggling={togglingSkills.has(skill.name)}
                         onToggle={() => handleToggleSkill(skill)}
@@ -454,6 +558,7 @@ export default function SkillsPage() {
                     {activeSkills.map((skill) => (
                       <SkillRow
                         key={skill.name}
+                        contractsIndex={contractsIndex}
                         skill={skill}
                         toggling={togglingSkills.has(skill.name)}
                         onToggle={() => handleToggleSkill(skill)}
@@ -541,9 +646,11 @@ export default function SkillsPage() {
               )}
             </>
           ) : view === "library" ? (
-            <AiLibraryTeamsView agents={libraryAgents} teams={libraryTeams} />
+            <AiLibraryTeamsView agents={libraryAgents} contractsIndex={contractsIndex} teams={libraryTeams} />
+          ) : view === "aura-skills" ? (
+            <AuraSkillsView contractsIndex={contractsIndex} skills={filteredAuraSkills} />
           ) : (
-            <PromptCardsView agents={libraryAgents} />
+            <PromptCardsView agents={libraryAgents} contractsIndex={contractsIndex} />
           )}
         </div>
       </div>
@@ -553,11 +660,15 @@ export default function SkillsPage() {
 }
 
 function SkillRow({
+  contractsIndex,
   skill,
   toggling,
   onToggle,
   noDescriptionLabel,
 }: SkillRowProps) {
+  const registryRow = findSkillRegistryRow(contractsIndex, skill.name);
+  const relatedContracts = relatedContractsForSkill(contractsIndex, skill.name);
+
   return (
     <div className="group flex items-start gap-3 px-3 py-2.5 transition-colors hover:bg-muted/40">
       <div className="pt-0.5 shrink-0">
@@ -567,6 +678,13 @@ function SkillRow({
           disabled={toggling}
         />
       </div>
+      <img
+        alt=""
+        aria-hidden="true"
+        className="skill-row-art"
+        loading="lazy"
+        src={skillGroupArtUrl(skill.category)}
+      />
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2 mb-0.5">
           <span
@@ -576,10 +694,24 @@ function SkillRow({
           >
             {skill.name}
           </span>
+          <Badge tone="secondary" className="text-[9px]">
+            {prettyCategory(skill.category, "General")}
+          </Badge>
         </div>
         <p className="text-xs text-muted-foreground leading-relaxed line-clamp-2">
           {skill.description || noDescriptionLabel}
         </p>
+        {registryRow || relatedContracts.length ? (
+          <div className="skill-contract-row">
+            {registryRow?.source_path ? <span>{registryRow.source_path}</span> : null}
+            {registryRow?.status ? <span>{registryRow.status}</span> : null}
+            {relatedContracts.slice(0, 3).map((contract) => (
+              <span key={contract.object_name ?? contract.domain ?? "contract"}>
+                {contract.object_name}
+              </span>
+            ))}
+          </div>
+        ) : null}
       </div>
     </div>
   );
@@ -610,6 +742,7 @@ interface PanelItemProps {
 }
 
 interface SkillRowProps {
+  contractsIndex: SupabaseContractsIndex | null;
   noDescriptionLabel: string;
   onToggle: () => void;
   skill: SkillInfo;
@@ -618,12 +751,80 @@ interface SkillRowProps {
 
 type LibraryAgent = (typeof gbautoLibrary.agents)[number];
 type LibraryTeam = (typeof gbautoLibrary.teams)[number];
+type AuraSkill = (typeof auraSkills.skills)[number];
+
+function SkillsContractPanel({
+  index,
+  view,
+}: {
+  index: SupabaseContractsIndex | null;
+  view: "skills" | "toolsets" | "library" | "prompt-cards" | "aura-skills";
+}) {
+  const registryRows = index?.skills_registry ?? [];
+  const contracts = relatedContractsForSkill(index, view === "aura-skills" ? "skill" : "agent");
+  const activeRegistryRows = registryRows.filter((row) => row.status === "active").length;
+
+  return (
+    <section className="skill-contract-panel">
+      <div>
+        <span className="library-eyebrow">Supabase Contract Index</span>
+        <h2>Skills data spine</h2>
+        <p>
+          Joins this page to <code>ops_skills_registry</code>, <code>skill_runs</code>,
+          skill output records, smoke skill views, and agent/profile trace tables.
+        </p>
+      </div>
+      <div className="skill-contract-metrics">
+        <span><b>{registryRows.length || "-"}</b> registry rows</span>
+        <span><b>{activeRegistryRows || "-"}</b> active</span>
+        <span><b>{contracts.length || "-"}</b> related contracts</span>
+      </div>
+      <ContractObjectStrip contracts={contracts} />
+    </section>
+  );
+}
+
+function ContractObjectStrip({
+  contracts,
+}: {
+  contracts: readonly SupabaseContractRow[];
+}) {
+  if (!contracts.length) return null;
+
+  return (
+    <div className="contract-object-strip">
+      {contracts.slice(0, 6).map((contract) => (
+        <article key={contract.object_name ?? `${contract.domain}:${contract.owner_agent}`}>
+          <div className="library-card-topline">
+            <span>{contract.domain ?? "domain tbd"}</span>
+            <span>{contract.access_model ?? "access tbd"}</span>
+          </div>
+          <strong>{contract.object_name ?? "unnamed object"}</strong>
+          <p>{contract.notes || contract.read_path || contract.write_path || "No contract notes yet."}</p>
+        </article>
+      ))}
+    </div>
+  );
+}
+
+function libraryTeamArtUrl(team: LibraryTeam): string {
+  return skillGroupArtUrl(TEAM_ART_GROUPS[team.id] ?? team.artSeed);
+}
+
+function promptCardArtUrl(agent: LibraryAgent): string {
+  return (
+    mtgArtUrl(agent.mtg) ||
+    skillGroupArtUrl(TEAM_ART_GROUPS[agent.team] ?? agent.teamDisplayName)
+  );
+}
 
 function AiLibraryTeamsView({
   agents,
+  contractsIndex,
   teams,
 }: {
   agents: readonly LibraryAgent[];
+  contractsIndex: SupabaseContractsIndex | null;
   teams: readonly LibraryTeam[];
 }) {
   const agentsByTeam = useMemo(() => {
@@ -654,13 +855,26 @@ function AiLibraryTeamsView({
           <span>agents</span>
         </div>
       </div>
+      <ContractObjectStrip
+        contracts={contractsForObjects(contractsIndex, [
+          "agent_runs",
+          "kanban_tasks",
+          "prd_kanban_dispatch_links",
+          "langfuse_traces",
+          "skill_runs",
+        ])}
+      />
 
       <div className="library-team-grid">
         {teams.map((team) => {
           const teamAgents = agentsByTeam.get(team.id) ?? [];
           return (
             <article className="library-team-card" key={team.id}>
-              <LibraryArt label={team.displayName} seed={team.artSeed} />
+              <LibraryArt
+                imageUrl={libraryTeamArtUrl(team)}
+                label={team.displayName}
+                seed={team.artSeed}
+              />
               <div className="library-team-card-body">
                 <div className="library-card-topline">
                   <span>{team.kind}</span>
@@ -687,7 +901,13 @@ function AiLibraryTeamsView({
   );
 }
 
-function PromptCardsView({ agents }: { agents: readonly LibraryAgent[] }) {
+function PromptCardsView({
+  agents,
+  contractsIndex,
+}: {
+  agents: readonly LibraryAgent[];
+  contractsIndex: SupabaseContractsIndex | null;
+}) {
   return (
     <section className="library-page">
       <div className="library-toolbar">
@@ -699,11 +919,19 @@ function PromptCardsView({ agents }: { agents: readonly LibraryAgent[] }) {
           {agents.length} rendered
         </Badge>
       </div>
+      <ContractObjectStrip
+        contracts={contractsForObjects(contractsIndex, [
+          "agent_runs",
+          "prompt_profile_applies",
+          "langfuse_traces",
+          "skill_runs",
+        ])}
+      />
       <div className="library-prompt-grid">
         {agents.map((agent) => (
           <article className="library-prompt-card" key={agent.id}>
             <LibraryArt
-              imageUrl={mtgArtUrl(agent.mtg)}
+              imageUrl={promptCardArtUrl(agent)}
               label={agent.displayName}
               seed={agent.artSeed}
             />
@@ -727,6 +955,143 @@ function PromptCardsView({ agents }: { agents: readonly LibraryAgent[] }) {
           </article>
         ))}
       </div>
+    </section>
+  );
+}
+
+function AuraSkillsView({
+  contractsIndex,
+  skills,
+}: {
+  contractsIndex: SupabaseContractsIndex | null;
+  skills: readonly AuraSkill[];
+}) {
+  const [category, setCategory] = useState<string | null>(null);
+  const categories = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const skill of auraSkills.skills) {
+      counts.set(skill.category, (counts.get(skill.category) ?? 0) + 1);
+    }
+    return [...counts.entries()]
+      .sort((a, b) => a[0].localeCompare(b[0]))
+      .map(([key, count]) => ({ key, count }));
+  }, []);
+  const visibleSkills = useMemo(() => {
+    if (!category) return skills;
+    return skills.filter((skill) => skill.category === category);
+  }, [category, skills]);
+
+  return (
+    <section className="library-page aura-skills-page">
+      <div className="library-hero aura-skills-hero">
+        <div>
+          <span className="library-eyebrow">Aura Skill UI Design System</span>
+          <h2>Popular Aura Skills</h2>
+          <p>
+            Public Aura.build skill records indexed from the live skills feed
+            for TAC Designer, Hermes Skills, and UI-agents design references.
+          </p>
+        </div>
+        <div className="library-hero-stats aura-skills-stats">
+          <strong>{auraSkills.summary.total}</strong>
+          <span>skills</span>
+          <strong>{formatCompact(auraSkills.summary.totalViews)}</strong>
+          <span>views</span>
+          <strong>{formatCompact(auraSkills.summary.totalUses)}</strong>
+          <span>uses</span>
+        </div>
+      </div>
+      <ContractObjectStrip
+        contracts={contractsForObjects(contractsIndex, [
+          "ops_skills_registry",
+          "skill_runs",
+          "obs_smoke_skill_runs",
+          "obs_smoke_skill_metrics_daily",
+        ])}
+      />
+
+      <div className="aura-skills-filter-row" aria-label="Aura skill filters">
+        <button
+          className={cn("aura-filter-pill", !category && "is-active")}
+          onClick={() => setCategory(null)}
+          type="button"
+        >
+          All
+        </button>
+        {categories.map((item) => (
+          <button
+            className={cn(
+              "aura-filter-pill",
+              category === item.key && "is-active",
+            )}
+            key={item.key}
+            onClick={() => setCategory(category === item.key ? null : item.key)}
+            type="button"
+          >
+            {prettyCategory(item.key, "UI")} <span>{item.count}</span>
+          </button>
+        ))}
+      </div>
+
+      {visibleSkills.length === 0 ? (
+        <Card className="rounded-none">
+          <CardContent className="py-8 text-center text-sm text-muted-foreground">
+            No Aura skills match the current filter.
+          </CardContent>
+        </Card>
+      ) : (
+        <div className="aura-skills-grid">
+          {visibleSkills.map((skill) => (
+            <article className="aura-skill-card" key={skill.id}>
+              <img
+                alt={`${skill.title} ${prettyCategory(skill.category, "UI")} MTG group art`}
+                className="aura-skill-art"
+                loading="lazy"
+                src={skillGroupArtUrl(skill.category)}
+              />
+              <div className="library-card-topline">
+                <span>{prettyCategory(skill.category, "UI")}</span>
+                <span>{skill.authorName}</span>
+              </div>
+              <h3>{skill.title}</h3>
+              <p>{skill.description}</p>
+
+              <div className="aura-skill-metrics">
+                <span>
+                  <strong>{formatCompact(skill.views)}</strong>
+                  views
+                </span>
+                <span>
+                  <strong>{formatCompact(skill.uses)}</strong>
+                  uses
+                </span>
+              </div>
+
+              <div className="library-tag-row">
+                {skill.repoOwner && skill.repoName ? (
+                  <span>
+                    {skill.repoOwner}/{skill.repoName}
+                  </span>
+                ) : (
+                  <span>Aura source</span>
+                )}
+                {skill.featured && <span>Featured</span>}
+              </div>
+
+              <p className="aura-skill-preview">{skill.contentPreview}</p>
+
+              <a
+                className="aura-skill-link"
+                href={skill.sourceUrl || "https://www.aura.build/skills"}
+                rel="noreferrer"
+                target="_blank"
+              >
+                Open source
+              </a>
+            </article>
+          ))}
+        </div>
+      )}
     </section>
   );
 }
@@ -781,4 +1146,11 @@ function mtgArtUrl(value: unknown) {
 function mtgCardName(value: unknown) {
   if (!value || typeof value !== "object") return "";
   return (value as { card?: string }).card || "";
+}
+
+function formatCompact(value: number) {
+  return new Intl.NumberFormat("en", {
+    maximumFractionDigits: 1,
+    notation: "compact",
+  }).format(value);
 }

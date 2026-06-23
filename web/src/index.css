@@ -1977,6 +1977,63 @@ code { font-size: 0.875rem; }
   grid-template-columns: 1fr;
 }
 
+.supabase-contract-summary {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(24rem, .8fr);
+  gap: .85rem;
+  align-items: stretch;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: linear-gradient(135deg, rgba(255, 255, 255, .7), rgba(241, 238, 228, .58));
+  padding: 1rem;
+}
+
+.supabase-contract-summary h3 {
+  margin: .15rem 0 .35rem;
+  color: #191919;
+  font-family: var(--theme-font-display);
+  font-size: 1.45rem;
+  font-weight: 550;
+}
+
+.supabase-contract-summary p {
+  max-width: 58rem;
+  margin: 0;
+  color: var(--color-muted-foreground);
+  font-size: .8rem;
+  line-height: 1.5;
+}
+
+.supabase-contract-summary code {
+  color: #191919;
+  font-size: .75rem;
+}
+
+.supabase-contract-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: .5rem;
+}
+
+.supabase-contract-summary-grid span,
+.supabase-contract-grid span {
+  min-width: 0;
+  border: 1px solid rgba(214, 212, 200, .72);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, .46);
+  color: var(--color-muted-foreground);
+  padding: .55rem .65rem;
+  font-size: .72rem;
+  line-height: 1.25;
+}
+
+.supabase-contract-summary-grid b,
+.supabase-contract-grid b {
+  display: block;
+  color: #191919;
+  font-size: .84rem;
+}
+
 .supabase-table-card {
   display: grid;
   min-width: 0;
@@ -2028,6 +2085,80 @@ code { font-size: 0.875rem; }
   display: block;
   color: #191919;
   font-size: .8rem;
+}
+
+.supabase-contract-card {
+  display: grid;
+  gap: .65rem;
+  border: 1px solid rgba(214, 212, 200, .72);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, .34);
+  padding: .85rem;
+}
+
+.supabase-contract-card.is-empty {
+  border-style: dashed;
+}
+
+.supabase-contract-card.is-empty strong {
+  color: #191919;
+  font-size: .86rem;
+}
+
+.supabase-contract-card.is-empty span,
+.supabase-contract-topline {
+  color: #8c8a84;
+  font-size: .62rem;
+  font-weight: 850;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+
+.supabase-contract-topline {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: .5rem;
+}
+
+.supabase-contract-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: .5rem;
+}
+
+.supabase-contract-paths {
+  display: grid;
+  gap: .45rem;
+  margin: 0;
+}
+
+.supabase-contract-paths div {
+  display: grid;
+  gap: .15rem;
+}
+
+.supabase-contract-paths dt {
+  color: #8c8a84;
+  font-size: .6rem;
+  font-weight: 850;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+
+.supabase-contract-paths dd {
+  margin: 0;
+  color: #191919;
+  font-size: .74rem;
+  line-height: 1.4;
+}
+
+.supabase-contract-card p,
+.supabase-contract-note {
+  margin: 0;
+  color: var(--color-muted-foreground);
+  font-size: .72rem;
+  line-height: 1.45;
 }
 
 .supabase-chip {
@@ -2187,6 +2318,12 @@ code { font-size: 0.875rem; }
   .supabase-card-metrics {
     grid-template-columns: 1fr;
   }
+
+  .supabase-contract-summary,
+  .supabase-contract-summary-grid,
+  .supabase-contract-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 /* ------------------------------------------------------------------ */
@@ -2197,11 +2334,130 @@ code { font-size: 0.875rem; }
   color: #191919;
 }
 
+.skill-contract-panel,
+.profile-contract-panel {
+  display: grid;
+  gap: .85rem;
+  margin-bottom: 1rem;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, .72), rgba(230, 228, 217, .58)),
+    linear-gradient(45deg, rgba(25, 25, 25, .025) 25%, transparent 25%, transparent 75%, rgba(25, 25, 25, .025) 75%);
+  background-size: auto, 18px 18px;
+  padding: 1rem;
+  box-shadow: 0 24px 80px -64px rgba(25, 25, 25, .52);
+}
+
+.skill-contract-panel h2,
+.profile-contract-panel h3 {
+  margin: .15rem 0 .35rem;
+  color: #191919;
+  font-family: var(--theme-font-display);
+  font-size: 1.35rem;
+  font-weight: 550;
+  line-height: 1.1;
+}
+
+.skill-contract-panel p,
+.profile-contract-panel p {
+  max-width: 58rem;
+  margin: 0;
+  color: var(--color-muted-foreground);
+  font-size: .78rem;
+  line-height: 1.5;
+}
+
+.skill-contract-panel code {
+  color: #191919;
+  font-size: .74rem;
+}
+
+.skill-contract-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: .55rem;
+}
+
+.skill-contract-metrics span {
+  border: 1px solid rgba(214, 212, 200, .72);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, .42);
+  color: var(--color-muted-foreground);
+  padding: .55rem .65rem;
+  font-size: .72rem;
+}
+
+.skill-contract-metrics b {
+  display: block;
+  color: #191919;
+  font-size: .86rem;
+}
+
+.contract-object-strip,
+.profile-contract-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: .65rem;
+}
+
+.contract-object-strip article,
+.profile-contract-grid section {
+  display: grid;
+  gap: .35rem;
+  min-width: 0;
+  border: 1px solid rgba(214, 212, 200, .72);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, .42);
+  padding: .75rem;
+}
+
+.contract-object-strip strong,
+.profile-contract-grid strong {
+  color: #191919;
+  font-size: .82rem;
+  line-height: 1.2;
+  overflow-wrap: anywhere;
+}
+
+.contract-object-strip p,
+.profile-contract-grid p {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  font-size: .72rem;
+}
+
+.skill-contract-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .35rem;
+  margin-top: .45rem;
+}
+
+.skill-contract-row span {
+  max-width: 18rem;
+  min-height: 1.35rem;
+  overflow: hidden;
+  border: 1px solid rgba(214, 212, 200, .72);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, .5);
+  color: #5c5c5c;
+  padding: .15rem .45rem;
+  font-size: .62rem;
+  font-weight: 750;
+  line-height: 1.1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .library-hero,
 .library-toolbar,
 .library-view-switcher,
 .library-team-card,
 .library-prompt-card,
+.aura-skill-card,
 .profile-index-card,
 .tac-variant-card {
   border: 1px solid #d6d4c8;
@@ -2313,6 +2569,7 @@ code { font-size: 0.875rem; }
 
 .library-team-card:hover,
 .library-prompt-card:hover,
+.aura-skill-card:hover,
 .profile-index-card:hover,
 .tac-variant-card:hover {
   border-color: rgba(217, 119, 87, 0.58);
@@ -2332,6 +2589,15 @@ code { font-size: 0.875rem; }
   min-width: 7.5rem;
   height: 7.5rem;
   min-height: 7.5rem;
+}
+
+.skill-row-art {
+  width: 3.25rem;
+  min-width: 3.25rem;
+  height: 3.25rem;
+  border: 1px solid rgba(217, 119, 87, 0.22);
+  background: #e6e4d9;
+  object-fit: cover;
 }
 
 .library-art-fallback {
@@ -2425,9 +2691,145 @@ code { font-size: 0.875rem; }
 }
 
 .library-prompt-card,
+.aura-skill-card,
 .profile-index-card {
   overflow: hidden;
   transition: border-color 180ms ease, transform 180ms ease;
+}
+
+.aura-skills-hero {
+  align-items: stretch;
+}
+
+.aura-skills-stats {
+  grid-template-columns: repeat(3, minmax(3.5rem, auto));
+  align-content: end;
+}
+
+.aura-skills-filter-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-bottom: 0.9rem;
+}
+
+.aura-filter-pill {
+  border: 1px solid rgba(25, 25, 25, 0.12);
+  background: rgba(255, 255, 255, 0.42);
+  padding: 0.42rem 0.62rem;
+  color: rgba(25, 25, 25, 0.68);
+  font-family: var(--theme-font-mono);
+  font-size: 0.68rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  transition: border-color 160ms ease, background 160ms ease, color 160ms ease;
+}
+
+.aura-filter-pill:hover,
+.aura-filter-pill.is-active {
+  border-color: rgba(217, 119, 87, 0.5);
+  background: rgba(217, 119, 87, 0.14);
+  color: #191919;
+}
+
+.aura-filter-pill span {
+  margin-left: 0.35rem;
+  color: rgba(25, 25, 25, 0.48);
+}
+
+.aura-skills-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.85rem;
+}
+
+.aura-skill-card {
+  display: flex;
+  min-height: 24rem;
+  flex-direction: column;
+  padding: 0.95rem;
+}
+
+.aura-skill-art {
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  margin-bottom: 0.8rem;
+  border: 1px solid rgba(217, 119, 87, 0.24);
+  background: #e6e4d9;
+  object-fit: cover;
+}
+
+.aura-skill-card h3 {
+  margin: 0;
+  color: #191919;
+  font-family: "Newsreader", Georgia, serif;
+  font-size: 1.2rem;
+  line-height: 1.02;
+  letter-spacing: 0;
+}
+
+.aura-skill-card p {
+  margin: 0.55rem 0 0;
+  color: rgba(25, 25, 25, 0.66);
+  font-size: 0.82rem;
+  line-height: 1.45;
+}
+
+.aura-skill-metrics {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.45rem;
+  margin-top: 0.8rem;
+}
+
+.aura-skill-metrics span {
+  border: 1px solid rgba(217, 119, 87, 0.22);
+  background: rgba(255, 255, 255, 0.38);
+  padding: 0.48rem 0.55rem;
+  color: rgba(25, 25, 25, 0.58);
+  font-family: var(--theme-font-mono);
+  font-size: 0.62rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.aura-skill-metrics strong {
+  display: block;
+  color: #d97757;
+  font-family: "Newsreader", Georgia, serif;
+  font-size: 1.45rem;
+  line-height: 1;
+  letter-spacing: 0;
+}
+
+.aura-skill-preview {
+  display: -webkit-box;
+  flex: 1;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 5;
+}
+
+.aura-skill-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-top: 0.9rem;
+  border: 1px solid rgba(25, 25, 25, 0.18);
+  background: #191919;
+  padding: 0.52rem 0.7rem;
+  color: #f3f1e7;
+  font-family: var(--theme-font-mono);
+  font-size: 0.68rem;
+  letter-spacing: 0.08em;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.aura-skill-link:hover {
+  background: #9f4f38;
+  color: #fffaf0;
 }
 
 .library-prompt-card .library-art {
@@ -2563,6 +2965,14 @@ code { font-size: 0.875rem; }
   display: flex;
   gap: 0.85rem;
   align-items: stretch;
+  color: inherit;
+  text-decoration: none;
+}
+
+.profile-feature-card,
+.tac-variant-card {
+  color: inherit;
+  text-decoration: none;
 }
 
 .tac-lead-hero {
@@ -2588,10 +2998,177 @@ code { font-size: 0.875rem; }
   line-height: 1.5;
 }
 
+.profile-detail-page {
+  display: grid;
+  gap: 1rem;
+}
+
+.profile-detail-topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.profile-detail-back,
+.profile-report-actions a {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  min-height: 2rem;
+  border: 1px solid rgba(25, 25, 25, 0.16);
+  background: rgba(255, 255, 255, 0.44);
+  padding: 0.45rem 0.65rem;
+  color: #191919;
+  font-family: var(--theme-font-mono);
+  font-size: 0.68rem;
+  letter-spacing: 0.08em;
+  line-height: 1;
+  text-decoration: none;
+  text-transform: uppercase;
+}
+
+.profile-detail-back:hover,
+.profile-report-actions a:hover {
+  border-color: rgba(217, 119, 87, 0.5);
+  background: rgba(217, 119, 87, 0.12);
+}
+
+.profile-detail-hero {
+  align-items: stretch;
+}
+
+.profile-detail-copy {
+  min-width: 0;
+}
+
+.profile-detail-hero .library-art {
+  flex: 0 0 10rem;
+  min-height: 10rem;
+}
+
+.profile-detail-grid {
+  display: grid;
+  grid-template-columns: 1.3fr 0.9fr 1fr;
+  gap: 0.85rem;
+}
+
+.profile-detail-panel,
+.profile-report-viewer {
+  border: 1px solid #d6d4c8;
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.62), rgba(230, 228, 217, 0.54)),
+    #f3f1e7;
+  box-shadow: 0 18px 45px rgba(76, 55, 41, 0.08);
+}
+
+.profile-detail-panel {
+  min-width: 0;
+  padding: 1rem;
+}
+
+.profile-detail-panel p {
+  margin: 0.6rem 0 0;
+  color: rgba(25, 25, 25, 0.66);
+  font-size: 0.86rem;
+  line-height: 1.48;
+}
+
+.profile-detail-list {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.profile-detail-list strong {
+  display: block;
+  color: #191919;
+  font-family: "Newsreader", Georgia, serif;
+  font-size: 1.05rem;
+  font-weight: 500;
+  line-height: 1.05;
+}
+
+.profile-detail-source-list {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.profile-detail-source-list code {
+  display: block;
+  overflow-wrap: anywhere;
+  border: 1px solid rgba(25, 25, 25, 0.1);
+  background: rgba(255, 255, 255, 0.42);
+  padding: 0.38rem 0.45rem;
+  color: rgba(25, 25, 25, 0.7);
+  font-size: 0.68rem;
+  line-height: 1.35;
+}
+
+.profile-report-viewer {
+  display: grid;
+  gap: 0.85rem;
+  overflow: hidden;
+  padding: 1rem;
+}
+
+.profile-report-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.profile-report-header h3 {
+  margin: 0.25rem 0 0;
+  color: #191919;
+  font-family: "Newsreader", Georgia, serif;
+  font-size: clamp(1.55rem, 3vw, 2.4rem);
+  font-weight: 500;
+  line-height: 1;
+  letter-spacing: 0;
+}
+
+.profile-report-header p {
+  max-width: 48rem;
+  margin: 0.55rem 0 0;
+  color: rgba(25, 25, 25, 0.66);
+  font-size: 0.9rem;
+  line-height: 1.48;
+}
+
+.profile-report-actions {
+  display: flex;
+  flex-shrink: 0;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.45rem;
+}
+
+.profile-report-frame-wrap {
+  min-height: 72dvh;
+  overflow: hidden;
+  border: 1px solid rgba(214, 212, 200, 0.82);
+  background: #f3f1e7;
+}
+
+.profile-report-frame {
+  display: block;
+  width: 100%;
+  height: 72dvh;
+  border: 0;
+  background: #f3f1e7;
+}
+
 @media (max-width: 1100px) {
+  .aura-skills-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
   .library-team-grid,
   .library-prompt-grid,
   .profile-index-grid,
+  .profile-detail-grid,
   .tac-variant-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -2599,16 +3176,30 @@ code { font-size: 0.875rem; }
 
 @media (max-width: 820px) {
   .library-hero,
-  .library-toolbar {
+  .library-toolbar,
+  .profile-detail-topbar,
+  .profile-report-header {
     align-items: flex-start;
     flex-direction: column;
   }
 
   .library-team-grid,
   .library-prompt-grid,
+  .aura-skills-grid,
   .profile-index-grid,
+  .profile-detail-grid,
   .tac-variant-grid {
     grid-template-columns: 1fr;
+  }
+
+  .profile-report-actions {
+    justify-content: flex-start;
+  }
+
+  .aura-skills-stats {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    text-align: left;
+    width: 100%;
   }
 
   .library-team-card {

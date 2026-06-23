@@ -1,0 +1,1504 @@
+{
+    "generated_at":  "2026-06-23T19:37:06.1208504Z",
+    "source":  "gbauto-supabase cli sanitized readback",
+    "project":  "gbauto",
+    "contracts":  {
+                      "value":  [
+                                    {
+                                        "object_name":  "obs_smoke_skill_runs",
+                                        "object_type":  "view",
+                                        "domain":  "skill-observability",
+                                        "owner_agent":  "dbforge",
+                                        "lifecycle":  "active",
+                                        "write_path":  "Derived from skill_runs (smoke tenant via invoked_by/skill_name)",
+                                        "read_path":  "gb-automation-landing /clients/smoke-client portal (Capability Library)",
+                                        "retention_policy":  "Derived view.",
+                                        "access_model":  "anon_read",
+                                        "notes":  "Anon, smoke-client-scoped projection of skill_runs (display columns only).",
+                                        "created_at":  "2026-06-19T07:44:57.401319+00:00",
+                                        "updated_at":  "2026-06-19T12:50:23.671582+00:00",
+                                        "schema_version":  1
+                                    },
+                                    {
+                                        "object_name":  "obs_smoke_dossiers",
+                                        "object_type":  "view",
+                                        "domain":  "lineage-observability",
+                                        "owner_agent":  "dbforge",
+                                        "lifecycle":  "active",
+                                        "write_path":  "Derived rollup over prd_artifacts/langfuse_traces/agent_runs (smoke tenant)",
+                                        "read_path":  "gb-automation-landing /clients/smoke-client portal (lineage dossier panel)",
+                                        "retention_policy":  "Derived view.",
+                                        "access_model":  "anon_read",
+                                        "notes":  "Anon per-PRD plan-execution dossier rollup (cost + stage span + card/trace counts).",
+                                        "created_at":  "2026-06-19T07:44:57.401319+00:00",
+                                        "updated_at":  "2026-06-19T12:50:23.671582+00:00",
+                                        "schema_version":  1
+                                    },
+                                    {
+                                        "object_name":  "obs_smoke_lineage",
+                                        "object_type":  "view",
+                                        "domain":  "lineage-observability",
+                                        "owner_agent":  "dbforge",
+                                        "lifecycle":  "active",
+                                        "write_path":  "Derived join over prd_artifacts/prd_kanban_dispatch_links/agent_runs/tac_build_runs/langfuse_traces/host_job_runs (smoke tenant)",
+                                        "read_path":  "gb-automation-landing /clients/smoke-client portal (lineage page)",
+                                        "retention_policy":  "Derived view.",
+                                        "access_model":  "anon_read",
+                                        "notes":  "Anon golden-thread lineage: per smoke prd_id stage presence flags + timestamps across the full funnel.",
+                                        "created_at":  "2026-06-19T07:44:57.401319+00:00",
+                                        "updated_at":  "2026-06-19T12:50:23.671582+00:00",
+                                        "schema_version":  1
+                                    },
+                                    {
+                                        "object_name":  "obs_smoke_browser_runs",
+                                        "object_type":  "view",
+                                        "domain":  "browser-automation",
+                                        "owner_agent":  "dbforge",
+                                        "lifecycle":  "active",
+                                        "write_path":  "Derived from browser_control_runs (smoke tenant via output_data tenant)",
+                                        "read_path":  "gb-automation-landing /clients/smoke-client portal (browser visual-evidence strip)",
+                                        "retention_policy":  "Derived view.",
+                                        "access_model":  "anon_read",
+                                        "notes":  "Anon, smoke-client-scoped projection of browser_control_runs (run/status/target/screenshot/trace).",
+                                        "created_at":  "2026-06-19T07:44:57.401319+00:00",
+                                        "updated_at":  "2026-06-19T12:50:23.671582+00:00",
+                                        "schema_version":  1
+                                    },
+                                    {
+                                        "object_name":  "obs_smoke_trace_cost_daily",
+                                        "object_type":  "view",
+                                        "domain":  "observability",
+                                        "owner_agent":  "dbforge",
+                                        "lifecycle":  "active",
+                                        "write_path":  "Derived daily aggregate from langfuse_traces (smoke tenant)",
+                                        "read_path":  "gb-automation-landing /clients/smoke-client portal (cost/token/latency cards)",
+                                        "retention_policy":  "Derived view.",
+                                        "access_model":  "anon_read",
+                                        "notes":  "Anon, smoke-client-scoped daily cost/token/latency aggregate over langfuse_traces.",
+                                        "created_at":  "2026-06-19T07:44:57.401319+00:00",
+                                        "updated_at":  "2026-06-19T12:50:23.671582+00:00",
+                                        "schema_version":  1
+                                    },
+                                    {
+                                        "object_name":  "obs_smoke_build_runs",
+                                        "object_type":  "view",
+                                        "domain":  "tac-observability",
+                                        "owner_agent":  "dbforge",
+                                        "lifecycle":  "active",
+                                        "write_path":  "Derived from tac_build_runs (smoke tenant via PRD correlation/run id)",
+                                        "read_path":  "gb-automation-landing /clients/smoke-client portal (verify receipt-chain panel)",
+                                        "retention_policy":  "Derived view.",
+                                        "access_model":  "anon_read",
+                                        "notes":  "Anon, smoke-client-scoped projection of tac_build_runs (receipt-chain identifiers + status/cost).",
+                                        "created_at":  "2026-06-19T07:44:57.401319+00:00",
+                                        "updated_at":  "2026-06-19T12:50:23.671582+00:00",
+                                        "schema_version":  1
+                                    },
+                                    {
+                                        "object_name":  "obs_smoke_self_improve",
+                                        "object_type":  "view",
+                                        "domain":  "agent-observability",
+                                        "owner_agent":  "dbforge",
+                                        "lifecycle":  "active",
+                                        "write_path":  "Derived from kanban_tasks (smoke tenant, kind=self-improve)",
+                                        "read_path":  "gb-automation-landing /clients/smoke-client portal (/board proposed lane)",
+                                        "retention_policy":  "Derived view.",
+                                        "access_model":  "anon_read",
+                                        "notes":  "Anon, smoke-client-scoped projection of proposed self-improve drift cards from kanban_tasks.",
+                                        "created_at":  "2026-06-19T07:44:57.401319+00:00",
+                                        "updated_at":  "2026-06-19T12:50:23.671582+00:00",
+                                        "schema_version":  1
+                                    },
+                                    {
+                                        "object_name":  "obs_smoke_dispatch_links",
+                                        "object_type":  "view",
+                                        "domain":  "prd-kanban-traceability",
+                                        "owner_agent":  "dbforge",
+                                        "lifecycle":  "active",
+                                        "write_path":  "Derived from prd_kanban_dispatch_links (smoke tenant via evidence/profile/PRD)",
+                                        "read_path":  "gb-automation-landing /clients/smoke-client portal (/prds + /board)",
+                                        "retention_policy":  "Derived view.",
+                                        "access_model":  "anon_read",
+                                        "notes":  "Anon, smoke-client-scoped projection of prd_kanban_dispatch_links (identifiers + relationship/status).",
+                                        "created_at":  "2026-06-19T07:44:57.401319+00:00",
+                                        "updated_at":  "2026-06-19T12:50:23.671582+00:00",
+                                        "schema_version":  1
+                                    },
+                                    {
+                                        "object_name":  "obs_smoke_render_gates",
+                                        "object_type":  "view",
+                                        "domain":  "render-observability",
+                                        "owner_agent":  "dbforge",
+                                        "lifecycle":  "active",
+                                        "write_path":  "Derived from host_job_runs render-gate receipts (smoke tenant)",
+                                        "read_path":  "gb-automation-landing /clients/smoke-client portal (Overview + gate panels)",
+                                        "retention_policy":  "Derived view.",
+                                        "access_model":  "anon_read",
+                                        "notes":  "Anon projection of render-gate host_job_runs receipts so gate results render on the portal.",
+                                        "created_at":  "2026-06-19T07:44:57.401319+00:00",
+                                        "updated_at":  "2026-06-19T12:50:23.671582+00:00",
+                                        "schema_version":  1
+                                    },
+                                    {
+                                        "object_name":  "obs_smoke_host_jobs",
+                                        "object_type":  "view",
+                                        "domain":  "host-observability",
+                                        "owner_agent":  "dbforge",
+                                        "lifecycle":  "active",
+                                        "write_path":  "Derived from host_job_runs (smoke tenant via task_name/jsonb tenant)",
+                                        "read_path":  "gb-automation-landing /clients/smoke-client portal (/runs host-receipt drawer)",
+                                        "retention_policy":  "Derived view.",
+                                        "access_model":  "anon_read",
+                                        "notes":  "Anon, smoke-client-scoped projection of host_job_runs (host-job-run.v1 receipt leg).",
+                                        "created_at":  "2026-06-19T07:44:57.401319+00:00",
+                                        "updated_at":  "2026-06-19T12:50:23.671582+00:00",
+                                        "schema_version":  1
+                                    },
+                                    {
+                                        "object_name":  "obs_smoke_skill_metrics_daily",
+                                        "object_type":  "view",
+                                        "domain":  "skill-observability",
+                                        "owner_agent":  "dbforge",
+                                        "lifecycle":  "active",
+                                        "write_path":  "Derived daily aggregate from skill_runs (smoke tenant)",
+                                        "read_path":  "gb-automation-landing /clients/smoke-client portal (skill sparkline/latency)",
+                                        "retention_policy":  "Derived view.",
+                                        "access_model":  "anon_read",
+                                        "notes":  "Anon, smoke-client-scoped daily skill metrics (run/ok/error + p50/p95).",
+                                        "created_at":  "2026-06-19T07:44:57.401319+00:00",
+                                        "updated_at":  "2026-06-19T12:50:23.671582+00:00",
+                                        "schema_version":  1
+                                    },
+                                    {
+                                        "object_name":  "kanban_tasks",
+                                        "object_type":  "table",
+                                        "domain":  "kanban-board",
+                                        "owner_agent":  "sprint-manager",
+                                        "lifecycle":  "active",
+                                        "write_path":  "Kanban board mirror / sprint-manager / smoke producers",
+                                        "read_path":  "obs_smoke_self_improve and board dashboards",
+                                        "retention_policy":  "Board task metadata; one row per task_id.",
+                                        "access_model":  "service_role_only",
+                                        "notes":  "Kanban task cards; obs_smoke_self_improve exposes the smoke-client self-improve proposed lane.",
+                                        "created_at":  "2026-06-19T12:49:58.075953+00:00",
+                                        "updated_at":  "2026-06-19T12:49:58.075953+00:00",
+                                        "schema_version":  1
+                                    },
+                                    {
+                                        "object_name":  "prd_kanban_dispatch_links",
+                                        "object_type":  "table",
+                                        "domain":  "prd-kanban-traceability",
+                                        "owner_agent":  "sprint-manager",
+                                        "lifecycle":  "active",
+                                        "write_path":  "Sprint Manager, PRD indexer, board dispatcher, smoke producers, or manual dispatch receipts",
+                                        "read_path":  "obs_smoke_dispatch_links, obs_smoke_lineage, prd_kanban_team_flow, dashboards",
+                                        "retention_policy":  "Indefinite traceability metadata; evidence must be sanitized.",
+                                        "access_model":  "service_role_only",
+                                        "notes":  "The explicit PRD -\u003e Kanban task/run bridge; smoke views filter evidence-\u003e\u003etenant = smoke-client.",
+                                        "created_at":  "2026-06-19T12:49:58.075953+00:00",
+                                        "updated_at":  "2026-06-19T12:49:58.075953+00:00",
+                                        "schema_version":  1
+                                    },
+                                    {
+                                        "object_name":  "obs_smoke_sprint_links",
+                                        "object_type":  "view",
+                                        "domain":  "lineage-observability",
+                                        "owner_agent":  "dbforge",
+                                        "lifecycle":  "active",
+                                        "write_path":  "Derived from sprint_rock_prd_links joined to prd_artifacts (smoke tenant via linked PRD)",
+                                        "read_path":  "gb-automation-landing /clients/smoke-client portal (lineage sprint panels)",
+                                        "retention_policy":  "Derived view.",
+                                        "access_model":  "anon_read",
+                                        "notes":  "Anon, smoke-client-scoped projection of sprint_rock_prd_links (sprint_id/relationship/status + promotion/carryover evidence) for the golden-thread sprint threads.",
+                                        "created_at":  "2026-06-19T06:37:13.543241+00:00",
+                                        "updated_at":  "2026-06-19T06:37:13.543241+00:00",
+                                        "schema_version":  1
+                                    },
+                                    {
+                                        "object_name":  "obs_smoke_taxonomy",
+                                        "object_type":  "view",
+                                        "domain":  "lineage-observability",
+                                        "owner_agent":  "dbforge",
+                                        "lifecycle":  "active",
+                                        "write_path":  "Derived from prd_artifacts.frontmatter (smoke tenant via client/tags)",
+                                        "read_path":  "gb-automation-landing /clients/smoke-client portal (lineage taxonomy pills)",
+                                        "retention_policy":  "Derived view.",
+                                        "access_model":  "anon_read",
+                                        "notes":  "Anon, smoke-client-scoped per-PRD taxonomy pills (domain/service/client_tier) + retag provenance for the golden-thread taxonomy/tag-correction threads.",
+                                        "created_at":  "2026-06-19T06:37:13.543241+00:00",
+                                        "updated_at":  "2026-06-19T06:37:13.543241+00:00",
+                                        "schema_version":  1
+                                    },
+                                    {
+                                        "object_name":  "obs_smoke_runs",
+                                        "object_type":  "view",
+                                        "domain":  "cron-observability",
+                                        "owner_agent":  "dbforge",
+                                        "lifecycle":  "active",
+                                        "write_path":  "Derived from cron_runs (smoke tenant)",
+                                        "read_path":  "gb-automation-landing /clients/smoke-client portal",
+                                        "retention_policy":  "Derived view.",
+                                        "access_model":  "anon_read",
+                                        "notes":  "Anon, smoke-client-scoped projection of cron_runs.",
+                                        "created_at":  "2026-06-19T04:04:10.074360+00:00",
+                                        "updated_at":  "2026-06-19T04:04:10.074360+00:00",
+                                        "schema_version":  1
+                                    },
+                                    {
+                                        "object_name":  "obs_smoke_prds",
+                                        "object_type":  "view",
+                                        "domain":  "reporting",
+                                        "owner_agent":  "sprint-manager",
+                                        "lifecycle":  "active",
+                                        "write_path":  "Derived from prd_artifacts (smoke tenant)",
+                                        "read_path":  "gb-automation-landing /clients/smoke-client portal",
+                                        "retention_policy":  "Derived view.",
+                                        "access_model":  "anon_read",
+                                        "notes":  "Anon, smoke-client-scoped projection of prd_artifacts (display columns only).",
+                                        "created_at":  "2026-06-19T04:04:10.074360+00:00",
+                                        "updated_at":  "2026-06-19T04:04:10.074360+00:00",
+                                        "schema_version":  1
+                                    },
+                                    {
+                                        "object_name":  "obs_smoke_traces",
+                                        "object_type":  "view",
+                                        "domain":  "observability",
+                                        "owner_agent":  "dbforge",
+                                        "lifecycle":  "active",
+                                        "write_path":  "Derived from langfuse_traces (smoke tenant; raw_summary excluded)",
+                                        "read_path":  "gb-automation-landing /clients/smoke-client portal",
+                                        "retention_policy":  "Derived view.",
+                                        "access_model":  "anon_read",
+                                        "notes":  "Anon, smoke-client-scoped projection of langfuse_traces metadata.",
+                                        "created_at":  "2026-06-19T04:04:10.074360+00:00",
+                                        "updated_at":  "2026-06-19T04:04:10.074360+00:00",
+                                        "schema_version":  1
+                                    },
+                                    {
+                                        "object_name":  "obs_smoke_board",
+                                        "object_type":  "view",
+                                        "domain":  "agent-observability",
+                                        "owner_agent":  "dbforge",
+                                        "lifecycle":  "active",
+                                        "write_path":  "Derived from agent_runs (smoke tenant, deduped latest-status-per-task)",
+                                        "read_path":  "gb-automation-landing /clients/smoke-client portal",
+                                        "retention_policy":  "Derived view.",
+                                        "access_model":  "anon_read",
+                                        "notes":  "Anon, deduped smoke-client board state from agent_runs.",
+                                        "created_at":  "2026-06-19T04:04:10.074360+00:00",
+                                        "updated_at":  "2026-06-19T04:04:10.074360+00:00",
+                                        "schema_version":  1
+                                    },
+                                    {
+                                        "object_name":  "obs_smoke_run_outputs",
+                                        "object_type":  "view",
+                                        "domain":  "cron-observability",
+                                        "owner_agent":  "dbforge",
+                                        "lifecycle":  "active",
+                                        "write_path":  "Derived from cron_run_outputs (smoke tenant)",
+                                        "read_path":  "gb-automation-landing /clients/smoke-client portal",
+                                        "retention_policy":  "Derived view.",
+                                        "access_model":  "anon_read",
+                                        "notes":  "Anon, smoke-client-scoped projection of cron_run_outputs (display columns only).",
+                                        "created_at":  "2026-06-19T04:04:10.074360+00:00",
+                                        "updated_at":  "2026-06-19T04:04:10.074360+00:00",
+                                        "schema_version":  1
+                                    },
+                                    {
+                                        "object_name":  "obs_smoke_schedules",
+                                        "object_type":  "view",
+                                        "domain":  "cron-observability",
+                                        "owner_agent":  "dbforge",
+                                        "lifecycle":  "active",
+                                        "write_path":  "Derived from hermes_cron_catalog (smoke tenant)",
+                                        "read_path":  "gb-automation-landing /clients/smoke-client portal",
+                                        "retention_policy":  "Derived view.",
+                                        "access_model":  "anon_read",
+                                        "notes":  "Anon, smoke-client-scoped projection of hermes_cron_catalog.",
+                                        "created_at":  "2026-06-19T04:04:10.074360+00:00",
+                                        "updated_at":  "2026-06-19T04:04:10.074360+00:00",
+                                        "schema_version":  1
+                                    },
+                                    {
+                                        "object_name":  "v_feedback_context_index",
+                                        "object_type":  "view",
+                                        "domain":  "feedback",
+                                        "owner_agent":  "dbforge",
+                                        "lifecycle":  "active",
+                                        "write_path":  "Supabase migration view over feedback_context_snapshots and agent_feedback_events",
+                                        "read_path":  "Feedback dashboards, memory enrichment, trace review, website feedback triage",
+                                        "retention_policy":  "Derived view; no independent retention.",
+                                        "access_model":  "service_role_only",
+                                        "notes":  "Read surface for feedback context coverage and search.",
+                                        "created_at":  "2026-06-18T21:17:39.374211+00:00",
+                                        "updated_at":  "2026-06-18T21:17:39.374211+00:00",
+                                        "schema_version":  1
+                                    },
+                                    {
+                                        "object_name":  "feedback_context_snapshots",
+                                        "object_type":  "table",
+                                        "domain":  "feedback",
+                                        "owner_agent":  "feedback",
+                                        "lifecycle":  "active",
+                                        "write_path":  "resources/skills/feedback/scripts/snapshot_feedback.py from Telegram, website Ctrl-K feedback, and agent harness captures",
+                                        "read_path":  "v_feedback_context_index, memory indexers, trace self-improvement review, proposal/PRD promotion",
+                                        "retention_policy":  "Keep sanitized context indefinitely; screenshots and large artifacts live in artifact storage with provider lifecycle.",
+                                        "access_model":  "service_role_only",
+                                        "notes":  "Child context snapshots for agent_feedback_events. Telegram captures git/session/Langfuse/user-message state; website captures page state, nav history, and screenshot artifact pointers.",
+                                        "created_at":  "2026-06-18T21:17:39.374211+00:00",
+                                        "updated_at":  "2026-06-18T21:17:39.374211+00:00",
+                                        "schema_version":  1
+                                    },
+                                    {
+                                        "object_name":  "youtube_intel_videos",
+                                        "object_type":  "table",
+                                        "domain":  "youtube-intel",
+                                        "owner_agent":  "youtube-intel",
+                                        "lifecycle":  "active",
+                                        "write_path":  "scripts/youtube-intel/process_liked.py and scripts/youtube_liked_scan.py via future Supabase upsert",
+                                        "read_path":  "v_youtube_intel_index, source_artifacts, PRD/proposal promotion, DBForge",
+                                        "retention_policy":  "Indefinite metadata; raw transcript bodies remain in artifact storage.",
+                                        "access_model":  "service_role_only",
+                                        "notes":  "Video metadata, transcript state, hashes, tags, and source_artifact promotion link.",
+                                        "created_at":  "2026-06-18T20:43:08.128018+00:00",
+                                        "updated_at":  "2026-06-18T20:43:08.128018+00:00",
+                                        "schema_version":  1
+                                    },
+                                    {
+                                        "object_name":  "youtube_intel_channels",
+                                        "object_type":  "table",
+                                        "domain":  "youtube-intel",
+                                        "owner_agent":  "youtube-intel",
+                                        "lifecycle":  "active",
+                                        "write_path":  "config/youtube_channels.yaml and scripts/youtube_liked_scan.py via future Supabase upsert",
+                                        "read_path":  "YouTube dashboards, document ingestion, DBForge",
+                                        "retention_policy":  "Indefinite channel metadata; no OAuth credentials.",
+                                        "access_model":  "service_role_only",
+                                        "notes":  "Channel allowlist and scan policy metadata for YouTube Intel.",
+                                        "created_at":  "2026-06-18T20:43:08.128018+00:00",
+                                        "updated_at":  "2026-06-18T20:43:08.128018+00:00",
+                                        "schema_version":  1
+                                    },
+                                    {
+                                        "object_name":  "youtube_intel_artifacts",
+                                        "object_type":  "table",
+                                        "domain":  "youtube-intel",
+                                        "owner_agent":  "youtube-intel",
+                                        "lifecycle":  "active",
+                                        "write_path":  "YouTube artifact indexers and future GCS artifact publisher",
+                                        "read_path":  "v_youtube_intel_index, source_artifacts, artifact audits",
+                                        "retention_policy":  "Indefinite artifact metadata; storage lifecycle controlled by provider.",
+                                        "access_model":  "service_role_only",
+                                        "notes":  "Artifact paths and storage pointers for metadata, transcripts, descriptions, summaries, dashboards, reports, run receipts, VTT, thumbnails, and source rows.",
+                                        "created_at":  "2026-06-18T20:43:08.128018+00:00",
+                                        "updated_at":  "2026-06-18T20:43:08.128018+00:00",
+                                        "schema_version":  1
+                                    },
+                                    {
+                                        "object_name":  "youtube_intel_scan_runs",
+                                        "object_type":  "table",
+                                        "domain":  "youtube-intel",
+                                        "owner_agent":  "youtube-intel",
+                                        "lifecycle":  "active",
+                                        "write_path":  "launchd YouTube Intel runs and manual backfills",
+                                        "read_path":  "run dashboards, DBForge, cron health review",
+                                        "retention_policy":  "Keep run metadata indefinitely; failures contain messages only, no secrets.",
+                                        "access_model":  "service_role_only",
+                                        "notes":  "Run ledger for liked-video scans, channel refreshes, backfills, repairs, and dry-runs.",
+                                        "created_at":  "2026-06-18T20:43:08.128018+00:00",
+                                        "updated_at":  "2026-06-18T20:43:08.128018+00:00",
+                                        "schema_version":  1
+                                    },
+                                    {
+                                        "object_name":  "youtube_intel_run_videos",
+                                        "object_type":  "table",
+                                        "domain":  "youtube-intel",
+                                        "owner_agent":  "youtube-intel",
+                                        "lifecycle":  "active",
+                                        "write_path":  "YouTube Intel run processors",
+                                        "read_path":  "run dashboards, retry analysis, DBForge",
+                                        "retention_policy":  "Follows youtube_intel_scan_runs lifecycle.",
+                                        "access_model":  "service_role_only",
+                                        "notes":  "Per-video run outcomes for retry, IP-block, no-transcript, processed, and failure analysis.",
+                                        "created_at":  "2026-06-18T20:43:08.128018+00:00",
+                                        "updated_at":  "2026-06-18T20:43:08.128018+00:00",
+                                        "schema_version":  1
+                                    },
+                                    {
+                                        "object_name":  "v_youtube_intel_index",
+                                        "object_type":  "view",
+                                        "domain":  "youtube-intel",
+                                        "owner_agent":  "dbforge",
+                                        "lifecycle":  "active",
+                                        "write_path":  "Supabase migration view over YouTube Intel tables",
+                                        "read_path":  "YouTube dashboards, document ingestion, PRD/proposal review",
+                                        "retention_policy":  "View only.",
+                                        "access_model":  "service_role_only",
+                                        "notes":  "Read surface for YouTube videos with artifact coverage and source_artifact promotion state.",
+                                        "created_at":  "2026-06-18T20:43:08.128018+00:00",
+                                        "updated_at":  "2026-06-18T20:43:08.128018+00:00",
+                                        "schema_version":  1
+                                    },
+                                    {
+                                        "object_name":  "v_client_template_schema_matrix",
+                                        "object_type":  "view",
+                                        "domain":  "template",
+                                        "owner_agent":  "dbforge",
+                                        "lifecycle":  "active",
+                                        "write_path":  "Supabase migration view over information_schema/pg_indexes/ops_schema_catalog",
+                                        "read_path":  "Schema matrix reports, template validation, CI gates",
+                                        "retention_policy":  "Derived view; no independent retention.",
+                                        "access_model":  "authenticated_read",
+                                        "notes":  "Classifies every public object into base template, optional browser substrate, Ecom domain module, reporting view, or shared/legacy. Same migration also adds tenant/client diagnostic indexes; index rows are intentionally not cataloged because ops_schema_catalog tracks tables/views/functions only.",
+                                        "created_at":  "2026-06-18T16:19:24.628956+00:00",
+                                        "updated_at":  "2026-06-18T16:19:24.628956+00:00",
+                                        "schema_version":  1
+                                    },
+                                    {
+                                        "object_name":  "v_browser_scrape_client_health",
+                                        "object_type":  "view",
+                                        "domain":  "browser-scraper",
+                                        "owner_agent":  "dbforge",
+                                        "lifecycle":  "active",
+                                        "write_path":  "Supabase migration view",
+                                        "read_path":  "Ops dashboards and client readiness checks",
+                                        "retention_policy":  "Derived view; no independent retention.",
+                                        "access_model":  "authenticated_read",
+                                        "notes":  "Client/domain aggregate over browser_scrape_runs.",
+                                        "created_at":  "2026-06-18T15:11:38.027213+00:00",
+                                        "updated_at":  "2026-06-18T15:11:38.027213+00:00",
+                                        "schema_version":  1
+                                    },
+                                    {
+                                        "object_name":  "v_ecom_browser_scrape_adapter",
+                                        "object_type":  "view",
+                                        "domain":  "ecom",
+                                        "owner_agent":  "dbforge",
+                                        "lifecycle":  "active",
+                                        "write_path":  "Supabase migration view over ecom_runs",
+                                        "read_path":  "Ecom/browser convergence dashboards",
+                                        "retention_policy":  "Derived view; no independent retention.",
+                                        "access_model":  "authenticated_read",
+                                        "notes":  "Bridge existing Ecom run telemetry into generic browser scraper receipt language without moving domain data.",
+                                        "created_at":  "2026-06-18T15:11:38.027213+00:00",
+                                        "updated_at":  "2026-06-18T15:11:38.027213+00:00",
+                                        "schema_version":  1
+                                    },
+                                    {
+                                        "object_name":  "v_browser_scrape_receipts",
+                                        "object_type":  "view",
+                                        "domain":  "browser-scraper",
+                                        "owner_agent":  "dbforge",
+                                        "lifecycle":  "active",
+                                        "write_path":  "Supabase migration view",
+                                        "read_path":  "Dashboards, smoke readbacks, downstream client receipts",
+                                        "retention_policy":  "Derived view; no independent retention.",
+                                        "access_model":  "authenticated_read",
+                                        "notes":  "Preferred normalized read surface for browser scraper receipts.",
+                                        "created_at":  "2026-06-18T15:11:38.027213+00:00",
+                                        "updated_at":  "2026-06-18T15:11:38.027213+00:00",
+                                        "schema_version":  1
+                                    },
+                                    {
+                                        "object_name":  "browser_scrape_artifacts",
+                                        "object_type":  "table",
+                                        "domain":  "browser-scraper",
+                                        "owner_agent":  "dbforge",
+                                        "lifecycle":  "active",
+                                        "write_path":  "Browser scraper workers and report renderers",
+                                        "read_path":  "Receipt/artifact readbacks",
+                                        "retention_policy":  "Keep artifact pointers with receipts; object retention handled by storage policy.",
+                                        "access_model":  "service_role_write_authenticated_read",
+                                        "notes":  "Artifact pointer table, not raw artifact storage.",
+                                        "created_at":  "2026-06-18T15:11:38.027213+00:00",
+                                        "updated_at":  "2026-06-18T15:11:38.027213+00:00",
+                                        "schema_version":  1
+                                    },
+                                    {
+                                        "object_name":  "browser_scrape_observations",
+                                        "object_type":  "table",
+                                        "domain":  "browser-scraper",
+                                        "owner_agent":  "dbforge",
+                                        "lifecycle":  "active",
+                                        "write_path":  "Browser scraper extraction workers",
+                                        "read_path":  "Domain module adapters and QA reports",
+                                        "retention_policy":  "Keep generic observations 90-180 days; durable domain truth belongs in domain tables.",
+                                        "access_model":  "service_role_write_authenticated_read",
+                                        "notes":  "Generic observations; Ecom product/price truth stays in Ecom tables.",
+                                        "created_at":  "2026-06-18T15:11:38.027213+00:00",
+                                        "updated_at":  "2026-06-18T15:11:38.027213+00:00",
+                                        "schema_version":  1
+                                    },
+                                    {
+                                        "object_name":  "browser_scrape_pages",
+                                        "object_type":  "table",
+                                        "domain":  "browser-scraper",
+                                        "owner_agent":  "dbforge",
+                                        "lifecycle":  "active",
+                                        "write_path":  "Browser scraper workers",
+                                        "read_path":  "Page diagnostics and no-greenwash coverage reports",
+                                        "retention_policy":  "Keep page receipts 180 days unless client retention requires longer.",
+                                        "access_model":  "service_role_write_authenticated_read",
+                                        "notes":  "Page-level fetch/render/extraction proof.",
+                                        "created_at":  "2026-06-18T15:11:38.027213+00:00",
+                                        "updated_at":  "2026-06-18T15:11:38.027213+00:00",
+                                        "schema_version":  1
+                                    },
+                                    {
+                                        "object_name":  "browser_scrape_runs",
+                                        "object_type":  "table",
+                                        "domain":  "browser-scraper",
+                                        "owner_agent":  "dbforge",
+                                        "lifecycle":  "active",
+                                        "write_path":  "Browser scraper workers and agent teams",
+                                        "read_path":  "v_browser_scrape_receipts, v_browser_scrape_client_health",
+                                        "retention_policy":  "Keep sanitized receipts indefinitely; no raw secrets or private transcripts.",
+                                        "access_model":  "service_role_write_authenticated_read",
+                                        "notes":  "Canonical generic browser scrape run receipt table.",
+                                        "created_at":  "2026-06-18T15:11:38.027213+00:00",
+                                        "updated_at":  "2026-06-18T15:11:38.027213+00:00",
+                                        "schema_version":  1
+                                    },
+                                    {
+                                        "object_name":  "browser_scrape_jobs",
+                                        "object_type":  "table",
+                                        "domain":  "browser-scraper",
+                                        "owner_agent":  "dbforge",
+                                        "lifecycle":  "active",
+                                        "write_path":  "Browser scraper schedulers and workers",
+                                        "read_path":  "v_browser_scrape_receipts, queue health reports",
+                                        "retention_policy":  "Keep job rows 180 days; keep aggregate receipts indefinitely.",
+                                        "access_model":  "service_role_write_authenticated_read",
+                                        "notes":  "Generic queue table for browser scraping work.",
+                                        "created_at":  "2026-06-18T15:11:38.027213+00:00",
+                                        "updated_at":  "2026-06-18T15:11:38.027213+00:00",
+                                        "schema_version":  1
+                                    },
+                                    {
+                                        "object_name":  "browser_scrape_targets",
+                                        "object_type":  "table",
+                                        "domain":  "browser-scraper",
+                                        "owner_agent":  "dbforge",
+                                        "lifecycle":  "active",
+                                        "write_path":  "Browser scraper schedulers and domain modules",
+                                        "read_path":  "v_browser_scrape_receipts, route coverage reports",
+                                        "retention_policy":  "Keep target inventory while client engagement is active.",
+                                        "access_model":  "service_role_write_authenticated_read",
+                                        "notes":  "Generic URL/route inventory and intended scope.",
+                                        "created_at":  "2026-06-18T15:11:38.027213+00:00",
+                                        "updated_at":  "2026-06-18T15:11:38.027213+00:00",
+                                        "schema_version":  1
+                                    },
+                                    {
+                                        "object_name":  "browser_scrape_profiles",
+                                        "object_type":  "table",
+                                        "domain":  "browser-scraper",
+                                        "owner_agent":  "dbforge",
+                                        "lifecycle":  "active",
+                                        "write_path":  "Browser scraper module installers and profile writers",
+                                        "read_path":  "v_browser_scrape_receipts, browser scraper schedulers",
+                                        "retention_policy":  "Keep active profiles indefinitely; archive retired profiles.",
+                                        "access_model":  "service_role_write_authenticated_read",
+                                        "notes":  "Generic browser profile/policy registry; not Ecom-specific.",
+                                        "created_at":  "2026-06-18T15:11:38.027213+00:00",
+                                        "updated_at":  "2026-06-18T15:11:38.027213+00:00",
+                                        "schema_version":  1
+                                    },
+                                    {
+                                        "object_name":  "skill_runs",
+                                        "object_type":  "table",
+                                        "domain":  "skill-observability",
+                                        "owner_agent":  "dbforge",
+                                        "lifecycle":  "active",
+                                        "write_path":  "Universal skill hook",
+                                        "read_path":  "ops_run_timeline, skill_metrics_daily",
+                                        "retention_policy":  "Keep 180 days raw; keep daily rollups indefinitely.",
+                                        "access_model":  "service_role_only",
+                                        "notes":  "One row per skill invocation. Use trace_id and parent_run_id for lineage where available.",
+                                        "created_at":  "2026-06-18T07:33:46.006209+00:00",
+                                        "updated_at":  "2026-06-18T07:33:46.006209+00:00",
+                                        "schema_version":  1
+                                    },
+                                    {
+                                        "object_name":  "dbforge_operations",
+                                        "object_type":  "table",
+                                        "domain":  "schema-governance",
+                                        "owner_agent":  "dbforge",
+                                        "lifecycle":  "active",
+                                        "write_path":  "DBForge migrations and manual schema operations",
+                                        "read_path":  "DBForge receipts and migration readbacks",
+                                        "retention_policy":  "Indefinite.",
+                                        "access_model":  "service_role_only",
+                                        "notes":  "Append-only-ish operation receipts for future schema changes.",
+                                        "created_at":  "2026-06-18T07:33:46.006209+00:00",
+                                        "updated_at":  "2026-06-18T07:33:46.006209+00:00",
+                                        "schema_version":  1
+                                    },
+                                    {
+                                        "object_name":  "agent_runs",
+                                        "object_type":  "table",
+                                        "domain":  "agent-observability",
+                                        "owner_agent":  "dbforge",
+                                        "lifecycle":  "active",
+                                        "write_path":  "Hermes/TAC/local runtime mirrors",
+                                        "read_path":  "ops_run_timeline, ops_recent_failures, ops_dashboard_snapshots",
+                                        "retention_policy":  "Keep sanitized summaries indefinitely; avoid raw transcripts/secrets.",
+                                        "access_model":  "service_role_only",
+                                        "notes":  "Current closest table to a shared run spine. Prefer extending this before creating another run table.",
+                                        "created_at":  "2026-06-18T07:33:46.006209+00:00",
+                                        "updated_at":  "2026-06-18T07:33:46.006209+00:00",
+                                        "schema_version":  1
+                                    },
+                                    {
+                                        "object_name":  "ops_schema_catalog",
+                                        "object_type":  "table",
+                                        "domain":  "schema-governance",
+                                        "owner_agent":  "dbforge",
+                                        "lifecycle":  "active",
+                                        "write_path":  "DBForge migrations",
+                                        "read_path":  "DBForge, Codex, dashboards, schema audits",
+                                        "retention_policy":  "Indefinite.",
+                                        "access_model":  "service_role_only",
+                                        "notes":  "Source of truth for which schema objects exist, who owns them, and how they should be used.",
+                                        "created_at":  "2026-06-18T07:33:46.006209+00:00",
+                                        "updated_at":  "2026-06-18T07:33:46.006209+00:00",
+                                        "schema_version":  1
+                                    },
+                                    {
+                                        "object_name":  "langfuse_traces",
+                                        "object_type":  "table",
+                                        "domain":  "observability",
+                                        "owner_agent":  "dbforge",
+                                        "lifecycle":  "active",
+                                        "write_path":  "Langfuse sync/import jobs",
+                                        "read_path":  "ecom_langfuse_traces, ecom_langfuse_daily_rollup, ops_run_timeline via trace IDs",
+                                        "retention_policy":  "Keep raw imported traces 90 days; keep rollups indefinitely.",
+                                        "access_model":  "service_role_only",
+                                        "notes":  "Trace mirror for joining runtime tables to Langfuse evidence.",
+                                        "created_at":  "2026-06-18T07:33:46.006209+00:00",
+                                        "updated_at":  "2026-06-18T07:33:46.006209+00:00",
+                                        "schema_version":  1
+                                    },
+                                    {
+                                        "object_name":  "ecom_observations",
+                                        "object_type":  "table",
+                                        "domain":  "ecom",
+                                        "owner_agent":  "dbforge",
+                                        "lifecycle":  "active",
+                                        "write_path":  "Ecom scraper persistence",
+                                        "read_path":  "ecom_schema_overview, future normalized product observation views",
+                                        "retention_policy":  "Keep raw snapshots 30-90 days unless client requirements say otherwise.",
+                                        "access_model":  "service_role_only",
+                                        "notes":  "Raw JSONB product snapshots. Query-critical product fields should eventually be extracted into typed rows.",
+                                        "created_at":  "2026-06-18T07:33:46.006209+00:00",
+                                        "updated_at":  "2026-06-18T07:33:46.006209+00:00",
+                                        "schema_version":  1
+                                    },
+                                    {
+                                        "object_name":  "ecom_scrape_jobs",
+                                        "object_type":  "table",
+                                        "domain":  "ecom",
+                                        "owner_agent":  "dbforge",
+                                        "lifecycle":  "active",
+                                        "write_path":  "Ecom scraper enqueue/worker flow",
+                                        "read_path":  "ecom_queue_health, ecom_stuck_jobs, ecom_schema_overview",
+                                        "retention_policy":  "Keep jobs 180 days; keep observations/change events per client retention.",
+                                        "access_model":  "service_role_only",
+                                        "notes":  "Core ecom job queue. Next improvement should add atomic claim/complete/fail functions.",
+                                        "created_at":  "2026-06-18T07:33:46.006209+00:00",
+                                        "updated_at":  "2026-06-18T07:33:46.006209+00:00",
+                                        "schema_version":  1
+                                    },
+                                    {
+                                        "object_name":  "scrape_runs",
+                                        "object_type":  "table",
+                                        "domain":  "mall-scanner",
+                                        "owner_agent":  "dbforge",
+                                        "lifecycle":  "active",
+                                        "write_path":  "Mall scanner queue and telemetry writers",
+                                        "read_path":  "ops_run_timeline, dashboard/API queue reads",
+                                        "retention_policy":  "Keep queue telemetry 180 days; keep product/price history in domain tables.",
+                                        "access_model":  "service_role_only",
+                                        "notes":  "Mixed queue + telemetry table for the Mall App scanner.",
+                                        "created_at":  "2026-06-18T07:33:46.006209+00:00",
+                                        "updated_at":  "2026-06-18T07:33:46.006209+00:00",
+                                        "schema_version":  1
+                                    },
+                                    {
+                                        "object_name":  "test_runs",
+                                        "object_type":  "table",
+                                        "domain":  "validation",
+                                        "owner_agent":  "dbforge",
+                                        "lifecycle":  "active",
+                                        "write_path":  "CI/local/test wrappers",
+                                        "read_path":  "ops_run_timeline, test_metrics_daily",
+                                        "retention_policy":  "Keep 180 days raw; keep daily rollups indefinitely.",
+                                        "access_model":  "service_role_only",
+                                        "notes":  "Generalized test-run table. tac_test_runs remains latest-status oriented.",
+                                        "created_at":  "2026-06-18T07:33:46.006209+00:00",
+                                        "updated_at":  "2026-06-18T07:33:46.006209+00:00",
+                                        "schema_version":  1
+                                    },
+                                    {
+                                        "object_name":  "cron_runs",
+                                        "object_type":  "table",
+                                        "domain":  "cron-observability",
+                                        "owner_agent":  "dbforge",
+                                        "lifecycle":  "active",
+                                        "write_path":  "Cron wrappers and Linear/TAC automation",
+                                        "read_path":  "ops_run_timeline, cron_metrics_daily",
+                                        "retention_policy":  "Keep 180 days raw; keep daily rollups indefinitely.",
+                                        "access_model":  "service_role_only",
+                                        "notes":  "Per-tick cron summaries with child outputs in cron_run_outputs.",
+                                        "created_at":  "2026-06-18T07:33:46.006209+00:00",
+                                        "updated_at":  "2026-06-18T07:33:46.006209+00:00",
+                                        "schema_version":  1
+                                    },
+                                    {
+                                        "object_name":  "hermes_cron_catalog",
+                                        "object_type":  "table",
+                                        "domain":  "cron-observability",
+                                        "owner_agent":  "dbforge",
+                                        "lifecycle":  "active",
+                                        "write_path":  "run_managed_cron.py + sync_cron_catalog.py",
+                                        "read_path":  "morning_brief, Schedules spoke",
+                                        "retention_policy":  "Indefinite (registry).",
+                                        "access_model":  "service_role_only",
+                                        "notes":  "Cron definition index + last-green watermark; monotonic-timestamp trigger.",
+                                        "created_at":  "2026-06-18T07:25:23.342133+00:00",
+                                        "updated_at":  "2026-06-18T07:30:32.210242+00:00",
+                                        "schema_version":  1
+                                    },
+                                    {
+                                        "object_name":  "prompt_profile_applies",
+                                        "object_type":  "table",
+                                        "domain":  "prompt-governance",
+                                        "owner_agent":  "dbforge",
+                                        "lifecycle":  "active",
+                                        "write_path":  "canopy ship_prompt_profile_apply.py",
+                                        "read_path":  "canopy receipts",
+                                        "retention_policy":  "Indefinite.",
+                                        "access_model":  "service_role_only",
+                                        "notes":  "Canopy prompt-profile apply sink.",
+                                        "created_at":  "2026-06-18T07:25:24.090845+00:00",
+                                        "updated_at":  "2026-06-18T07:30:31.578663+00:00",
+                                        "schema_version":  1
+                                    },
+                                    {
+                                        "object_name":  "browser_control_runs",
+                                        "object_type":  "table",
+                                        "domain":  "browser-automation",
+                                        "owner_agent":  "dbforge",
+                                        "lifecycle":  "active",
+                                        "write_path":  "browser harness",
+                                        "read_path":  "ops_run_timeline",
+                                        "retention_policy":  "Keep 180 days raw.",
+                                        "access_model":  "service_role_only",
+                                        "notes":  "Browser control run telemetry (now created).",
+                                        "created_at":  "2026-06-18T07:30:30.934844+00:00",
+                                        "updated_at":  "2026-06-18T07:30:30.934844+00:00",
+                                        "schema_version":  1
+                                    },
+                                    {
+                                        "object_name":  "tac_test_runs",
+                                        "object_type":  "table",
+                                        "domain":  "validation",
+                                        "owner_agent":  "dbforge",
+                                        "lifecycle":  "active",
+                                        "write_path":  "TAC test wrappers",
+                                        "read_path":  "ops_run_timeline, TAC dashboards",
+                                        "retention_policy":  "Latest-status oriented.",
+                                        "access_model":  "service_role_only",
+                                        "notes":  "Latest-status TAC test rows.",
+                                        "created_at":  "2026-06-18T07:30:30.304396+00:00",
+                                        "updated_at":  "2026-06-18T07:30:30.304396+00:00",
+                                        "schema_version":  1
+                                    },
+                                    {
+                                        "object_name":  "host_job_runs",
+                                        "object_type":  "table",
+                                        "domain":  "host-observability",
+                                        "owner_agent":  "dbforge",
+                                        "lifecycle":  "active",
+                                        "write_path":  "insert_host_job_run_to_supabase.py (host-job-run.v1)",
+                                        "read_path":  "ops dashboards, host receipts",
+                                        "retention_policy":  "Keep 180 days raw.",
+                                        "access_model":  "service_role_only",
+                                        "notes":  "Unified host receipt envelope (mac-mini + gbauto-win).",
+                                        "created_at":  "2026-06-18T07:30:29.667401+00:00",
+                                        "updated_at":  "2026-06-18T07:30:29.667401+00:00",
+                                        "schema_version":  1
+                                    },
+                                    {
+                                        "object_name":  "cron_run_outputs",
+                                        "object_type":  "table",
+                                        "domain":  "cron-observability",
+                                        "owner_agent":  "dbforge",
+                                        "lifecycle":  "active",
+                                        "write_path":  "run_managed_cron.py + cron dispatch",
+                                        "read_path":  "ops_run_timeline (via cron_runs), morning_brief",
+                                        "retention_policy":  "Keep 180 days raw.",
+                                        "access_model":  "service_role_only",
+                                        "notes":  "Per-issue child rows under cron_runs (agent_summary = manager why).",
+                                        "created_at":  "2026-06-18T07:30:29.006936+00:00",
+                                        "updated_at":  "2026-06-18T07:30:29.006936+00:00",
+                                        "schema_version":  1
+                                    }
+                                ],
+                      "Count":  56
+                  },
+    "skills_registry":  {
+                            "value":  [
+                                          {
+                                              "skill_name":  "automation/browser-hygiene",
+                                              "display_name":  "Browser Hygiene",
+                                              "scope":  "shared",
+                                              "source_path":  "resources/skills/chrome-tab-manager/SKILL.md",
+                                              "description":  "Tame Chrome tabs and browser pressure.",
+                                              "owner":  "gbautomation",
+                                              "status":  "active",
+                                              "first_seen_at":  "2026-06-09T07:07:50.323345+00:00",
+                                              "last_seen_at":  "2026-06-09T07:07:50.323345+00:00",
+                                              "updated_at":  "2026-06-09T07:07:50.323345+00:00"
+                                          },
+                                          {
+                                              "skill_name":  "gbautomation/commit-cleaner",
+                                              "display_name":  "Commit Cleaner",
+                                              "scope":  "shared",
+                                              "source_path":  "resources/skills/commit-cleaner/SKILL.md",
+                                              "description":  "Scan and clean git worktrees before push.",
+                                              "owner":  "gbautomation",
+                                              "status":  "active",
+                                              "first_seen_at":  "2026-06-09T07:07:50.323345+00:00",
+                                              "last_seen_at":  "2026-06-09T07:07:50.323345+00:00",
+                                              "updated_at":  "2026-06-09T07:07:50.323345+00:00"
+                                          },
+                                          {
+                                              "skill_name":  "consulting-admin/email-watcher",
+                                              "display_name":  "Email Watcher",
+                                              "scope":  "shared",
+                                              "source_path":  "resources/skills/consulting-admin/SKILL.md",
+                                              "description":  "Watch consulting inbox signals.",
+                                              "owner":  "gbautomation",
+                                              "status":  "active",
+                                              "first_seen_at":  "2026-06-09T07:07:50.323345+00:00",
+                                              "last_seen_at":  "2026-06-09T07:07:50.323345+00:00",
+                                              "updated_at":  "2026-06-09T07:07:50.323345+00:00"
+                                          },
+                                          {
+                                              "skill_name":  "consulting-admin/calendar-watcher",
+                                              "display_name":  "Calendar Watcher",
+                                              "scope":  "shared",
+                                              "source_path":  "resources/skills/consulting-admin/SKILL.md",
+                                              "description":  "Watch consulting calendar signals.",
+                                              "owner":  "gbautomation",
+                                              "status":  "active",
+                                              "first_seen_at":  "2026-06-09T07:07:50.323345+00:00",
+                                              "last_seen_at":  "2026-06-09T07:07:50.323345+00:00",
+                                              "updated_at":  "2026-06-09T07:07:50.323345+00:00"
+                                          },
+                                          {
+                                              "skill_name":  "devops/mirror-hermes",
+                                              "display_name":  "Mirror Hermes",
+                                              "scope":  "shared",
+                                              "source_path":  "resources/skills/gbauto-supabase/SKILL.md",
+                                              "description":  "Mirror Hermes operational state into Supabase.",
+                                              "owner":  "gbautomation",
+                                              "status":  "active",
+                                              "first_seen_at":  "2026-06-09T07:07:50.323345+00:00",
+                                              "last_seen_at":  "2026-06-09T07:07:50.323345+00:00",
+                                              "updated_at":  "2026-06-09T07:07:50.323345+00:00"
+                                          },
+                                          {
+                                              "skill_name":  "scripts/contact-form-poller",
+                                              "display_name":  "Contact Form Poller",
+                                              "scope":  "shared",
+                                              "source_path":  "scripts/contact-form-poller",
+                                              "description":  "Poll and route website contact submissions.",
+                                              "owner":  "gbautomation",
+                                              "status":  "active",
+                                              "first_seen_at":  "2026-06-09T07:07:50.323345+00:00",
+                                              "last_seen_at":  "2026-06-09T07:07:50.323345+00:00",
+                                              "updated_at":  "2026-06-09T07:07:50.323345+00:00"
+                                          },
+                                          {
+                                              "skill_name":  "consulting-co/youtube-likes-scanner",
+                                              "display_name":  "YouTube Likes Scanner",
+                                              "scope":  "shared",
+                                              "source_path":  "resources/skills/youtube-indydevdan-process/SKILL.md",
+                                              "description":  "Scan YouTube intelligence signals.",
+                                              "owner":  "gbautomation",
+                                              "status":  "active",
+                                              "first_seen_at":  "2026-06-09T07:07:50.323345+00:00",
+                                              "last_seen_at":  "2026-06-09T07:07:50.323345+00:00",
+                                              "updated_at":  "2026-06-09T07:07:50.323345+00:00"
+                                          },
+                                          {
+                                              "skill_name":  "tac/component-retrieval",
+                                              "display_name":  "TAC Component Retrieval",
+                                              "scope":  "shared",
+                                              "source_path":  "resources/skills/tac-kb-query/SKILL.md",
+                                              "description":  "Retrieve TAC components and record lineage.",
+                                              "owner":  "gbautomation",
+                                              "status":  "active",
+                                              "first_seen_at":  "2026-06-09T07:07:50.323345+00:00",
+                                              "last_seen_at":  "2026-06-09T07:07:50.323345+00:00",
+                                              "updated_at":  "2026-06-09T07:07:50.323345+00:00"
+                                          }
+                                      ],
+                            "Count":  8
+                        },
+    "tables":  {
+                   "value":  [
+                                 {
+                                     "table_name":  "active_agent_preferences",
+                                     "table_type":  "VIEW"
+                                 },
+                                 {
+                                     "table_name":  "agent_feedback_events",
+                                     "table_type":  "BASE TABLE"
+                                 },
+                                 {
+                                     "table_name":  "agent_log_artifacts",
+                                     "table_type":  "BASE TABLE"
+                                 },
+                                 {
+                                     "table_name":  "agent_runs",
+                                     "table_type":  "BASE TABLE"
+                                 },
+                                 {
+                                     "table_name":  "browser_control_runs",
+                                     "table_type":  "BASE TABLE"
+                                 },
+                                 {
+                                     "table_name":  "browser_scrape_artifacts",
+                                     "table_type":  "BASE TABLE"
+                                 },
+                                 {
+                                     "table_name":  "browser_scrape_jobs",
+                                     "table_type":  "BASE TABLE"
+                                 },
+                                 {
+                                     "table_name":  "browser_scrape_observations",
+                                     "table_type":  "BASE TABLE"
+                                 },
+                                 {
+                                     "table_name":  "browser_scrape_pages",
+                                     "table_type":  "BASE TABLE"
+                                 },
+                                 {
+                                     "table_name":  "browser_scrape_profiles",
+                                     "table_type":  "BASE TABLE"
+                                 },
+                                 {
+                                     "table_name":  "browser_scrape_runs",
+                                     "table_type":  "BASE TABLE"
+                                 },
+                                 {
+                                     "table_name":  "browser_scrape_targets",
+                                     "table_type":  "BASE TABLE"
+                                 },
+                                 {
+                                     "table_name":  "browser_sessions",
+                                     "table_type":  "BASE TABLE"
+                                 },
+                                 {
+                                     "table_name":  "browser_shares",
+                                     "table_type":  "BASE TABLE"
+                                 },
+                                 {
+                                     "table_name":  "browser_snapshots",
+                                     "table_type":  "BASE TABLE"
+                                 },
+                                 {
+                                     "table_name":  "chat_messages",
+                                     "table_type":  "BASE TABLE"
+                                 },
+                                 {
+                                     "table_name":  "commit_cleaner_runs",
+                                     "table_type":  "BASE TABLE"
+                                 },
+                                 {
+                                     "table_name":  "contact_submissions",
+                                     "table_type":  "BASE TABLE"
+                                 },
+                                 {
+                                     "table_name":  "cron_run_outputs",
+                                     "table_type":  "BASE TABLE"
+                                 },
+                                 {
+                                     "table_name":  "cron_runs",
+                                     "table_type":  "BASE TABLE"
+                                 },
+                                 {
+                                     "table_name":  "dbforge_operations",
+                                     "table_type":  "BASE TABLE"
+                                 },
+                                 {
+                                     "table_name":  "ecom_changes",
+                                     "table_type":  "BASE TABLE"
+                                 },
+                                 {
+                                     "table_name":  "ecom_langfuse_daily_rollup",
+                                     "table_type":  "VIEW"
+                                 },
+                                 {
+                                     "table_name":  "ecom_langfuse_traces",
+                                     "table_type":  "VIEW"
+                                 },
+                                 {
+                                     "table_name":  "ecom_observations",
+                                     "table_type":  "BASE TABLE"
+                                 },
+                                 {
+                                     "table_name":  "ecom_price_changes",
+                                     "table_type":  "BASE TABLE"
+                                 },
+                                 {
+                                     "table_name":  "ecom_price_observations",
+                                     "table_type":  "BASE TABLE"
+                                 },
+                                 {
+                                     "table_name":  "ecom_product_website_status",
+                                     "table_type":  "VIEW"
+                                 },
+                                 {
+                                     "table_name":  "ecom_queue_health",
+                                     "table_type":  "VIEW"
+                                 },
+                                 {
+                                     "table_name":  "ecom_run_baseline_metrics",
+                                     "table_type":  "VIEW"
+                                 },
+                                 {
+                                     "table_name":  "ecom_run_trace_readback",
+                                     "table_type":  "VIEW"
+                                 },
+                                 {
+                                     "table_name":  "ecom_runs",
+                                     "table_type":  "BASE TABLE"
+                                 },
+                                 {
+                                     "table_name":  "ecom_schema_overview",
+                                     "table_type":  "VIEW"
+                                 },
+                                 {
+                                     "table_name":  "ecom_scrape_jobs",
+                                     "table_type":  "BASE TABLE"
+                                 },
+                                 {
+                                     "table_name":  "ecom_scrape_profiles",
+                                     "table_type":  "BASE TABLE"
+                                 },
+                                 {
+                                     "table_name":  "ecom_shops",
+                                     "table_type":  "BASE TABLE"
+                                 },
+                                 {
+                                     "table_name":  "ecom_website_production_status",
+                                     "table_type":  "VIEW"
+                                 },
+                                 {
+                                     "table_name":  "eos_objectives",
+                                     "table_type":  "BASE TABLE"
+                                 },
+                                 {
+                                     "table_name":  "feedback_context_snapshots",
+                                     "table_type":  "BASE TABLE"
+                                 },
+                                 {
+                                     "table_name":  "github_commits",
+                                     "table_type":  "BASE TABLE"
+                                 },
+                                 {
+                                     "table_name":  "graph_edges",
+                                     "table_type":  "BASE TABLE"
+                                 },
+                                 {
+                                     "table_name":  "graph_entities",
+                                     "table_type":  "BASE TABLE"
+                                 },
+                                 {
+                                     "table_name":  "graph_freshness",
+                                     "table_type":  "VIEW"
+                                 },
+                                 {
+                                     "table_name":  "graph_runs",
+                                     "table_type":  "BASE TABLE"
+                                 },
+                                 {
+                                     "table_name":  "hermes_cron_catalog",
+                                     "table_type":  "BASE TABLE"
+                                 },
+                                 {
+                                     "table_name":  "host_job_runs",
+                                     "table_type":  "BASE TABLE"
+                                 },
+                                 {
+                                     "table_name":  "integration_agent_run_receipts_v1",
+                                     "table_type":  "VIEW"
+                                 },
+                                 {
+                                     "table_name":  "integration_langfuse_trace_receipts_v1",
+                                     "table_type":  "VIEW"
+                                 },
+                                 {
+                                     "table_name":  "kanban_tasks",
+                                     "table_type":  "BASE TABLE"
+                                 },
+                                 {
+                                     "table_name":  "langfuse_traces",
+                                     "table_type":  "BASE TABLE"
+                                 },
+                                 {
+                                     "table_name":  "mac_mini_action_requests",
+                                     "table_type":  "BASE TABLE"
+                                 },
+                                 {
+                                     "table_name":  "mall_brands",
+                                     "table_type":  "BASE TABLE"
+                                 },
+                                 {
+                                     "table_name":  "mall_items",
+                                     "table_type":  "BASE TABLE"
+                                 },
+                                 {
+                                     "table_name":  "mall_price_history",
+                                     "table_type":  "BASE TABLE"
+                                 },
+                                 {
+                                     "table_name":  "obs_agent_cost_daily",
+                                     "table_type":  "VIEW"
+                                 },
+                                 {
+                                     "table_name":  "obs_agent_run_join",
+                                     "table_type":  "VIEW"
+                                 },
+                                 {
+                                     "table_name":  "obs_event_enriched",
+                                     "table_type":  "VIEW"
+                                 },
+                                 {
+                                     "table_name":  "obs_events",
+                                     "table_type":  "BASE TABLE"
+                                 },
+                                 {
+                                     "table_name":  "obs_kanban_task_trace_status",
+                                     "table_type":  "VIEW"
+                                 },
+                                 {
+                                     "table_name":  "obs_langfuse_trace_join",
+                                     "table_type":  "VIEW"
+                                 },
+                                 {
+                                     "table_name":  "obs_needs_review",
+                                     "table_type":  "VIEW"
+                                 },
+                                 {
+                                     "table_name":  "obs_public_ops_feed",
+                                     "table_type":  "VIEW"
+                                 },
+                                 {
+                                     "table_name":  "obs_recent_sessions",
+                                     "table_type":  "VIEW"
+                                 },
+                                 {
+                                     "table_name":  "obs_session_rollups",
+                                     "table_type":  "VIEW"
+                                 },
+                                 {
+                                     "table_name":  "obs_sessions",
+                                     "table_type":  "BASE TABLE"
+                                 },
+                                 {
+                                     "table_name":  "obs_smoke_board",
+                                     "table_type":  "VIEW"
+                                 },
+                                 {
+                                     "table_name":  "obs_smoke_browser_runs",
+                                     "table_type":  "VIEW"
+                                 },
+                                 {
+                                     "table_name":  "obs_smoke_build_runs",
+                                     "table_type":  "VIEW"
+                                 },
+                                 {
+                                     "table_name":  "obs_smoke_dispatch_links",
+                                     "table_type":  "VIEW"
+                                 },
+                                 {
+                                     "table_name":  "obs_smoke_dossiers",
+                                     "table_type":  "VIEW"
+                                 },
+                                 {
+                                     "table_name":  "obs_smoke_host_jobs",
+                                     "table_type":  "VIEW"
+                                 },
+                                 {
+                                     "table_name":  "obs_smoke_lineage",
+                                     "table_type":  "VIEW"
+                                 },
+                                 {
+                                     "table_name":  "obs_smoke_prds",
+                                     "table_type":  "VIEW"
+                                 },
+                                 {
+                                     "table_name":  "obs_smoke_render_gates",
+                                     "table_type":  "VIEW"
+                                 },
+                                 {
+                                     "table_name":  "obs_smoke_run_outputs",
+                                     "table_type":  "VIEW"
+                                 },
+                                 {
+                                     "table_name":  "obs_smoke_runs",
+                                     "table_type":  "VIEW"
+                                 },
+                                 {
+                                     "table_name":  "obs_smoke_schedules",
+                                     "table_type":  "VIEW"
+                                 },
+                                 {
+                                     "table_name":  "obs_smoke_scrape_health",
+                                     "table_type":  "VIEW"
+                                 },
+                                 {
+                                     "table_name":  "obs_smoke_scrape_receipts",
+                                     "table_type":  "VIEW"
+                                 },
+                                 {
+                                     "table_name":  "obs_smoke_self_improve",
+                                     "table_type":  "VIEW"
+                                 },
+                                 {
+                                     "table_name":  "obs_smoke_skill_metrics_daily",
+                                     "table_type":  "VIEW"
+                                 },
+                                 {
+                                     "table_name":  "obs_smoke_skill_runs",
+                                     "table_type":  "VIEW"
+                                 },
+                                 {
+                                     "table_name":  "obs_smoke_sprint_links",
+                                     "table_type":  "VIEW"
+                                 },
+                                 {
+                                     "table_name":  "obs_smoke_taxonomy",
+                                     "table_type":  "VIEW"
+                                 },
+                                 {
+                                     "table_name":  "obs_smoke_trace_cost_daily",
+                                     "table_type":  "VIEW"
+                                 },
+                                 {
+                                     "table_name":  "obs_smoke_traces",
+                                     "table_type":  "VIEW"
+                                 },
+                                 {
+                                     "table_name":  "obs_trace_join_candidates",
+                                     "table_type":  "VIEW"
+                                 },
+                                 {
+                                     "table_name":  "ops_client_activity",
+                                     "table_type":  "VIEW"
+                                 },
+                                 {
+                                     "table_name":  "ops_clients",
+                                     "table_type":  "VIEW"
+                                 },
+                                 {
+                                     "table_name":  "ops_clients_registry",
+                                     "table_type":  "BASE TABLE"
+                                 },
+                                 {
+                                     "table_name":  "ops_dashboard_snapshots",
+                                     "table_type":  "BASE TABLE"
+                                 },
+                                 {
+                                     "table_name":  "ops_feedback_pipeline",
+                                     "table_type":  "VIEW"
+                                 },
+                                 {
+                                     "table_name":  "ops_recent_failures",
+                                     "table_type":  "VIEW"
+                                 },
+                                 {
+                                     "table_name":  "ops_run_timeline",
+                                     "table_type":  "VIEW"
+                                 },
+                                 {
+                                     "table_name":  "ops_schema_catalog",
+                                     "table_type":  "BASE TABLE"
+                                 },
+                                 {
+                                     "table_name":  "ops_skill_activity",
+                                     "table_type":  "VIEW"
+                                 },
+                                 {
+                                     "table_name":  "ops_skills_registry",
+                                     "table_type":  "BASE TABLE"
+                                 },
+                                 {
+                                     "table_name":  "ops_trace_coverage",
+                                     "table_type":  "VIEW"
+                                 },
+                                 {
+                                     "table_name":  "ops_website_feedback",
+                                     "table_type":  "BASE TABLE"
+                                 },
+                                 {
+                                     "table_name":  "outbound_runs",
+                                     "table_type":  "BASE TABLE"
+                                 },
+                                 {
+                                     "table_name":  "prd_artifacts",
+                                     "table_type":  "BASE TABLE"
+                                 },
+                                 {
+                                     "table_name":  "prd_kanban_dispatch_links",
+                                     "table_type":  "BASE TABLE"
+                                 },
+                                 {
+                                     "table_name":  "prompt_profile_applies",
+                                     "table_type":  "BASE TABLE"
+                                 },
+                                 {
+                                     "table_name":  "scrape_runs",
+                                     "table_type":  "BASE TABLE"
+                                 },
+                                 {
+                                     "table_name":  "skill_outputs",
+                                     "table_type":  "BASE TABLE"
+                                 },
+                                 {
+                                     "table_name":  "skill_runs",
+                                     "table_type":  "BASE TABLE"
+                                 },
+                                 {
+                                     "table_name":  "sprint_cards",
+                                     "table_type":  "BASE TABLE"
+                                 },
+                                 {
+                                     "table_name":  "sprint_issues",
+                                     "table_type":  "BASE TABLE"
+                                 },
+                                 {
+                                     "table_name":  "sprint_nudges",
+                                     "table_type":  "BASE TABLE"
+                                 },
+                                 {
+                                     "table_name":  "sprint_plans",
+                                     "table_type":  "BASE TABLE"
+                                 },
+                                 {
+                                     "table_name":  "sprint_rock_prd_links",
+                                     "table_type":  "BASE TABLE"
+                                 },
+                                 {
+                                     "table_name":  "sprint_rocks",
+                                     "table_type":  "BASE TABLE"
+                                 },
+                                 {
+                                     "table_name":  "sprint_scorecard_metrics",
+                                     "table_type":  "BASE TABLE"
+                                 },
+                                 {
+                                     "table_name":  "tac_build_runs",
+                                     "table_type":  "BASE TABLE"
+                                 },
+                                 {
+                                     "table_name":  "tac_component_retrievals",
+                                     "table_type":  "BASE TABLE"
+                                 },
+                                 {
+                                     "table_name":  "tac_self_improve_events",
+                                     "table_type":  "BASE TABLE"
+                                 },
+                                 {
+                                     "table_name":  "tac_test_runs",
+                                     "table_type":  "BASE TABLE"
+                                 },
+                                 {
+                                     "table_name":  "test_run_outputs",
+                                     "table_type":  "BASE TABLE"
+                                 },
+                                 {
+                                     "table_name":  "test_runs",
+                                     "table_type":  "BASE TABLE"
+                                 },
+                                 {
+                                     "table_name":  "todo_triage_runs",
+                                     "table_type":  "BASE TABLE"
+                                 },
+                                 {
+                                     "table_name":  "todo_triage_todos",
+                                     "table_type":  "BASE TABLE"
+                                 },
+                                 {
+                                     "table_name":  "v_agent_blockers_open",
+                                     "table_type":  "VIEW"
+                                 },
+                                 {
+                                     "table_name":  "v_agent_observability_gaps",
+                                     "table_type":  "VIEW"
+                                 },
+                                 {
+                                     "table_name":  "v_agent_run_receipts_recent",
+                                     "table_type":  "VIEW"
+                                 },
+                                 {
+                                     "table_name":  "v_agent_run_replay_queue",
+                                     "table_type":  "VIEW"
+                                 },
+                                 {
+                                     "table_name":  "v_agent_trace_coverage",
+                                     "table_type":  "VIEW"
+                                 },
+                                 {
+                                     "table_name":  "v_browser_scrape_client_health",
+                                     "table_type":  "VIEW"
+                                 },
+                                 {
+                                     "table_name":  "v_browser_scrape_receipts",
+                                     "table_type":  "VIEW"
+                                 },
+                                 {
+                                     "table_name":  "v_client_template_schema_matrix",
+                                     "table_type":  "VIEW"
+                                 },
+                                 {
+                                     "table_name":  "v_ecom_browser_scrape_adapter",
+                                     "table_type":  "VIEW"
+                                 },
+                                 {
+                                     "table_name":  "v_feedback_context_index",
+                                     "table_type":  "VIEW"
+                                 },
+                                 {
+                                     "table_name":  "v_youtube_intel_index",
+                                     "table_type":  "VIEW"
+                                 },
+                                 {
+                                     "table_name":  "youtube_intel_artifacts",
+                                     "table_type":  "BASE TABLE"
+                                 },
+                                 {
+                                     "table_name":  "youtube_intel_channels",
+                                     "table_type":  "BASE TABLE"
+                                 },
+                                 {
+                                     "table_name":  "youtube_intel_run_videos",
+                                     "table_type":  "BASE TABLE"
+                                 },
+                                 {
+                                     "table_name":  "youtube_intel_scan_runs",
+                                     "table_type":  "BASE TABLE"
+                                 },
+                                 {
+                                     "table_name":  "youtube_intel_videos",
+                                     "table_type":  "BASE TABLE"
+                                 }
+                             ],
+                   "Count":  137
+               }
+}

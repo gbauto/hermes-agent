@@ -25,6 +25,7 @@ import {
   Download,
   Eye,
   FileText,
+  GitBranch,
   Globe,
   Heart,
   KeyRound,
@@ -32,6 +33,7 @@ import {
   MessageSquare,
   Package,
   Puzzle,
+  RadioTower,
   RotateCw,
   Settings,
   Shield,
@@ -39,6 +41,7 @@ import {
   Star,
   Terminal,
   Users,
+  Workflow,
   Wrench,
   X,
   Zap,
@@ -50,6 +53,11 @@ import { Spinner } from "@nous-research/ui/ui/components/spinner";
 import { Typography } from "@/components/NouiTypography";
 import { cn } from "@/lib/utils";
 import { Backdrop } from "@/components/Backdrop";
+import {
+  CommandLayerOverlay,
+  type CommandLayerAction,
+  type CommandLayerMode,
+} from "@/components/CommandLayerOverlay";
 import { SidebarFooter } from "@/components/SidebarFooter";
 import { SidebarStatusStrip } from "@/components/SidebarStatusStrip";
 import { PageHeaderProvider } from "@/contexts/PageHeaderProvider";
@@ -63,7 +71,11 @@ import LogsPage from "@/pages/LogsPage";
 import AnalyticsPage from "@/pages/AnalyticsPage";
 import ModelsPage from "@/pages/ModelsPage";
 import CronPage from "@/pages/CronPage";
-import ProfilesPage from "@/pages/ProfilesPage";
+import DocumentsPage from "@/pages/DocumentsPage";
+import GbAutomationOverviewPage from "@/pages/GbAutomationOverviewPage";
+import GbAutomationReposPage from "@/pages/GbAutomationReposPage";
+import { KanbanPage, LangfusePage, SupabasePage } from "@/pages/SupabaseIndexesPage";
+import ProfilesPage, { ProfileDetailPage } from "@/pages/ProfilesPage";
 import SkillsPage from "@/pages/SkillsPage";
 import PluginsPage from "@/pages/PluginsPage";
 import ChatPage from "@/pages/ChatPage";
@@ -115,6 +127,14 @@ const BUILTIN_ROUTES_CORE: Record<string, ComponentType> = {
   "/skills": SkillsPage,
   "/plugins": PluginsPage,
   "/profiles": ProfilesPage,
+  "/profiles/:profileId": ProfileDetailPage,
+  "/overview": GbAutomationOverviewPage,
+  "/repos": GbAutomationReposPage,
+  "/supabase": SupabasePage,
+  "/langfuse": LangfusePage,
+  "/kanban": KanbanPage,
+  "/artifacts": DocumentsPage,
+  "/documents": DocumentsPage,
   "/config": ConfigPage,
   "/env": EnvPage,
   "/docs": DocsPage,
@@ -160,6 +180,19 @@ const BUILTIN_NAV_REST: NavItem[] = [
     label: "Documentation",
     icon: BookOpen,
   },
+];
+
+const GB_AUTOMATION_NAV: NavItem[] = [
+  { path: "/overview", label: "Overview", icon: BarChart3 },
+  { path: "/repos", label: "Repos", icon: GitBranch },
+  { path: "/supabase", label: "Supabase", icon: Database },
+  { path: "/langfuse", label: "Langfuse", icon: RadioTower },
+  { path: "/kanban", label: "Kanban", icon: Workflow },
+  { path: "/cron", label: "Cron", icon: Clock },
+  { path: "/skills", label: "Skills", icon: Package },
+  { path: "/plugins", label: "Plugins", icon: Puzzle },
+  { path: "/artifacts", label: "Artifacts", icon: FileText },
+  { path: "/profiles", label: "Profiles", icon: Users },
 ];
 
 const ICON_MAP: Record<string, ComponentType<{ className?: string }>> = {
@@ -308,11 +341,20 @@ function buildRoutes(
 export default function App() {
   const { t } = useI18n();
   const { pathname } = useLocation();
+  const navigate = useNavigate();
   const { manifests, loading: pluginsLoading } = usePlugins();
   const { theme } = useTheme();
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [commandLayerMode, setCommandLayerMode] = useState<CommandLayerMode | null>(null);
   const closeMobile = useCallback(() => setMobileOpen(false), []);
-  const isDocsRoute = pathname === "/docs" || pathname === "/docs/";
+  const closeCommandLayer = useCallback(() => setCommandLayerMode(null), []);
+  const isDocsRoute =
+    pathname === "/docs" ||
+    pathname === "/docs/" ||
+    pathname === "/documents" ||
+    pathname === "/documents/" ||
+    pathname === "/artifacts" ||
+    pathname === "/artifacts/";
   const normalizedPath = pathname.replace(/\/$/, "") || "/";
   const isChatRoute = normalizedPath === "/chat";
   const embeddedChat = isDashboardEmbeddedChatEnabled();
@@ -389,6 +431,142 @@ export default function App() {
   );
 
   const layoutVariant = theme.layoutVariant ?? "standard";
+
+  const commandActions = useMemo<CommandLayerAction[]>(
+    () => [
+      {
+        description: "Open the embedded Hermes chat surface.",
+        keys: "Ctrl+K / Alt+.",
+        label: "Chat with Hermes",
+        run: () => {
+          closeCommandLayer();
+          navigate("/chat");
+        },
+      },
+      {
+        description: "Open the session list.",
+        keys: "Ctrl+O",
+        label: "Open session",
+        run: () => {
+          closeCommandLayer();
+          navigate("/sessions");
+        },
+      },
+      {
+        description: "Open the reusable feedback panel for this route.",
+        keys: "Ctrl+J / Alt+J",
+        label: "Submit feedback",
+        run: () => setCommandLayerMode("feedback"),
+      },
+      {
+        description: "Open the current GBAutomation artifact index.",
+        keys: "Ctrl+B",
+        label: "Artifacts",
+        run: () => {
+          closeCommandLayer();
+          navigate("/artifacts");
+        },
+      },
+      {
+        description: "Open the GBAutomation operations overview.",
+        keys: "Ctrl+,",
+        label: "Overview",
+        run: () => {
+          closeCommandLayer();
+          navigate("/overview");
+        },
+      },
+      {
+        description: "Open the repo and commit activity index.",
+        keys: "Ctrl+'",
+        label: "Repos & Commits",
+        run: () => {
+          closeCommandLayer();
+          navigate("/repos");
+        },
+      },
+      {
+        description: "Open the Hermes Kanban plugin board.",
+        keys: "Ctrl+M",
+        label: "Hermes Board",
+        run: () => {
+          closeCommandLayer();
+          navigate("/kanban");
+        },
+      },
+      {
+        description: "Open the skills and library browser surface.",
+        keys: "Ctrl+;",
+        label: "AI Library",
+        run: () => {
+          closeCommandLayer();
+          navigate("/skills");
+        },
+      },
+      {
+        description: "Show the available keyboard shortcuts.",
+        keys: "Ctrl+/ / Alt+/",
+        label: "Shortcuts reference",
+        run: () => setCommandLayerMode("shortcuts"),
+      },
+    ],
+    [closeCommandLayer, navigate],
+  );
+
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      const modifier = event.ctrlKey || event.metaKey || event.altKey;
+      if (!modifier) return;
+
+      const target = event.target as HTMLElement | null;
+      const isTypingTarget =
+        target?.tagName === "INPUT" ||
+        target?.tagName === "TEXTAREA" ||
+        target?.isContentEditable === true;
+      const key = event.key.toLowerCase();
+      const isAltOnly = event.altKey && !event.ctrlKey && !event.metaKey;
+
+      if (isTypingTarget && !["j", "k", "/", "."].includes(key)) return;
+
+      if (key === "k" || key === ".") {
+        event.preventDefault();
+        setCommandLayerMode((current) => (current === "commands" ? null : "commands"));
+      } else if (key === "j") {
+        event.preventDefault();
+        setCommandLayerMode("feedback");
+      } else if (key === "o" && !isAltOnly) {
+        event.preventDefault();
+        navigate("/sessions");
+        closeCommandLayer();
+      } else if (key === "b" && !isAltOnly) {
+        event.preventDefault();
+        navigate("/artifacts");
+        closeCommandLayer();
+      } else if (key === "m" && !isAltOnly) {
+        event.preventDefault();
+        navigate("/kanban");
+        closeCommandLayer();
+      } else if (key === "," && !isAltOnly) {
+        event.preventDefault();
+        navigate("/overview");
+        closeCommandLayer();
+      } else if (event.key === "'" && !isAltOnly) {
+        event.preventDefault();
+        navigate("/repos");
+        closeCommandLayer();
+      } else if (event.key === ";" && !isAltOnly) {
+        event.preventDefault();
+        navigate("/skills");
+        closeCommandLayer();
+      } else if (key === "/") {
+        event.preventDefault();
+        setCommandLayerMode("shortcuts");
+      }
+    };
+
+    document.addEventListener("keydown", onKey, true);
+    return () => document.removeEventListener("keydown", onKey, true);
+  }, [closeCommandLayer, navigate]);
 
   useEffect(() => {
     if (!mobileOpen) return;
@@ -505,6 +683,19 @@ export default function App() {
                   <br />
                   Agent
                 </Typography>
+
+                {/* GBAutomation brand mark — the gb monogram as a solid
+                    black fill clipped to an alpha mask, with a sweeping
+                    shine. Technique from consulting-admin's
+                    gb-logo-shine-demo.html. Links to the public site. */}
+                <a
+                  href="https://www.gbautomation.xyz"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="gb-logo"
+                  aria-label="GBAutomation — open gbautomation.xyz"
+                  title="gbautomation.xyz"
+                />
               </div>
 
               <Button
@@ -561,6 +752,33 @@ export default function App() {
                   </ul>
                 </div>
               )}
+
+              <div
+                aria-labelledby="hermes-sidebar-gbauto-nav-heading"
+                className="gbauto-sidebar-section flex flex-col border-t border-current/10 pb-2"
+                role="group"
+              >
+                <span
+                  className={cn(
+                    "px-5 pt-2.5 pb-1",
+                    "font-mondwest text-[0.6rem] tracking-[0.15em] uppercase opacity-30",
+                  )}
+                  id="hermes-sidebar-gbauto-nav-heading"
+                >
+                  GBAutomation
+                </span>
+
+                <ul className="flex flex-col">
+                  {GB_AUTOMATION_NAV.map((item) => (
+                    <SidebarNavLink
+                      closeMobile={closeMobile}
+                      item={item}
+                      key={`gbauto:${item.path}`}
+                      t={t}
+                    />
+                  ))}
+                </ul>
+              </div>
             </nav>
 
             <SidebarSystemActions onNavigate={closeMobile} />
@@ -650,6 +868,14 @@ export default function App() {
       </div>
 
       <PluginSlot name="overlay" />
+      {commandLayerMode ? (
+        <CommandLayerOverlay
+          actions={commandActions}
+          mode={commandLayerMode}
+          onClose={closeCommandLayer}
+          route={pathname}
+        />
+      ) : null}
     </div>
   );
 }
