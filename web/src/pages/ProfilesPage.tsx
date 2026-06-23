@@ -2,13 +2,18 @@ import {
   useCallback,
   useEffect,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
 } from "react";
+import type { CSSProperties } from "react";
 import {
+  BookOpen,
   ChevronDown,
+  LayoutGrid,
   Pencil,
   Plus,
+  Sparkles,
   Terminal,
   Trash2,
   Users,
@@ -31,6 +36,7 @@ import { Label } from "@/components/ui/label";
 import { Checkbox } from "@nous-research/ui/ui/components/checkbox";
 import { useI18n } from "@/i18n";
 import { usePageHeader } from "@/contexts/usePageHeader";
+import { gbautoLibrary } from "@/generated/gbautoLibrary";
 
 // Mirrors hermes_cli/profiles.py::_PROFILE_ID_RE so we can reject obviously
 // invalid names (uppercase, spaces, …) before round-tripping a doomed POST.
@@ -67,7 +73,10 @@ function ProfilesLoadingSpinner() {
 
 export default function ProfilesPage() {
   const [profiles, setProfiles] = useState<ProfileInfo[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
+  const [libraryView, setLibraryView] = useState<
+    "teams" | "profiles" | "tac" | "admin"
+  >("teams");
   const { toast, showToast } = useToast();
   const { t } = useI18n();
   const { setEnd } = usePageHeader();
@@ -96,6 +105,7 @@ export default function ProfilesPage() {
   const activeSoulRequest = useRef<string | null>(null);
 
   const load = useCallback(() => {
+    setLoading(true);
     api
       .getProfiles()
       .then((res) => setProfiles(res.profiles))
@@ -104,8 +114,8 @@ export default function ProfilesPage() {
   }, [showToast, t.status.error]);
 
   useEffect(() => {
-    load();
-  }, [load]);
+    if (libraryView === "admin" && profiles.length === 0) load();
+  }, [libraryView, load, profiles.length]);
 
   const handleCreate = async () => {
     const name = newName.trim();
@@ -230,6 +240,10 @@ export default function ProfilesPage() {
 
   // Put "Create" button in page header
   useLayoutEffect(() => {
+    if (libraryView !== "admin") {
+      setEnd(null);
+      return;
+    }
     setEnd(
       <Button size="sm" onClick={() => setCreateModalOpen(true)}>
         <Plus className="h-3 w-3" />
@@ -239,7 +253,13 @@ export default function ProfilesPage() {
     return () => {
       setEnd(null);
     };
-  }, [setEnd, t.common.create, loading]);
+  }, [setEnd, t.common.create, loading, libraryView]);
+
+  const tacProfiles = useMemo(
+    () =>
+      gbautoLibrary.profiles.filter((profile) => profile.team === "tac-hermes"),
+    [],
+  );
 
   if (loading) {
     return (
@@ -357,7 +377,20 @@ export default function ProfilesPage() {
         </div>
       )}
 
+      <ProfileLibraryTabs active={libraryView} onChange={setLibraryView} />
+
+      {libraryView === "teams" && (
+        <ProfileTeamsShowcase tacProfiles={tacProfiles} />
+      )}
+
+      {libraryView === "profiles" && (
+        <ProfileIndexShowcase profiles={gbautoLibrary.profiles} />
+      )}
+
+      {libraryView === "tac" && <TacLeadVariants />}
+
       {/* List */}
+      {libraryView === "admin" && (
       <div className="flex flex-col gap-3">
         <H2
           variant="sm"
@@ -549,6 +582,228 @@ export default function ProfilesPage() {
           );
         })}
       </div>
+      )}
     </div>
   );
+}
+
+type ProfileLibraryView = "teams" | "profiles" | "tac" | "admin";
+type HermesProfile = (typeof gbautoLibrary.profiles)[number];
+
+function ProfileLibraryTabs({
+  active,
+  onChange,
+}: {
+  active: ProfileLibraryView;
+  onChange: (view: ProfileLibraryView) => void;
+}) {
+  const tabs: Array<{
+    icon: React.ComponentType<{ className?: string }>;
+    id: ProfileLibraryView;
+    label: string;
+  }> = [
+    { id: "teams", label: "Team Profiles", icon: LayoutGrid },
+    { id: "profiles", label: "Profile Index", icon: BookOpen },
+    { id: "tac", label: "TAC Lead Variants", icon: Sparkles },
+    { id: "admin", label: "Admin", icon: Users },
+  ];
+
+  return (
+    <div className="library-view-switcher" role="tablist" aria-label="Profile views">
+      {tabs.map((tab) => {
+        const Icon = tab.icon;
+        return (
+          <button
+            aria-selected={active === tab.id}
+            className={active === tab.id ? "is-active" : ""}
+            key={tab.id}
+            onClick={() => onChange(tab.id)}
+            role="tab"
+            type="button"
+          >
+            <Icon className="h-3.5 w-3.5" />
+            {tab.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+function ProfileTeamsShowcase({
+  tacProfiles,
+}: {
+  tacProfiles: readonly HermesProfile[];
+}) {
+  return (
+    <section className="library-page">
+      <div className="library-hero">
+        <div>
+          <span className="library-eyebrow">Hermes Profile Teams</span>
+          <h2>TAC Hermes Build Council</h2>
+          <p>
+            Hover the profile cards to reveal role details. Assigned MTG art
+            renders as the image crop; unassigned profiles use GBauto art
+            panels.
+          </p>
+        </div>
+        <div className="library-hero-stats">
+          <strong>{tacProfiles.length}</strong>
+          <span>profiles</span>
+          <strong>{gbautoLibrary.profileTeams.length}</strong>
+          <span>team spec</span>
+        </div>
+      </div>
+
+      <div className="profile-expanding-cards">
+        {tacProfiles.map((profile) => (
+          <article className="profile-feature-card" key={profile.id}>
+            <ProfileArt profile={profile} />
+            <div className="profile-feature-title">
+              <span>{profile.displayName}</span>
+            </div>
+            <div className="profile-feature-reveal">
+              <div>
+                <h3>{profile.displayName}</h3>
+                <p>{profile.role || "Hermes TAC profile."}</p>
+                <div className="library-tag-row">
+                  <span>{profile.model || "model tbd"}</span>
+                  <span>{profile.status || "planned"}</span>
+                  <span>{profile.primaryTools.length} tools</span>
+                </div>
+              </div>
+            </div>
+          </article>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function ProfileIndexShowcase({
+  profiles,
+}: {
+  profiles: readonly HermesProfile[];
+}) {
+  return (
+    <section className="library-page">
+      <div className="library-toolbar">
+        <div>
+          <span className="library-eyebrow">Profile Templates</span>
+          <h2>Hermes Profile Index</h2>
+        </div>
+        <Badge tone="secondary" className="text-[10px]">
+          {profiles.length} imported
+        </Badge>
+      </div>
+      <div className="profile-index-grid">
+        {profiles.map((profile) => (
+          <article className="profile-index-card" key={profile.id}>
+            <ProfileArt profile={profile} compact />
+            <div>
+              <div className="library-card-topline">
+                <span>{profile.team || "template"}</span>
+                <span>{profile.model || "model tbd"}</span>
+              </div>
+              <h3>{profile.displayName}</h3>
+              <p>{profile.role || "Reusable Hermes profile template."}</p>
+              <div className="library-mini-roster">
+                {profile.primaryTools.slice(0, 4).map((tool) => (
+                  <span key={tool}>{tool}</span>
+                ))}
+              </div>
+            </div>
+          </article>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function TacLeadVariants() {
+  const tacLead = gbautoLibrary.profiles.find((profile) => profile.id === "tac-lead");
+  return (
+    <section className="library-page">
+      <div className="library-hero tac-lead-hero">
+        <div>
+          <span className="library-eyebrow">Selectable TAC Lead Concepts</span>
+          <h2>TAC Lead Variants</h2>
+          <p>
+            Three UI treatments for the same profile: advisor, retrieval, and
+            dispatch. Each maps to an operating mode in the profile spec.
+          </p>
+        </div>
+        {tacLead && <ProfileArt profile={tacLead} compact />}
+      </div>
+
+      <div className="tac-variant-grid">
+        {gbautoLibrary.tacLeadVariants.map((variant) => {
+          const mode = tacLead?.operatingModes.find(
+            (item) => item.id === variant.modeId,
+          );
+          return (
+            <article className="tac-variant-card" key={variant.id}>
+              <div className="library-card-topline">
+                <span>{variant.modeId}</span>
+                <span>option</span>
+              </div>
+              <h3>{variant.title}</h3>
+              <p>{mode?.purpose || variant.summary}</p>
+              <strong>{variant.emphasis}</strong>
+            </article>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
+function ProfileArt({
+  compact = false,
+  profile,
+}: {
+  compact?: boolean;
+  profile: HermesProfile;
+}) {
+  const artUrl = profileMtgArtUrl(profile.mtg);
+  const hue = hashProfileSeed(profile.artSeed) % 360;
+  if (artUrl) {
+    return (
+      <img
+        alt={`${profile.displayName} MTG art`}
+        className={compact ? "library-art is-compact" : "library-art"}
+        loading="lazy"
+        src={artUrl}
+      />
+    );
+  }
+  return (
+    <div
+      aria-label={`${profile.displayName} generated art panel`}
+      className={
+        compact
+          ? "library-art library-art-fallback is-compact"
+          : "library-art library-art-fallback"
+      }
+      role="img"
+      style={{ "--library-hue": `${hue}deg` } as CSSProperties}
+    >
+      <LayoutGrid className="h-7 w-7" />
+      <span>{profile.displayName}</span>
+    </div>
+  );
+}
+
+function hashProfileSeed(value: string) {
+  let hash = 0;
+  for (let index = 0; index < value.length; index += 1) {
+    hash = (hash * 31 + value.charCodeAt(index)) >>> 0;
+  }
+  return hash;
+}
+
+function profileMtgArtUrl(value: unknown) {
+  if (!value || typeof value !== "object") return "";
+  const mtg = value as { artUrl?: string; imageUrl?: string };
+  return mtg.artUrl || mtg.imageUrl || "";
 }

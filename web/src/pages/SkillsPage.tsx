@@ -1,5 +1,7 @@
 import { useEffect, useLayoutEffect, useState, useMemo } from "react";
+import type { CSSProperties } from "react";
 import {
+  BookOpen,
   Package,
   Search,
   Wrench,
@@ -14,9 +16,12 @@ import {
   Code,
   Zap,
   Filter,
+  LayoutGrid,
+  Sparkles,
 } from "lucide-react";
 import { api } from "@/lib/api";
 import type { SkillInfo, ToolsetInfo } from "@/lib/api";
+import { gbautoLibrary } from "@/generated/gbautoLibrary";
 import { useToast } from "@/hooks/useToast";
 import { Toast } from "@/components/Toast";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -98,7 +103,9 @@ export default function SkillsPage() {
   const [toolsets, setToolsets] = useState<ToolsetInfo[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
-  const [view, setView] = useState<"skills" | "toolsets">("skills");
+  const [view, setView] = useState<
+    "skills" | "toolsets" | "library" | "prompt-cards"
+  >("skills");
   const [activeCategory, setActiveCategory] = useState<string | null>(null);
   const [togglingSkills, setTogglingSkills] = useState<Set<string>>(new Set());
   const { toast, showToast } = useToast();
@@ -142,7 +149,7 @@ export default function SkillsPage() {
 
   /* ---- Derived data ---- */
   const lowerSearch = search.toLowerCase();
-  const isSearching = search.trim().length > 0;
+  const isSearching = search.trim().length > 0 && view === "skills";
 
   const searchMatchedSkills = useMemo(() => {
     if (!isSearching) return [];
@@ -187,6 +194,37 @@ export default function SkillsPage() {
   }, [skills, t]);
 
   const enabledCount = skills.filter((s) => s.enabled).length;
+
+  const libraryAgents = useMemo(() => {
+    return gbautoLibrary.agents.filter((agent) => {
+      if (!search) return true;
+      const haystack = [
+        agent.displayName,
+        agent.name,
+        agent.teamDisplayName,
+        agent.description,
+        agent.expertise,
+        agent.model,
+        agent.role,
+      ]
+        .join(" ")
+        .toLowerCase();
+      return haystack.includes(lowerSearch);
+    });
+  }, [lowerSearch, search]);
+
+  const libraryTeams = useMemo(() => {
+    return gbautoLibrary.teams.filter((team) => {
+      if (!search) return true;
+      const teamAgents = gbautoLibrary.agents
+        .filter((agent) => agent.team === team.id)
+        .map((agent) => `${agent.displayName} ${agent.description}`)
+        .join(" ");
+      return `${team.displayName} ${team.leader} ${team.description} ${teamAgents}`
+        .toLowerCase()
+        .includes(lowerSearch);
+    });
+  }, [lowerSearch, search]);
 
   useLayoutEffect(() => {
     if (loading) {
@@ -282,6 +320,24 @@ export default function SkillsPage() {
                   onClick={() => {
                     setView("toolsets");
                     setSearch("");
+                  }}
+                />
+                <PanelItem
+                  icon={BookOpen}
+                  label={`AI Library (${gbautoLibrary.summary.teams})`}
+                  active={view === "library"}
+                  onClick={() => {
+                    setView("library");
+                    setActiveCategory(null);
+                  }}
+                />
+                <PanelItem
+                  icon={Sparkles}
+                  label={`Prompt Cards (${gbautoLibrary.summary.agents})`}
+                  active={view === "prompt-cards"}
+                  onClick={() => {
+                    setView("prompt-cards");
+                    setActiveCategory(null);
                   }}
                 />
               </div>
@@ -408,7 +464,7 @@ export default function SkillsPage() {
                 )}
               </CardContent>
             </Card>
-          ) : (
+          ) : view === "toolsets" ? (
             /* Toolsets grid */
             <>
               {filteredToolsets.length === 0 ? (
@@ -484,6 +540,10 @@ export default function SkillsPage() {
                 </div>
               )}
             </>
+          ) : view === "library" ? (
+            <AiLibraryTeamsView agents={libraryAgents} teams={libraryTeams} />
+          ) : (
+            <PromptCardsView agents={libraryAgents} />
           )}
         </div>
       </div>
@@ -554,4 +614,171 @@ interface SkillRowProps {
   onToggle: () => void;
   skill: SkillInfo;
   toggling: boolean;
+}
+
+type LibraryAgent = (typeof gbautoLibrary.agents)[number];
+type LibraryTeam = (typeof gbautoLibrary.teams)[number];
+
+function AiLibraryTeamsView({
+  agents,
+  teams,
+}: {
+  agents: readonly LibraryAgent[];
+  teams: readonly LibraryTeam[];
+}) {
+  const agentsByTeam = useMemo(() => {
+    const map = new Map<string, LibraryAgent[]>();
+    for (const agent of agents) {
+      const list = map.get(agent.team) ?? [];
+      list.push(agent);
+      map.set(agent.team, list);
+    }
+    return map;
+  }, [agents]);
+
+  return (
+    <section className="library-page">
+      <div className="library-hero">
+        <div>
+          <span className="library-eyebrow">Canonical AI Library</span>
+          <h2>Skill Teams</h2>
+          <p>
+            Imported from <code>ai-library/teams/_catalog.md</code> and every
+            roster under <code>ai-library/teams/*/_roster.yaml</code>.
+          </p>
+        </div>
+        <div className="library-hero-stats">
+          <strong>{gbautoLibrary.summary.teams}</strong>
+          <span>teams</span>
+          <strong>{gbautoLibrary.summary.agents}</strong>
+          <span>agents</span>
+        </div>
+      </div>
+
+      <div className="library-team-grid">
+        {teams.map((team) => {
+          const teamAgents = agentsByTeam.get(team.id) ?? [];
+          return (
+            <article className="library-team-card" key={team.id}>
+              <LibraryArt label={team.displayName} seed={team.artSeed} />
+              <div className="library-team-card-body">
+                <div className="library-card-topline">
+                  <span>{team.kind}</span>
+                  <span>{team.agentCount} agents</span>
+                </div>
+                <h3>{team.displayName}</h3>
+                <p>{team.description}</p>
+                <div className="library-team-meta">
+                  <span>Lead: {team.leader}</span>
+                  <span>{team.roleCounts.seniors} seniors</span>
+                  <span>{team.roleCounts.juniors} juniors</span>
+                </div>
+                <div className="library-mini-roster">
+                  {teamAgents.slice(0, 5).map((agent) => (
+                    <span key={agent.id}>{agent.displayName}</span>
+                  ))}
+                </div>
+              </div>
+            </article>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
+function PromptCardsView({ agents }: { agents: readonly LibraryAgent[] }) {
+  return (
+    <section className="library-page">
+      <div className="library-toolbar">
+        <div>
+          <span className="library-eyebrow">Prompt Surface</span>
+          <h2>Agent Prompt Cards</h2>
+        </div>
+        <Badge tone="secondary" className="text-[10px]">
+          {agents.length} rendered
+        </Badge>
+      </div>
+      <div className="library-prompt-grid">
+        {agents.map((agent) => (
+          <article className="library-prompt-card" key={agent.id}>
+            <LibraryArt
+              imageUrl={mtgArtUrl(agent.mtg)}
+              label={agent.displayName}
+              seed={agent.artSeed}
+            />
+            <div className="library-prompt-body">
+              <div className="library-card-topline">
+                <span>{agent.teamDisplayName}</span>
+                <span>{agent.model || "model tbd"}</span>
+              </div>
+              <h3>{agent.displayName}</h3>
+              <p>{agent.description}</p>
+              <div className="library-tag-row">
+                <span>{agent.rosterRole.replace(/s$/, "")}</span>
+                {agent.provider && <span>{agent.provider}</span>}
+                {mtgCardName(agent.mtg) ? (
+                  <span>{mtgCardName(agent.mtg)}</span>
+                ) : (
+                  <span>GBauto art</span>
+                )}
+              </div>
+            </div>
+          </article>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function LibraryArt({
+  imageUrl,
+  label,
+  seed,
+}: {
+  imageUrl?: string;
+  label: string;
+  seed: string;
+}) {
+  const hue = hashSeed(seed) % 360;
+  if (imageUrl) {
+    return (
+      <img
+        alt={`${label} MTG art`}
+        className="library-art"
+        loading="lazy"
+        src={imageUrl}
+      />
+    );
+  }
+  return (
+    <div
+      aria-label={`${label} generated art panel`}
+      className="library-art library-art-fallback"
+      role="img"
+      style={{ "--library-hue": `${hue}deg` } as CSSProperties}
+    >
+      <LayoutGrid className="h-7 w-7" />
+      <span>{label}</span>
+    </div>
+  );
+}
+
+function hashSeed(value: string) {
+  let hash = 0;
+  for (let index = 0; index < value.length; index += 1) {
+    hash = (hash * 31 + value.charCodeAt(index)) >>> 0;
+  }
+  return hash;
+}
+
+function mtgArtUrl(value: unknown) {
+  if (!value || typeof value !== "object") return "";
+  const mtg = value as { artUrl?: string; imageUrl?: string };
+  return mtg.artUrl || mtg.imageUrl || "";
+}
+
+function mtgCardName(value: unknown) {
+  if (!value || typeof value !== "object") return "";
+  return (value as { card?: string }).card || "";
 }
