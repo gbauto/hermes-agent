@@ -23,6 +23,7 @@ import { api } from "@/lib/api";
 import type { SkillInfo, ToolsetInfo } from "@/lib/api";
 import { auraSkills } from "@/generated/auraSkills";
 import { gbautoLibrary } from "@/generated/gbautoLibrary";
+import { skillIndividualArt } from "@/generated/skillIndividualArt";
 import { useToast } from "@/hooks/useToast";
 import { Toast } from "@/components/Toast";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -166,6 +167,13 @@ function skillArtKey(raw: string | null | undefined): string {
 function skillGroupArtUrl(raw: string | null | undefined): string {
   return `/skill-art/${skillArtKey(raw)}.jpg?v=${SKILL_ART_VERSION}`;
 }
+
+type IndividualArtEntry = {
+  artId: string;
+  publicPath: string;
+  sourceFile: string;
+  sourceGroup: string;
+};
 
 /* ------------------------------------------------------------------ */
 /*  Component                                                          */
@@ -668,7 +676,6 @@ function SkillRow({
 }: SkillRowProps) {
   const registryRow = findSkillRegistryRow(contractsIndex, skill.name);
   const relatedContracts = relatedContractsForSkill(contractsIndex, skill.name);
-
   return (
     <div className="group flex items-start gap-3 px-3 py-2.5 transition-colors hover:bg-muted/40">
       <div className="pt-0.5 shrink-0">
@@ -682,6 +689,7 @@ function SkillRow({
         alt=""
         aria-hidden="true"
         className="skill-row-art"
+        decoding="async"
         loading="lazy"
         src={skillGroupArtUrl(skill.category)}
       />
@@ -753,6 +761,40 @@ type LibraryAgent = (typeof gbautoLibrary.agents)[number];
 type LibraryTeam = (typeof gbautoLibrary.teams)[number];
 type AuraSkill = (typeof auraSkills.skills)[number];
 
+function versionedArtPath(publicPath: string): string {
+  return `${publicPath}?v=${skillIndividualArt.version}`;
+}
+
+function individualAgentArt(agent: LibraryAgent): IndividualArtEntry {
+  const entry =
+    skillIndividualArt.agents[
+      agent.id as keyof typeof skillIndividualArt.agents
+    ] as IndividualArtEntry | undefined;
+  if (entry) return entry;
+  const key = skillArtKey(TEAM_ART_GROUPS[agent.team] ?? agent.teamDisplayName);
+  return {
+    artId: `group-${key}`,
+    publicPath: `/skill-art/${key}.jpg`,
+    sourceFile: `${key}.jpg`,
+    sourceGroup: "group",
+  };
+}
+
+function individualAuraSkillArt(skill: AuraSkill): IndividualArtEntry {
+  const entry =
+    skillIndividualArt.auraSkills[
+      skill.id as keyof typeof skillIndividualArt.auraSkills
+    ] as IndividualArtEntry | undefined;
+  if (entry) return entry;
+  const key = skillArtKey(skill.category);
+  return {
+    artId: `group-${key}`,
+    publicPath: `/skill-art/${key}.jpg`,
+    sourceFile: `${key}.jpg`,
+    sourceGroup: "group",
+  };
+}
+
 function SkillsContractPanel({
   index,
   view,
@@ -809,13 +851,6 @@ function ContractObjectStrip({
 
 function libraryTeamArtUrl(team: LibraryTeam): string {
   return skillGroupArtUrl(TEAM_ART_GROUPS[team.id] ?? team.artSeed);
-}
-
-function promptCardArtUrl(agent: LibraryAgent): string {
-  return (
-    mtgArtUrl(agent.mtg) ||
-    skillGroupArtUrl(TEAM_ART_GROUPS[agent.team] ?? agent.teamDisplayName)
-  );
 }
 
 function AiLibraryTeamsView({
@@ -928,32 +963,37 @@ function PromptCardsView({
         ])}
       />
       <div className="library-prompt-grid">
-        {agents.map((agent) => (
-          <article className="library-prompt-card" key={agent.id}>
-            <LibraryArt
-              imageUrl={promptCardArtUrl(agent)}
-              label={agent.displayName}
-              seed={agent.artSeed}
-            />
-            <div className="library-prompt-body">
-              <div className="library-card-topline">
-                <span>{agent.teamDisplayName}</span>
-                <span>{agent.model || "model tbd"}</span>
+        {agents.map((agent) => {
+          const art = individualAgentArt(agent);
+          return (
+            <article className="library-prompt-card" key={agent.id}>
+              <LibraryArt
+                artId={art.artId}
+                imageUrl={versionedArtPath(art.publicPath)}
+                label={agent.displayName}
+                seed={agent.artSeed}
+              />
+              <div className="library-prompt-body">
+                <div className="library-card-topline">
+                  <span>{agent.teamDisplayName}</span>
+                  <span>{agent.model || "model tbd"}</span>
+                </div>
+                <h3>{agent.displayName}</h3>
+                <p>{agent.description}</p>
+                <div className="library-tag-row">
+                  <span>{agent.rosterRole.replace(/s$/, "")}</span>
+                  {agent.provider && <span>{agent.provider}</span>}
+                  {mtgCardName(agent.mtg) ? (
+                    <span>{mtgCardName(agent.mtg)}</span>
+                  ) : (
+                    <span>{art.sourceGroup}</span>
+                  )}
+                  <span>Art: {art.artId}</span>
+                </div>
               </div>
-              <h3>{agent.displayName}</h3>
-              <p>{agent.description}</p>
-              <div className="library-tag-row">
-                <span>{agent.rosterRole.replace(/s$/, "")}</span>
-                {agent.provider && <span>{agent.provider}</span>}
-                {mtgCardName(agent.mtg) ? (
-                  <span>{mtgCardName(agent.mtg)}</span>
-                ) : (
-                  <span>GBauto art</span>
-                )}
-              </div>
-            </div>
-          </article>
-        ))}
+            </article>
+          );
+        })}
       </div>
     </section>
   );
@@ -1041,55 +1081,60 @@ function AuraSkillsView({
         </Card>
       ) : (
         <div className="aura-skills-grid">
-          {visibleSkills.map((skill) => (
-            <article className="aura-skill-card" key={skill.id}>
-              <img
-                alt={`${skill.title} ${prettyCategory(skill.category, "UI")} MTG group art`}
-                className="aura-skill-art"
-                loading="lazy"
-                src={skillGroupArtUrl(skill.category)}
-              />
-              <div className="library-card-topline">
-                <span>{prettyCategory(skill.category, "UI")}</span>
-                <span>{skill.authorName}</span>
-              </div>
-              <h3>{skill.title}</h3>
-              <p>{skill.description}</p>
+          {visibleSkills.map((skill) => {
+            const art = individualAuraSkillArt(skill);
+            return (
+              <article className="aura-skill-card" key={skill.id}>
+                <img
+                  alt={`${skill.title} MTG art`}
+                  className="aura-skill-art"
+                  decoding="async"
+                  loading="lazy"
+                  src={versionedArtPath(art.publicPath)}
+                />
+                <div className="library-card-topline">
+                  <span>{prettyCategory(skill.category, "UI")}</span>
+                  <span>{skill.authorName}</span>
+                </div>
+                <h3>{skill.title}</h3>
+                <p>{skill.description}</p>
 
-              <div className="aura-skill-metrics">
-                <span>
-                  <strong>{formatCompact(skill.views)}</strong>
-                  views
-                </span>
-                <span>
-                  <strong>{formatCompact(skill.uses)}</strong>
-                  uses
-                </span>
-              </div>
-
-              <div className="library-tag-row">
-                {skill.repoOwner && skill.repoName ? (
+                <div className="aura-skill-metrics">
                   <span>
-                    {skill.repoOwner}/{skill.repoName}
+                    <strong>{formatCompact(skill.views)}</strong>
+                    views
                   </span>
-                ) : (
-                  <span>Aura source</span>
-                )}
-                {skill.featured && <span>Featured</span>}
-              </div>
+                  <span>
+                    <strong>{formatCompact(skill.uses)}</strong>
+                    uses
+                  </span>
+                </div>
 
-              <p className="aura-skill-preview">{skill.contentPreview}</p>
+                <div className="library-tag-row">
+                  {skill.repoOwner && skill.repoName ? (
+                    <span>
+                      {skill.repoOwner}/{skill.repoName}
+                    </span>
+                  ) : (
+                    <span>Aura source</span>
+                  )}
+                  {skill.featured && <span>Featured</span>}
+                  <span>Art: {art.artId}</span>
+                </div>
 
-              <a
-                className="aura-skill-link"
-                href={skill.sourceUrl || "https://www.aura.build/skills"}
-                rel="noreferrer"
-                target="_blank"
-              >
-                Open source
-              </a>
-            </article>
-          ))}
+                <p className="aura-skill-preview">{skill.contentPreview}</p>
+
+                <a
+                  className="aura-skill-link"
+                  href={skill.sourceUrl || "https://www.aura.build/skills"}
+                  rel="noreferrer"
+                  target="_blank"
+                >
+                  Open source
+                </a>
+              </article>
+            );
+          })}
         </div>
       )}
     </section>
@@ -1097,10 +1142,12 @@ function AuraSkillsView({
 }
 
 function LibraryArt({
+  artId,
   imageUrl,
   label,
   seed,
 }: {
+  artId?: string;
   imageUrl?: string;
   label: string;
   seed: string;
@@ -1111,8 +1158,11 @@ function LibraryArt({
       <img
         alt={`${label} MTG art`}
         className="library-art"
+        data-mtg-art-id={artId}
+        decoding="async"
         loading="lazy"
         src={imageUrl}
+        title={artId ? `MTG art ID: ${artId}` : undefined}
       />
     );
   }
@@ -1135,12 +1185,6 @@ function hashSeed(value: string) {
     hash = (hash * 31 + value.charCodeAt(index)) >>> 0;
   }
   return hash;
-}
-
-function mtgArtUrl(value: unknown) {
-  if (!value || typeof value !== "object") return "";
-  const mtg = value as { artUrl?: string; imageUrl?: string };
-  return mtg.artUrl || mtg.imageUrl || "";
 }
 
 function mtgCardName(value: unknown) {
