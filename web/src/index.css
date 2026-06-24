@@ -1824,6 +1824,375 @@ code { font-size: 0.875rem; }
 /* ------------------------------------------------------------------ */
 /* Supabase, Langfuse, and Kanban index pages                          */
 /* ------------------------------------------------------------------ */
+.cron-supabase-panel {
+  display: grid;
+  gap: .85rem;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, .72), rgba(230, 228, 217, .56)),
+    linear-gradient(45deg, rgba(25, 25, 25, .025) 25%, transparent 25%, transparent 75%, rgba(25, 25, 25, .025) 75%);
+  background-size: auto, 18px 18px;
+  box-shadow: 0 24px 80px -64px rgba(25, 25, 25, .52);
+  padding: 1rem;
+}
+
+.cron-supabase-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.cron-supabase-eyebrow {
+  margin: 0 0 .3rem;
+  color: #d97757;
+  font-size: .68rem;
+  font-weight: 850;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+
+.cron-supabase-header h2 {
+  margin: 0;
+  color: #191919;
+  font-family: var(--theme-font-display);
+  font-size: 1.65rem;
+  font-weight: 560;
+  line-height: 1.06;
+}
+
+.cron-supabase-header p {
+  max-width: 58rem;
+  margin: .4rem 0 0;
+  color: var(--color-muted-foreground);
+  font-size: .8rem;
+  line-height: 1.45;
+}
+
+.cron-supabase-header code {
+  color: #191919;
+  font-size: .74rem;
+}
+
+.cron-supabase-toolbar {
+  display: grid;
+  grid-template-columns: minmax(18rem, 1.8fr) minmax(9rem, .75fr) minmax(10rem, .85fr) minmax(7rem, .45fr) minmax(7rem, .45fr);
+  gap: .55rem;
+  align-items: center;
+}
+
+.cron-supabase-search {
+  display: flex;
+  align-items: center;
+  gap: .45rem;
+  min-width: 0;
+  border: 1px solid rgba(214, 212, 200, .9);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, .58);
+  padding: 0 .7rem;
+}
+
+.cron-supabase-search svg {
+  color: #d97757;
+  flex: 0 0 auto;
+}
+
+.cron-supabase-search input {
+  width: 100%;
+  min-height: 2.2rem;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: #191919;
+  font-size: .82rem;
+}
+
+.cron-supabase-stat-grid,
+.cron-supabase-rollup-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: .75rem;
+}
+
+.cron-supabase-rollup-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.cron-supabase-stat,
+.cron-supabase-rollup-card,
+.cron-supabase-empty,
+.cron-supabase-error,
+.cron-supabase-loading {
+  border: 1px solid rgba(214, 212, 200, .76);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, .52);
+}
+
+.cron-supabase-stat {
+  display: grid;
+  min-height: 6.2rem;
+  align-content: start;
+  gap: .2rem;
+  padding: .85rem;
+}
+
+.cron-supabase-stat svg {
+  color: #d97757;
+}
+
+.cron-supabase-stat strong {
+  color: #191919;
+  font-family: var(--theme-font-display);
+  font-size: 1.65rem;
+  font-weight: 600;
+  line-height: 1.05;
+}
+
+.cron-supabase-stat span {
+  color: #191919;
+  font-size: .72rem;
+  font-weight: 850;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+
+.cron-supabase-stat small {
+  color: var(--color-muted-foreground);
+  font-size: .72rem;
+}
+
+.cron-supabase-rollup-card {
+  display: grid;
+  gap: .75rem;
+  min-width: 0;
+  padding: .85rem;
+}
+
+.cron-supabase-rollup-card header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: .6rem;
+}
+
+.cron-supabase-rollup-card h3 {
+  margin: 0;
+  color: #191919;
+  font-size: .88rem;
+  font-weight: 850;
+  line-height: 1.2;
+}
+
+.cron-supabase-rollup-card p {
+  margin: .2rem 0 0;
+  color: var(--color-muted-foreground);
+  font-size: .72rem;
+}
+
+.cron-supabase-rollup-card dl {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: .45rem;
+  margin: 0;
+}
+
+.cron-supabase-rollup-card div {
+  min-width: 0;
+}
+
+.cron-supabase-rollup-card dt {
+  color: var(--color-muted-foreground);
+  font-size: .64rem;
+  font-weight: 800;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+
+.cron-supabase-rollup-card dd {
+  margin: .15rem 0 0;
+  overflow: hidden;
+  color: #191919;
+  font-family: var(--theme-font-mono);
+  font-size: .76rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cron-supabase-table-wrap {
+  overflow: auto;
+  border: 1px solid rgba(214, 212, 200, .76);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, .52);
+}
+
+.cron-supabase-table-wrap table {
+  width: 100%;
+  min-width: 72rem;
+  border-collapse: collapse;
+}
+
+.cron-supabase-table-wrap th,
+.cron-supabase-table-wrap td {
+  border-bottom: 1px solid rgba(214, 212, 200, .66);
+  padding: .65rem .7rem;
+  text-align: left;
+  vertical-align: top;
+}
+
+.cron-supabase-table-wrap th {
+  color: #191919;
+  font-size: .64rem;
+  font-weight: 850;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.cron-supabase-table-wrap td {
+  color: var(--color-muted-foreground);
+  font-family: var(--theme-font-mono);
+  font-size: .72rem;
+  line-height: 1.38;
+}
+
+.cron-supabase-branch {
+  display: inline-flex;
+  align-items: center;
+  gap: .25rem;
+  max-width: 16rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cron-supabase-summary-cell {
+  display: grid;
+  gap: .3rem;
+  min-width: 18rem;
+  max-width: 34rem;
+  white-space: normal;
+}
+
+.cron-supabase-summary-cell a {
+  color: #b85d3d;
+  font-weight: 850;
+}
+
+.cron-supabase-summary-cell small {
+  color: #9b3f2c;
+}
+
+.cron-supabase-empty,
+.cron-supabase-error,
+.cron-supabase-loading {
+  display: flex;
+  align-items: center;
+  gap: .45rem;
+  justify-content: center;
+  min-height: 5.5rem;
+  color: var(--color-muted-foreground);
+  font-size: .82rem;
+  padding: 1rem;
+}
+
+.cron-supabase-error {
+  justify-content: flex-start;
+  min-height: auto;
+  color: #9b3f2c;
+}
+
+.cron-triage-panel {
+  display: grid;
+  gap: .8rem;
+  border: 1px solid rgba(214, 212, 200, .82);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, .58);
+  box-shadow: 0 18px 70px -60px rgba(25, 25, 25, .5);
+  padding: 1rem;
+}
+
+.cron-triage-panel > header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.cron-triage-panel h3 {
+  margin: 0;
+  color: #191919;
+  font-family: var(--theme-font-display);
+  font-size: 1.1rem;
+  font-weight: 600;
+  line-height: 1.1;
+}
+
+.cron-triage-panel header p {
+  max-width: 52rem;
+  margin: .35rem 0 0;
+  color: var(--color-muted-foreground);
+  font-size: .78rem;
+  line-height: 1.45;
+}
+
+.cron-triage-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: .65rem;
+}
+
+.cron-triage-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: .8rem;
+  align-items: start;
+  min-width: 0;
+  border: 1px solid rgba(214, 212, 200, .76);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, .62);
+  padding: .8rem;
+}
+
+.cron-triage-card-kicker {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: .35rem;
+  margin-bottom: .45rem;
+  color: var(--color-muted-foreground);
+  font-size: .68rem;
+  font-weight: 800;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+
+.cron-triage-card h4 {
+  margin: 0;
+  color: #191919;
+  font-size: .9rem;
+  font-weight: 850;
+  line-height: 1.22;
+}
+
+.cron-triage-card p {
+  margin: .35rem 0 0;
+  color: var(--color-muted-foreground);
+  font-size: .76rem;
+  line-height: 1.42;
+}
+
+.cron-triage-card small {
+  display: block;
+  margin-top: .45rem;
+  overflow: hidden;
+  color: #9b3f2c;
+  font-family: var(--theme-font-mono);
+  font-size: .66rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .supabase-page {
   padding-bottom: 2rem;
 }
@@ -2290,6 +2659,23 @@ code { font-size: 0.875rem; }
 }
 
 @media (max-width: 1180px) {
+  .cron-supabase-toolbar {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .cron-supabase-search {
+    grid-column: 1 / -1;
+  }
+
+  .cron-supabase-stat-grid,
+  .cron-supabase-rollup-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .cron-triage-list {
+    grid-template-columns: 1fr;
+  }
+
   .supabase-stat-grid,
   .supabase-team-strip {
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -2301,6 +2687,29 @@ code { font-size: 0.875rem; }
 }
 
 @media (max-width: 720px) {
+  .cron-supabase-header {
+    flex-direction: column;
+  }
+
+  .cron-supabase-toolbar,
+  .cron-supabase-stat-grid,
+  .cron-supabase-rollup-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .cron-supabase-rollup-card dl {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .cron-triage-panel > header,
+  .cron-triage-card {
+    grid-template-columns: 1fr;
+  }
+
+  .cron-triage-panel > header {
+    flex-direction: column;
+  }
+
   .supabase-stat-grid,
   .supabase-team-strip {
     grid-template-columns: 1fr;

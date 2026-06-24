@@ -1,12 +1,34 @@
 import { useCallback, useEffect, useLayoutEffect, useState } from "react";
-import { Clock, Pause, Play, Plus, Trash2, X, Zap } from "lucide-react";
+import {
+  Activity,
+  AlertTriangle,
+  CheckCircle2,
+  Clock,
+  Database,
+  GitBranch,
+  Pause,
+  Play,
+  Plus,
+  RefreshCw,
+  Search,
+  Trash2,
+  X,
+  XCircle,
+  Zap,
+} from "lucide-react";
 import { Badge } from "@nous-research/ui/ui/components/badge";
 import { Button } from "@nous-research/ui/ui/components/button";
 import { Select, SelectOption } from "@nous-research/ui/ui/components/select";
 import { Spinner } from "@nous-research/ui/ui/components/spinner";
 import { H2 } from "@/components/NouiTypography";
 import { api } from "@/lib/api";
-import type { CronJob, ProfileInfo } from "@/lib/api";
+import type {
+  CronJob,
+  GbautoTriageItem,
+  ProfileInfo,
+  SupabaseCronLogsResponse,
+  SupabaseLogRow,
+} from "@/lib/api";
 import { DeleteConfirmDialog } from "@/components/DeleteConfirmDialog";
 import { useToast } from "@/hooks/useToast";
 import { useConfirmDelete } from "@/hooks/useConfirmDelete";
@@ -27,6 +49,38 @@ function formatTime(iso?: string | null): string {
 
 function asText(value: unknown): string {
   return typeof value === "string" ? value : "";
+}
+
+function valueText(row: SupabaseLogRow, key: string): string {
+  const value = row[key];
+  if (value === null || value === undefined) return "";
+  return String(value);
+}
+
+function valueNumber(row: SupabaseLogRow, key: string): number {
+  const value = row[key];
+  if (typeof value === "number") return value;
+  if (typeof value === "string" && value.trim()) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
+  return 0;
+}
+
+function formatNumber(value: unknown): string {
+  const number = typeof value === "number" ? value : Number(value ?? 0);
+  if (!Number.isFinite(number)) return "0";
+  return new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 }).format(number);
+}
+
+function formatCurrency(value: unknown): string {
+  const number = typeof value === "number" ? value : Number(value ?? 0);
+  if (!Number.isFinite(number)) return "$0";
+  return new Intl.NumberFormat(undefined, {
+    currency: "USD",
+    maximumFractionDigits: 4,
+    style: "currency",
+  }).format(number);
 }
 
 function truncateText(value: string, maxLength: number): string {
@@ -95,11 +149,266 @@ const STATUS_TONE: Record<string, "success" | "warning" | "destructive"> = {
   completed: "destructive",
 };
 
+const CRON_OUTPUT_TONE: Record<
+  string,
+  "success" | "warning" | "destructive" | "secondary" | "outline"
+> = {
+  error: "destructive",
+  failed: "destructive",
+  failed_silent: "destructive",
+  noop: "secondary",
+  ok: "success",
+  pr_opened: "success",
+  pushed_no_pr: "warning",
+  skipped: "warning",
+  success: "success",
+  triage_created: "success",
+};
+
+function getOutputTone(
+  status: string,
+): "success" | "warning" | "destructive" | "secondary" | "outline" {
+  return CRON_OUTPUT_TONE[status.toLowerCase()] ?? "outline";
+}
+
+function getOutputStatus(row: SupabaseLogRow): string {
+  return valueText(row, "status") || "unknown";
+}
+
+function formatSupabaseValue(value: unknown, key = ""): string {
+  if (value === null || value === undefined || value === "") return "-";
+  if (typeof value === "number") return formatNumber(value);
+  if (typeof value === "boolean") return value ? "true" : "false";
+  if (typeof value === "object") return JSON.stringify(value);
+  const text = String(value);
+  if (key.includes("_at")) return formatTime(text);
+  return text.length > 140 ? `${text.slice(0, 137)}...` : text;
+}
+
+function CronMetricCard({
+  icon: Icon,
+  label,
+  sub,
+  value,
+}: {
+  icon: typeof Clock;
+  label: string;
+  sub?: string;
+  value: string | number;
+}) {
+  return (
+    <article className="cron-supabase-stat">
+      <Icon className="h-4 w-4" />
+      <strong>{value}</strong>
+      <span>{label}</span>
+      {sub ? <small>{sub}</small> : null}
+    </article>
+  );
+}
+
+function CronRollupCard({ row }: { row: SupabaseLogRow }) {
+  const name = valueText(row, "cron_name") || "unnamed cron";
+  const failed = valueNumber(row, "failed_outputs");
+  return (
+    <article className="cron-supabase-rollup-card">
+      <header>
+        <div>
+          <h3>{name}</h3>
+          <p>{valueText(row, "hosts") || "host not recorded"}</p>
+        </div>
+        <Badge tone={failed > 0 ? "destructive" : "success"}>
+          {failed > 0 ? `${failed} failed` : "healthy"}
+        </Badge>
+      </header>
+      <dl>
+        <div>
+          <dt>Runs</dt>
+          <dd>{formatNumber(row.runs)}</dd>
+        </div>
+        <div>
+          <dt>Picked</dt>
+          <dd>{formatNumber(row.picked_outputs)}</dd>
+        </div>
+        <div>
+          <dt>OK</dt>
+          <dd>{formatNumber(row.ok_outputs)}</dd>
+        </div>
+        <div>
+          <dt>Skipped</dt>
+          <dd>{formatNumber(row.skipped_outputs)}</dd>
+        </div>
+        <div>
+          <dt>Cost</dt>
+          <dd>{formatCurrency(row.cost_usd)}</dd>
+        </div>
+        <div>
+          <dt>Latest</dt>
+          <dd>{formatTime(valueText(row, "latest_started_at"))}</dd>
+        </div>
+      </dl>
+    </article>
+  );
+}
+
+function CronOutputTable({ rows }: { rows: SupabaseLogRow[] }) {
+  const columns = [
+    "status",
+    "cron_name",
+    "host",
+    "issue_id",
+    "branch",
+    "duration_s",
+    "cost_usd",
+    "cron_started_at",
+  ];
+
+  if (!rows.length) {
+    return (
+      <div className="cron-supabase-empty">
+        No Supabase cron outputs matched this filter.
+      </div>
+    );
+  }
+
+  return (
+    <div className="cron-supabase-table-wrap">
+      <table>
+        <thead>
+          <tr>
+            {columns.map((column) => (
+              <th key={column}>{column.replace(/_/g, " ")}</th>
+            ))}
+            <th>summary</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row, index) => {
+            const status = getOutputStatus(row);
+            const prUrl = valueText(row, "pr_url");
+            return (
+              <tr
+                key={
+                  valueText(row, "output_id") ||
+                  `${valueText(row, "tick_id")}:${index}`
+                }
+              >
+                {columns.map((column) => (
+                  <td key={column}>
+                    {column === "status" ? (
+                      <Badge tone={getOutputTone(status)}>{status}</Badge>
+                    ) : column === "branch" && valueText(row, column) ? (
+                      <span className="cron-supabase-branch">
+                        <GitBranch className="h-3 w-3" />
+                        {formatSupabaseValue(row[column], column)}
+                      </span>
+                    ) : column === "cost_usd" ? (
+                      formatCurrency(row[column])
+                    ) : (
+                      formatSupabaseValue(row[column], column)
+                    )}
+                  </td>
+                ))}
+                <td>
+                  <div className="cron-supabase-summary-cell">
+                    <span>{formatSupabaseValue(row.agent_summary)}</span>
+                    {prUrl ? (
+                      <a href={prUrl} target="_blank" rel="noreferrer">
+                        PR
+                      </a>
+                    ) : null}
+                    {valueText(row, "stderr_tail") ? (
+                      <small>{truncateText(valueText(row, "stderr_tail"), 220)}</small>
+                    ) : null}
+                  </div>
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function TriageGatePanel({
+  approvingSlug,
+  items,
+  onApprove,
+}: {
+  approvingSlug: string;
+  items: GbautoTriageItem[];
+  onApprove: (slug: string) => void;
+}) {
+  const gatedItems = items.filter(
+    (item) => item.human_gate_required && item.status !== "approved",
+  );
+
+  return (
+    <section className="cron-triage-panel">
+      <header>
+        <div>
+          <p className="cron-supabase-eyebrow">Smoke-client triage gate</p>
+          <h3>Pending approval</h3>
+          <p>
+            Individual action items from the triage vault. Approve dry-run stages the TAC
+            dispatch and verifies the gate without writing Kanban cards.
+          </p>
+        </div>
+        <Badge tone={gatedItems.length ? "warning" : "success"}>
+          {gatedItems.length} gated
+        </Badge>
+      </header>
+
+      {gatedItems.length ? (
+        <div className="cron-triage-list">
+          {gatedItems.map((item) => (
+            <article key={item.slug} className="cron-triage-card">
+              <div>
+                <div className="cron-triage-card-kicker">
+                  <Badge tone={item.status === "approved" ? "success" : "outline"}>
+                    {item.status || "unknown"}
+                  </Badge>
+                  {item.priority ? <span>{item.priority}</span> : null}
+                  {item.origin ? <span>{item.origin}</span> : null}
+                </div>
+                <h4>{item.title}</h4>
+                <p>{truncateText(item.summary, 220)}</p>
+                <small>{item.slug}</small>
+              </div>
+              <Button
+                size="sm"
+                onClick={() => onApprove(item.slug)}
+                disabled={approvingSlug === item.slug}
+                prefix={approvingSlug === item.slug ? <Spinner /> : <CheckCircle2 />}
+              >
+                Approve dry-run
+              </Button>
+            </article>
+          ))}
+        </div>
+      ) : (
+        <div className="cron-supabase-empty">No smoke-client triage items are waiting.</div>
+      )}
+    </section>
+  );
+}
+
 export default function CronPage() {
   const [jobs, setJobs] = useState<CronJob[]>([]);
   const [profiles, setProfiles] = useState<ProfileInfo[]>([]);
   const [selectedProfile, setSelectedProfile] = useState("all");
   const [loading, setLoading] = useState(true);
+  const [supabaseCron, setSupabaseCron] = useState<SupabaseCronLogsResponse | null>(null);
+  const [supabaseLoading, setSupabaseLoading] = useState(true);
+  const [supabaseError, setSupabaseError] = useState("");
+  const [supabaseDays, setSupabaseDays] = useState("14");
+  const [supabaseLimit, setSupabaseLimit] = useState("50");
+  const [supabaseSearch, setSupabaseSearch] = useState("");
+  const [supabaseRepo, setSupabaseRepo] = useState("");
+  const [supabaseWorkdir, setSupabaseWorkdir] = useState("");
+  const [triageItems, setTriageItems] = useState<GbautoTriageItem[]>([]);
+  const [triageError, setTriageError] = useState("");
+  const [approvingSlug, setApprovingSlug] = useState("");
   const { toast, showToast } = useToast();
   const { t } = useI18n();
   const { setEnd } = usePageHeader();
@@ -119,12 +428,48 @@ export default function CronPage() {
   const createProfile = selectedProfile === "all" ? "default" : selectedProfile;
 
   const loadJobs = useCallback(() => {
+    setLoading(true);
     api
       .getCronJobs(selectedProfile)
       .then(setJobs)
       .catch(() => showToast(t.common.loading, "error"))
       .finally(() => setLoading(false));
   }, [selectedProfile, showToast, t.common.loading]);
+
+  const loadSupabaseCron = useCallback(() => {
+    setSupabaseLoading(true);
+    setSupabaseError("");
+    api
+      .getSupabaseLogsCron({
+        days: Number(supabaseDays) || 14,
+        limit: Number(supabaseLimit) || 50,
+        repo: supabaseRepo.trim() || undefined,
+        search: supabaseSearch.trim() || undefined,
+        workdir: supabaseWorkdir.trim() || undefined,
+      })
+      .then((res) => {
+        setSupabaseCron(res);
+        if (!res.ok) {
+          setSupabaseError(res.error || "Supabase cron query failed.");
+        }
+      })
+      .catch((error: unknown) => {
+        setSupabaseCron(null);
+        setSupabaseError(error instanceof Error ? error.message : String(error));
+      })
+      .finally(() => setSupabaseLoading(false));
+  }, [supabaseDays, supabaseLimit, supabaseRepo, supabaseSearch, supabaseWorkdir]);
+
+  const loadTriageItems = useCallback(() => {
+    setTriageError("");
+    api
+      .getGbautoTriageItems("smoke-client")
+      .then((res) => setTriageItems(res.items))
+      .catch((error: unknown) => {
+        setTriageItems([]);
+        setTriageError(error instanceof Error ? error.message : String(error));
+      });
+  }, []);
 
   useEffect(() => {
     api
@@ -136,6 +481,42 @@ export default function CronPage() {
   useEffect(() => {
     loadJobs();
   }, [loadJobs]);
+
+  useEffect(() => {
+    loadSupabaseCron();
+  }, [loadSupabaseCron]);
+
+  useEffect(() => {
+    loadTriageItems();
+  }, [loadTriageItems]);
+
+  const handleApproveTriageDryRun = useCallback(
+    async (slug: string) => {
+      setApprovingSlug(slug);
+      try {
+        const result = await api.approveGbautoTriageItem(slug, {
+          client: "smoke-client",
+          write: false,
+        });
+        const planned = valueText(result.dispatch?.dispatch as SupabaseLogRow, "stdout");
+        showToast(
+          result.ok
+            ? `Gate approved in dry-run: ${slug}`
+            : `Gate returned ${result.mode}: ${slug}`,
+          result.ok ? "success" : "error",
+        );
+        if (planned) {
+          console.info("Triage dry-run dispatch", planned);
+        }
+        loadTriageItems();
+      } catch (error) {
+        showToast(`${t.status.error}: ${error}`, "error");
+      } finally {
+        setApprovingSlug("");
+      }
+    },
+    [loadTriageItems, showToast, t.status.error],
+  );
 
   const handleCreate = async () => {
     if (!prompt.trim() || !schedule.trim()) {
@@ -251,6 +632,15 @@ export default function CronPage() {
   const pendingJob = jobDelete.pendingId
     ? jobs.find((j) => getJobKey(j) === jobDelete.pendingId)
     : null;
+  const rollupRows = supabaseCron?.rollup ?? [];
+  const outputRows = supabaseCron?.outputs ?? [];
+  const totalRuns = rollupRows.reduce((total, row) => total + valueNumber(row, "runs"), 0);
+  const totalFailures = rollupRows.reduce(
+    (total, row) => total + valueNumber(row, "failed_outputs"),
+    0,
+  );
+  const totalCost = rollupRows.reduce((total, row) => total + valueNumber(row, "cost_usd"), 0);
+  const openedPrs = outputRows.filter((row) => valueText(row, "pr_url")).length;
 
   return (
     <div className="flex flex-col gap-6">
@@ -391,6 +781,144 @@ export default function CronPage() {
           </div>
         </div>
       )}
+
+      <section className="cron-supabase-panel">
+        <header className="cron-supabase-header">
+          <div>
+            <p className="cron-supabase-eyebrow">Supabase cron evidence</p>
+            <h2>Run history and outputs</h2>
+            <p>
+              Live persisted cron ticks from <code>cron_runs</code> joined to output receipts in{" "}
+              <code>cron_run_outputs</code>.
+            </p>
+          </div>
+          <Button
+            size="sm"
+            onClick={loadSupabaseCron}
+            disabled={supabaseLoading}
+            prefix={supabaseLoading ? <Spinner /> : <RefreshCw />}
+          >
+            Refresh
+          </Button>
+        </header>
+
+        <div className="cron-supabase-toolbar">
+          <div className="cron-supabase-search">
+            <Search className="h-4 w-4" />
+            <input
+              aria-label="Search cron evidence"
+              placeholder="Search cron, issue, branch, PR, summary..."
+              value={supabaseSearch}
+              onChange={(event) => setSupabaseSearch(event.target.value)}
+            />
+          </div>
+          <Input
+            aria-label="Repo or host filter"
+            placeholder="repo / host"
+            value={supabaseRepo}
+            onChange={(event) => setSupabaseRepo(event.target.value)}
+          />
+          <Input
+            aria-label="Working directory or summary filter"
+            placeholder="workdir / summary"
+            value={supabaseWorkdir}
+            onChange={(event) => setSupabaseWorkdir(event.target.value)}
+          />
+          <Select
+            aria-label="Supabase cron days"
+            value={supabaseDays}
+            onValueChange={setSupabaseDays}
+          >
+            <SelectOption value="3">3 days</SelectOption>
+            <SelectOption value="7">7 days</SelectOption>
+            <SelectOption value="14">14 days</SelectOption>
+            <SelectOption value="30">30 days</SelectOption>
+          </Select>
+          <Select
+            aria-label="Supabase cron limit"
+            value={supabaseLimit}
+            onValueChange={setSupabaseLimit}
+          >
+            <SelectOption value="25">25 rows</SelectOption>
+            <SelectOption value="50">50 rows</SelectOption>
+            <SelectOption value="100">100 rows</SelectOption>
+            <SelectOption value="250">250 rows</SelectOption>
+          </Select>
+        </div>
+
+        {supabaseError ? (
+          <div className="cron-supabase-error">
+            <AlertTriangle className="h-4 w-4" />
+            {supabaseError}
+          </div>
+        ) : null}
+
+        <div className="cron-supabase-stat-grid">
+          <CronMetricCard
+            icon={Activity}
+            label="Runs"
+            sub={`${supabaseDays} day window`}
+            value={formatNumber(totalRuns)}
+          />
+          <CronMetricCard
+            icon={CheckCircle2}
+            label="Outputs"
+            sub="output receipts"
+            value={formatNumber(outputRows.length)}
+          />
+          <CronMetricCard
+            icon={XCircle}
+            label="Failures"
+            sub="rollup fail count"
+            value={formatNumber(totalFailures)}
+          />
+          <CronMetricCard
+            icon={Database}
+            label="Cost"
+            sub={`${openedPrs} PR-linked outputs`}
+            value={formatCurrency(totalCost)}
+          />
+        </div>
+
+        {supabaseLoading ? (
+          <div className="cron-supabase-loading">
+            <Spinner />
+            Loading Supabase cron receipts...
+          </div>
+        ) : (
+          <>
+            <div className="cron-supabase-rollup-grid">
+              {rollupRows.length ? (
+                rollupRows.slice(0, 6).map((row, index) => (
+                  <CronRollupCard
+                    key={valueText(row, "cron_name") || `rollup:${index}`}
+                    row={row}
+                  />
+                ))
+              ) : (
+                <div className="cron-supabase-empty">
+                  No cron rollups returned for the current filters.
+                </div>
+              )}
+            </div>
+
+            <CronOutputTable rows={outputRows.slice(0, Number(supabaseLimit) || 50)} />
+          </>
+        )}
+      </section>
+
+      {triageError ? (
+        <div className="cron-supabase-error">
+          <AlertTriangle className="h-4 w-4" />
+          {triageError}
+        </div>
+      ) : null}
+
+      <TriageGatePanel
+        approvingSlug={approvingSlug}
+        items={triageItems}
+        onApprove={handleApproveTriageDryRun}
+      />
 
       <div className="flex flex-col gap-3">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">

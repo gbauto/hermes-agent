@@ -148,7 +148,7 @@ function rowKey(row: SupabaseLogRow, index: number) {
 
 function statusClass(value: unknown) {
   const text = String(value ?? "").toLowerCase();
-  if (["ok", "success", "succeeded", "true", "passed", "done"].includes(text)) {
+  if (["ok", "success", "succeeded", "true", "passed", "done", "triage_created"].includes(text)) {
     return "border-emerald-500/25 bg-emerald-500/10 text-emerald-300";
   }
   if (["failed", "error", "false", "blocked", "timeout", "failed_silent"].includes(text)) {

@@ -252,10 +252,14 @@ def get_cron(*, days: Any = 14, limit: Any = 100, search: Optional[str] = None,
 
     def load() -> dict[str, Any]:
         rollup_sql = f"""
-            select cron_name, count(*)::int as runs, coalesce(sum(ok_count), 0)::int as ok_outputs,
+            select cron_name, count(*)::int as runs, coalesce(sum(picked_count), 0)::int as picked_outputs,
+                   coalesce(sum(ok_count), 0)::int as ok_outputs,
                    coalesce(sum(fail_count), 0)::int as failed_outputs,
+                   coalesce(sum(skipped_count), 0)::int as skipped_outputs,
                    coalesce(round(sum(total_cost_usd)::numeric, 4), 0) as cost_usd,
-                   max(started_at) as latest_started_at
+                   max(started_at) as latest_started_at,
+                   string_agg(distinct host, ', ' order by host) filter (where host is not null) as hosts,
+                   max(schema_version) as schema_version
             from cron_runs
             where started_at >= now() - interval '{bounds.days} days'
             {_contains_clause(["cron_name", "host"], repo)}
@@ -266,16 +270,18 @@ def get_cron(*, days: Any = 14, limit: Any = 100, search: Optional[str] = None,
             limit {bounds.limit}
         """
         outputs_sql = f"""
-            select o.output_id, o.tick_id, c.cron_name, c.started_at as cron_started_at,
+            select o.output_id, o.tick_id, c.cron_name, c.host, c.started_at as cron_started_at,
+                   c.elapsed_ms as cron_elapsed_ms,
                    o.issue_id, o.status, o.branch, o.pr_url, o.cost_usd, o.turns,
                    o.duration_s, left(coalesce(o.stderr_tail, ''), 2000) as stderr_tail,
-                   o.agent_summary
+                   o.agent_summary, o.schema_version,
+                   case when o.payload is null then null else left(o.payload::text, 2000) end as payload_preview
             from cron_run_outputs o
             left join cron_runs c on c.tick_id = o.tick_id
             where (c.started_at >= now() - interval '{bounds.days} days' or c.started_at is null)
-            {_contains_clause(["c.cron_name", "o.branch", "o.pr_url"], repo)}
-            {_contains_clause(["c.cron_name", "o.branch", "o.pr_url", "o.agent_summary"], workdir)}
-            {_search_clause(["c.cron_name", "o.issue_id", "o.status", "o.branch", "o.pr_url", "o.agent_summary", "o.stderr_tail"], search)}
+            {_contains_clause(["c.cron_name", "c.host", "o.branch", "o.pr_url"], repo)}
+            {_contains_clause(["c.cron_name", "c.host", "o.branch", "o.pr_url", "o.agent_summary"], workdir)}
+            {_search_clause(["c.cron_name", "c.host", "o.issue_id", "o.status", "o.branch", "o.pr_url", "o.agent_summary", "o.stderr_tail"], search)}
             order by c.started_at desc nulls last
             limit {bounds.limit}
         """
