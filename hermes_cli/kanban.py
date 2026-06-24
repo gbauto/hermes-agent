@@ -550,6 +550,12 @@ def build_parser(parent_subparsers: argparse._SubParsersAction) -> argparse.Argu
     p_unblock = sub.add_parser("unblock", help="Return one or more blocked/scheduled tasks to ready")
     p_unblock.add_argument("task_ids", nargs="+")
 
+    p_promote = sub.add_parser(
+        "promote",
+        help="Promote a todo/blocked/scheduled task toward ready, honoring dependencies",
+    )
+    p_promote.add_argument("task_id")
+
     p_archive = sub.add_parser("archive", help="Archive one or more tasks")
     p_archive.add_argument("task_ids", nargs="*",
                            help="Task ids to archive (default mode)")
@@ -899,6 +905,7 @@ def kanban_command(args: argparse.Namespace) -> int:
         "block":    _cmd_block,
         "schedule": _cmd_schedule,
         "unblock":  _cmd_unblock,
+        "promote":  _cmd_promote,
         "archive":  _cmd_archive,
         "tail":     _cmd_tail,
         "dispatch": _cmd_dispatch,
@@ -1953,6 +1960,42 @@ def _cmd_unblock(args: argparse.Namespace) -> int:
             else:
                 print(f"Unblocked {tid}")
     return 0 if not failed else 1
+
+
+def _cmd_promote(args: argparse.Namespace) -> int:
+    """Promote a task after a Telegram/operator review button.
+
+    ``todo`` tasks are rechecked against their parent gate; ``blocked`` and
+    ``scheduled`` tasks go through the same invariant-preserving path as
+    ``unblock``. Already-ready tasks are treated as success for idempotent
+    button clicks.
+    """
+    tid = args.task_id
+    with kb.connect() as conn:
+        task = kb.get_task(conn, tid)
+        if not task:
+            print(f"cannot promote {tid} (unknown id)", file=sys.stderr)
+            return 1
+        if task.status in {"blocked", "scheduled"}:
+            if not kb.unblock_task(conn, tid):
+                print(f"cannot promote {tid} (not blocked/scheduled?)", file=sys.stderr)
+                return 1
+        elif task.status == "todo":
+            kb.recompute_ready(conn)
+        elif task.status == "ready":
+            print(f"Promoted {tid} (already ready)")
+            return 0
+        else:
+            print(f"cannot promote {tid} from status {task.status}", file=sys.stderr)
+            return 1
+        updated = kb.get_task(conn, tid)
+        if updated and updated.status in {"ready", "todo"}:
+            suffix = "" if updated.status == "ready" else " (waiting on parent dependencies)"
+            print(f"Promoted {tid} to {updated.status}{suffix}")
+            return 0
+        status = updated.status if updated else "missing"
+        print(f"cannot promote {tid} (status {status})", file=sys.stderr)
+        return 1
 
 
 def _cmd_archive(args: argparse.Namespace) -> int:
