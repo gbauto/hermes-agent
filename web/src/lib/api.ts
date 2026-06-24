@@ -101,6 +101,22 @@ export const api = {
     const qs = supabaseLogsQueryString(params);
     return fetchJSON<SupabaseCronLogsResponse>(`/api/logs/supabase/cron?${qs}`);
   },
+  getGbautoTriageItems: (client = "smoke-client") =>
+    fetchJSON<GbautoTriageItemsResponse>(
+      `/api/gbauto/triage/items?client=${encodeURIComponent(client)}`,
+    ),
+  approveGbautoTriageItem: (
+    slug: string,
+    body: { client?: string; write?: boolean; board_db?: string } = {},
+  ) =>
+    fetchJSON<GbautoTriageApproveResponse>(
+      `/api/gbauto/triage/items/${encodeURIComponent(slug)}/approve`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      },
+    ),
   getSupabaseLogsHostJobs: (params: SupabaseLogsQuery = {}) => {
     const qs = supabaseLogsQueryString(params);
     return fetchJSON<SupabaseRowsResponse>(`/api/logs/supabase/host-jobs?${qs}`);
@@ -511,6 +527,39 @@ export interface SupabaseCronLogsResponse {
   ok: boolean;
   outputs: SupabaseLogRow[];
   rollup: SupabaseLogRow[];
+}
+
+export interface GbautoTriageItem {
+  client?: string | null;
+  first_seen?: string | null;
+  human_gate_required: boolean;
+  linked_kanban_tasks: unknown[];
+  origin?: string | null;
+  path: string;
+  priority?: string | null;
+  slug: string;
+  status: string;
+  summary: string;
+  tenant?: string | null;
+  title: string;
+}
+
+export interface GbautoTriageItemsResponse {
+  ok: boolean;
+  client: string;
+  items: GbautoTriageItem[];
+}
+
+export interface GbautoTriageApproveResponse {
+  ok: boolean;
+  client: string;
+  slug: string;
+  mode: "dry-run" | "write-kanban";
+  updated_item: boolean;
+  item: GbautoTriageItem;
+  prepare: Record<string, unknown>;
+  dispatch: Record<string, unknown>;
+  tasks: string[];
 }
 
 export interface SupabaseTracesLogsResponse extends SupabaseRowsResponse {

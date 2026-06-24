@@ -2613,6 +2613,174 @@ async def get_supabase_logs_cron(
     return get_cron(days=days, limit=limit, search=search, repo=repo, workdir=workdir)
 
 
+def _gbauto_repo_root() -> Path:
+    candidates = []
+    if os.environ.get("GBAUTO_REPO_ROOT"):
+        candidates.append(Path(os.environ["GBAUTO_REPO_ROOT"]))
+    candidates.extend([
+        PROJECT_ROOT.parent / "gbautomation",
+        PROJECT_ROOT.parent / "gbautomation-main",
+        Path.cwd(),
+    ])
+    for candidate in candidates:
+        root = candidate.expanduser().resolve()
+        if (root / "plugins" / "gbauto-triage" / "gbauto_triage").exists():
+            return root
+    raise HTTPException(status_code=404, detail="gbautomation repo with gbauto-triage plugin not found")
+
+
+def _triage_items_dir(client: str) -> Path:
+    safe_client = (client or "smoke-client").strip()
+    if not safe_client or any(part in safe_client for part in ("..", "/", "\\")):
+        raise HTTPException(status_code=400, detail="invalid client")
+    root = _gbauto_repo_root()
+    path = root / "second-brain" / "clients" / safe_client / "triage" / "items"
+    if not path.exists():
+        raise HTTPException(status_code=404, detail=f"triage vault not found for client {safe_client!r}")
+    return path
+
+
+def _read_triage_item(path: Path) -> Dict[str, Any]:
+    text = path.read_text(encoding="utf-8")
+    frontmatter: Dict[str, Any] = {}
+    body = text
+    if text.startswith("---"):
+        parts = text.split("---", 2)
+        if len(parts) == 3:
+            frontmatter = yaml.safe_load(parts[1]) or {}
+            body = parts[2].lstrip()
+    title = str(frontmatter.get("title") or path.stem)
+    summary = " ".join(
+        line.strip()
+        for line in body.splitlines()
+        if line.strip() and not line.lstrip().startswith("#")
+    )
+    return {
+        "slug": str(frontmatter.get("slug") or path.stem),
+        "title": title,
+        "status": str(frontmatter.get("status") or ""),
+        "priority": frontmatter.get("priority"),
+        "client": frontmatter.get("client") or frontmatter.get("tenant"),
+        "tenant": frontmatter.get("tenant"),
+        "origin": frontmatter.get("origin"),
+        "human_gate_required": bool(frontmatter.get("human_gate_required")),
+        "linked_kanban_tasks": frontmatter.get("linked_kanban_tasks") or [],
+        "first_seen": frontmatter.get("first_seen"),
+        "path": str(path),
+        "summary": summary[:500],
+        "_frontmatter": frontmatter,
+        "_body": body,
+    }
+
+
+def _write_triage_item(path: Path, item: Dict[str, Any]) -> None:
+    frontmatter = dict(item.get("_frontmatter") or {})
+    body = item.get("_body") or ""
+    rendered = yaml.safe_dump(frontmatter, sort_keys=False, allow_unicode=False).strip()
+    path.write_text(f"---\n{rendered}\n---\n{body}", encoding="utf-8")
+
+
+def _parse_dispatch_tasks(dispatch: Dict[str, Any]) -> List[str]:
+    stdout = str(dispatch.get("stdout") or "")
+    for line in stdout.splitlines():
+        if line.lower().startswith("tasks:"):
+            return [part.strip() for part in line.split(":", 1)[1].split(",") if part.strip()]
+    return []
+
+
+class TriageApproveRequest(BaseModel):
+    client: str = "smoke-client"
+    write: bool = False
+    board_db: Optional[str] = None
+
+
+@app.get("/api/gbauto/triage/items")
+async def list_gbauto_triage_items(client: str = "smoke-client"):
+    items = []
+    for path in sorted(_triage_items_dir(client).glob("*.md")):
+        item = _read_triage_item(path)
+        item.pop("_frontmatter", None)
+        item.pop("_body", None)
+        items.append(item)
+    return {"ok": True, "client": client, "items": items}
+
+
+@app.post("/api/gbauto/triage/items/{slug}/approve")
+async def approve_gbauto_triage_item(slug: str, body: TriageApproveRequest):
+    if any(part in slug for part in ("..", "/", "\\")):
+        raise HTTPException(status_code=400, detail="invalid slug")
+
+    vault = _triage_items_dir(body.client)
+    item_path = vault / f"{slug}.md"
+    if not item_path.exists():
+        raise HTTPException(status_code=404, detail=f"triage item not found: {slug}")
+
+    item = _read_triage_item(item_path)
+    root = _gbauto_repo_root()
+    plugin_path = root / "plugins" / "gbauto-triage"
+    if str(plugin_path) not in sys.path:
+        sys.path.insert(0, str(plugin_path))
+    os.environ.setdefault("GBAUTO_REPO_ROOT", str(root))
+
+    try:
+        from gbauto_triage.tools import triage_dispatch_tac_ticket, triage_prepare_tac_ticket
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=f"failed to import gbauto-triage tools: {type(exc).__name__}: {exc}",
+        )
+
+    request_text = (
+        f"TAC build for {body.client}: {item['title']}. "
+        f"{item['summary'] or 'Use the triage item body as the source of truth.'}"
+    )
+    prep = triage_prepare_tac_ticket({
+        "slug": slug,
+        "title": item["title"],
+        "summary": item["summary"],
+        "request": request_text,
+    })
+    if not prep.get("ok"):
+        return {"ok": False, "client": body.client, "item": item, "prepare": prep}
+
+    dispatch_args: Dict[str, Any] = {"intent_id": prep["intent_id"], "write": bool(body.write)}
+    if body.board_db:
+        dispatch_args["db"] = body.board_db
+    elif body.write:
+        dispatch_args["db"] = str(Path.home() / ".hermes" / "kanban" / "boards" / body.client / "kanban.db")
+
+    dispatch = triage_dispatch_tac_ticket(dispatch_args)
+    tasks = _parse_dispatch_tasks(dispatch.get("dispatch") or {})
+
+    updated = False
+    if dispatch.get("ok") and dispatch.get("live_write"):
+        from datetime import datetime, timezone
+
+        fm = item["_frontmatter"]
+        fm["status"] = "approved"
+        fm["approved_at"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        fm["gate_intent_id"] = prep["intent_id"]
+        if tasks:
+            fm["linked_kanban_tasks"] = list(dict.fromkeys((fm.get("linked_kanban_tasks") or []) + tasks))
+        _write_triage_item(item_path, item)
+        updated = True
+
+    public_item = dict(item)
+    public_item.pop("_frontmatter", None)
+    public_item.pop("_body", None)
+    return {
+        "ok": bool(dispatch.get("ok")),
+        "client": body.client,
+        "slug": slug,
+        "mode": "write-kanban" if dispatch.get("live_write") else "dry-run",
+        "updated_item": updated,
+        "item": public_item,
+        "prepare": prep,
+        "dispatch": dispatch,
+        "tasks": tasks,
+    }
+
+
 @app.get("/api/logs/supabase/host-jobs")
 async def get_supabase_logs_host_jobs(
     days: int = 14,
