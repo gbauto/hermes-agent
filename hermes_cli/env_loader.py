@@ -94,6 +94,22 @@ def _load_dotenv_with_fallback(path: Path, *, override: bool) -> None:
     _sanitize_loaded_credentials()
 
 
+def _credential_env_snapshot() -> dict[str, str]:
+    """Capture non-empty process credentials before loading fallback dotenvs."""
+    return {
+        key: value
+        for key, value in os.environ.items()
+        if value and any(key.endswith(suffix) for suffix in _CREDENTIAL_SUFFIXES)
+    }
+
+
+def _restore_process_credentials(snapshot: dict[str, str]) -> None:
+    """Restore process-provided credentials that a project .env overwrote."""
+    for key, value in snapshot.items():
+        os.environ[key] = value
+    _sanitize_loaded_credentials()
+
+
 def _sanitize_env_file_if_needed(path: Path) -> None:
     """Pre-sanitize a .env file before python-dotenv reads it.
 
@@ -169,7 +185,10 @@ def load_hermes_dotenv(
         loaded.append(user_env)
 
     if project_env_path and project_env_path.exists():
+        preserve_credentials = _credential_env_snapshot() if not loaded else {}
         _load_dotenv_with_fallback(project_env_path, override=not loaded)
+        if preserve_credentials:
+            _restore_process_credentials(preserve_credentials)
         loaded.append(project_env_path)
 
     _apply_external_secret_sources(home_path)

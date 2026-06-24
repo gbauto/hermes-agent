@@ -1266,7 +1266,10 @@ def create_openai_client(agent, client_kwargs: dict, *, reason: str, shared: boo
     # constructs a fresh one — no stale closed transport can be reused.
     # Tests in ``tests/run_agent/test_create_openai_client_reuse.py`` and
     # ``tests/run_agent/test_sequential_chats_live.py`` pin this invariant.
-    if "http_client" not in client_kwargs:
+    if "http_client" not in client_kwargs and not base_url_host_matches(
+        str(client_kwargs.get("base_url", "")),
+        "openrouter.ai",
+    ):
         keepalive_http = agent._build_keepalive_http_client(client_kwargs.get("base_url", ""))
         if keepalive_http is not None:
             client_kwargs["http_client"] = keepalive_http
@@ -1499,7 +1502,11 @@ def invoke_tool(agent, function_name: str, function_args: dict, effective_task_i
         try:
             from hermes_cli.plugins import get_pre_tool_call_block_message
             block_message = get_pre_tool_call_block_message(
-                function_name, function_args, task_id=effective_task_id or "",
+                function_name,
+                function_args,
+                task_id=effective_task_id or "",
+                session_id=agent.session_id or "",
+                tool_call_id=tool_call_id or "",
             )
         except Exception:
             pass

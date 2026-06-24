@@ -20,6 +20,7 @@ import subprocess
 import sys
 import threading
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 from pathlib import Path
@@ -52,7 +53,7 @@ from gateway.status import get_running_pid, read_runtime_status
 try:
     from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
     from fastapi.middleware.cors import CORSMiddleware
-    from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
+    from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response, StreamingResponse
     from fastapi.staticfiles import StaticFiles
     from pydantic import BaseModel
 except ImportError:
@@ -64,7 +65,7 @@ except ImportError:
         _lazy_ensure("tool.dashboard", prompt=False)
         from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
         from fastapi.middleware.cors import CORSMiddleware
-        from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
+        from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response, StreamingResponse
         from fastapi.staticfiles import StaticFiles
         from pydantic import BaseModel
     except Exception:
@@ -119,6 +120,9 @@ _PUBLIC_API_PATHS: frozenset = frozenset({
     "/api/dashboard/themes",
     "/api/dashboard/plugins",
     "/api/dashboard/plugins/rescan",
+    # EventSource cannot send custom auth headers. This read-only stream
+    # validates the dashboard token in its query string inside the endpoint.
+    "/api/gbauto/pi-observability/events/stream",
 })
 
 
@@ -2694,6 +2698,63 @@ class TriageApproveRequest(BaseModel):
     board_db: Optional[str] = None
 
 
+TRIAGE_CLIENT_BOARD_SLUGS = {
+    # smoke-client work runs on the isolated profile board, not a board named
+    # after the client slug and not the production gbautomation board.
+    "smoke-client": "smoke",
+}
+TRIAGE_CLIENT_BOARD_DBS = {
+    # Keep this as the Mini path even when the dashboard backend runs on Windows;
+    # the triage dispatch seam remotes POSIX Mini board targets via mm.sh.
+    "smoke-client": "/Users/greg/.hermes/kanban/boards/smoke/kanban.db",
+}
+
+
+def _triage_env_token(value: str) -> str:
+    return "".join(ch if ch.isalnum() else "_" for ch in value).upper()
+
+
+def _triage_board_slug_from_db(board_db: str, fallback: str) -> str:
+    normalized = board_db.replace("\\", "/").rstrip("/")
+    parts = normalized.split("/")
+    if len(parts) >= 2 and parts[-1] == "kanban.db":
+        return parts[-2] or fallback
+    return fallback
+
+
+def _triage_expand_board_db(board_db: str) -> str:
+    if board_db.startswith("/Users/greg/"):
+        return board_db
+    return str(Path(board_db).expanduser())
+
+
+def _triage_board_target(client: str, explicit_db: Optional[str] = None) -> Tuple[str, str]:
+    if explicit_db:
+        expanded = _triage_expand_board_db(explicit_db)
+        return _triage_board_slug_from_db(expanded, client), expanded
+
+    token = _triage_env_token(client)
+    env_db = (
+        os.environ.get(f"GBAUTO_TRIAGE_{token}_BOARD_DB")
+        or os.environ.get("GBAUTO_TRIAGE_BOARD_DB")
+    )
+    if env_db:
+        expanded = _triage_expand_board_db(env_db)
+        return _triage_board_slug_from_db(expanded, client), expanded
+
+    mapped_db = TRIAGE_CLIENT_BOARD_DBS.get(client)
+    if mapped_db:
+        return _triage_board_slug_from_db(mapped_db, client), mapped_db
+
+    board_slug = (
+        os.environ.get(f"GBAUTO_TRIAGE_{token}_BOARD")
+        or os.environ.get("GBAUTO_TRIAGE_BOARD")
+        or TRIAGE_CLIENT_BOARD_SLUGS.get(client)
+        or client
+    )
+    return board_slug, str(Path.home() / ".hermes" / "kanban" / "boards" / board_slug / "kanban.db")
+
+
 @app.get("/api/gbauto/triage/items")
 async def list_gbauto_triage_items(client: str = "smoke-client"):
     items = []
@@ -2743,11 +2804,10 @@ async def approve_gbauto_triage_item(slug: str, body: TriageApproveRequest):
     if not prep.get("ok"):
         return {"ok": False, "client": body.client, "item": item, "prepare": prep}
 
+    board_slug, board_db = _triage_board_target(body.client, body.board_db)
     dispatch_args: Dict[str, Any] = {"intent_id": prep["intent_id"], "write": bool(body.write)}
-    if body.board_db:
-        dispatch_args["db"] = body.board_db
-    elif body.write:
-        dispatch_args["db"] = str(Path.home() / ".hermes" / "kanban" / "boards" / body.client / "kanban.db")
+    if body.board_db or body.write:
+        dispatch_args["db"] = board_db
 
     dispatch = triage_dispatch_tac_ticket(dispatch_args)
     tasks = _parse_dispatch_tasks(dispatch.get("dispatch") or {})
@@ -2760,6 +2820,8 @@ async def approve_gbauto_triage_item(slug: str, body: TriageApproveRequest):
         fm["status"] = "approved"
         fm["approved_at"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         fm["gate_intent_id"] = prep["intent_id"]
+        fm["kanban_board"] = board_slug
+        fm["kanban_db"] = board_db
         if tasks:
             fm["linked_kanban_tasks"] = list(dict.fromkeys((fm.get("linked_kanban_tasks") or []) + tasks))
         _write_triage_item(item_path, item)
@@ -2773,12 +2835,404 @@ async def approve_gbauto_triage_item(slug: str, body: TriageApproveRequest):
         "client": body.client,
         "slug": slug,
         "mode": "write-kanban" if dispatch.get("live_write") else "dry-run",
+        "kanban_board": board_slug,
+        "kanban_db": board_db,
         "updated_item": updated,
         "item": public_item,
         "prepare": prep,
         "dispatch": dispatch,
         "tasks": tasks,
     }
+
+
+def _pi_observability_config() -> Tuple[str, str]:
+    """Return the Hermes-owned upstream observability URL/token."""
+    env_on_disk = load_env()
+    url = (
+        os.getenv("HERMES_PI_OBSERVABILITY_URL")
+        or os.getenv("OBS_SERVER_URL")
+        or env_on_disk.get("HERMES_PI_OBSERVABILITY_URL")
+        or env_on_disk.get("OBS_SERVER_URL")
+        or ""
+    ).strip()
+    token = (
+        os.getenv("HERMES_PI_OBSERVABILITY_TOKEN")
+        or os.getenv("OBS_AUTH_TOKEN")
+        or env_on_disk.get("HERMES_PI_OBSERVABILITY_TOKEN")
+        or env_on_disk.get("OBS_AUTH_TOKEN")
+        or ""
+    ).strip()
+    if not url or not token:
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "Hermes observability upstream is not configured. Set "
+                "HERMES_PI_OBSERVABILITY_URL and HERMES_PI_OBSERVABILITY_TOKEN "
+                "on the Hermes server."
+            ),
+        )
+    parsed = urllib.parse.urlparse(url)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        raise HTTPException(status_code=400, detail="Invalid Hermes Pi observability upstream URL")
+    return url.rstrip("/"), token
+
+
+def _pi_observability_json(url: str, token: str, timeout_s: float = 4.0) -> Dict[str, Any]:
+    req = urllib.request.Request(
+        url,
+        headers={
+            "Accept": "application/json",
+            "Authorization": f"Bearer {token}",
+        },
+        method="GET",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=timeout_s) as resp:
+            raw = resp.read()
+    except urllib.error.HTTPError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Hermes observability upstream returned HTTP {exc.code}",
+        ) from exc
+    except Exception as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Hermes observability upstream unavailable: {type(exc).__name__}",
+        ) from exc
+    try:
+        parsed = json.loads(raw.decode("utf-8"))
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail="Hermes observability upstream returned invalid JSON") from exc
+    if not isinstance(parsed, dict):
+        raise HTTPException(status_code=502, detail="Hermes observability upstream returned a non-object payload")
+    return parsed
+
+
+def _pi_observability_url(path: str, params: Optional[Dict[str, Any]] = None) -> Tuple[str, str]:
+    upstream_url, token = _pi_observability_config()
+    qs = urllib.parse.urlencode(
+        {
+            key: value
+            for key, value in (params or {}).items()
+            if value is not None and value != ""
+        }
+    )
+    suffix = path if path.startswith("/") else f"/{path}"
+    return f"{upstream_url}{suffix}{'?' + qs if qs else ''}", token
+
+
+def _pi_observability_upstream_json(
+    path: str,
+    params: Optional[Dict[str, Any]] = None,
+    timeout_s: float = 4.0,
+) -> Dict[str, Any]:
+    url, token = _pi_observability_url(path, params)
+    return _pi_observability_json(url, token, timeout_s=timeout_s)
+
+
+def _pi_observability_sessions_sync(
+    pool: str = "smoke-client",
+    tag: Optional[str] = None,
+    limit: int = 100,
+) -> Dict[str, Any]:
+    payload = _pi_observability_upstream_json(
+        "/sessions",
+        {"pool": pool or "smoke-client", "tag": tag, "limit": max(1, min(int(limit), 200))},
+    )
+    sessions = payload.get("sessions") or []
+    if not isinstance(sessions, list):
+        sessions = []
+    return {
+        "ok": True,
+        "source": "hermes",
+        "sessions": sessions,
+    }
+
+
+def _pi_observability_session_events_sync(
+    session_id: str,
+    limit: int = 1000,
+    since_seq: Optional[int] = None,
+) -> Dict[str, Any]:
+    safe_sid = urllib.parse.quote(session_id, safe="")
+    payload = _pi_observability_upstream_json(
+        f"/sessions/{safe_sid}/events",
+        {"limit": max(1, min(int(limit), 1000)), "since_seq": since_seq},
+    )
+    events = payload.get("events") or []
+    if not isinstance(events, list):
+        events = []
+    return {
+        "ok": True,
+        "source": "hermes",
+        "session_id": session_id,
+        "events": events,
+    }
+
+
+def _pi_observability_session_stats_sync(session_id: str) -> Dict[str, Any]:
+    events_payload = _pi_observability_session_events_sync(session_id, limit=1000)
+    events = events_payload.get("events") or []
+    total_cost = 0.0
+    total_tokens = 0
+    input_tokens = 0
+    output_tokens = 0
+    latest_input: Optional[int] = None
+    error_count = 0
+
+    for event in events:
+        if not isinstance(event, dict):
+            continue
+        payload = event.get("payload") or {}
+        if not isinstance(payload, dict):
+            payload = {}
+        if event.get("type") == "error" or payload.get("is_error") is True:
+            error_count += 1
+        usage = payload.get("usage") or {}
+        if not isinstance(usage, dict):
+            continue
+        cost = usage.get("cost_total")
+        if isinstance(cost, (int, float)):
+            total_cost += float(cost)
+        input_value = (
+            usage.get("input")
+            or usage.get("input_tokens")
+            or usage.get("prompt_tokens")
+            or 0
+        )
+        output_value = (
+            usage.get("output")
+            or usage.get("output_tokens")
+            or usage.get("completion_tokens")
+            or 0
+        )
+        cache_read = usage.get("cache_read") or 0
+        cache_write = usage.get("cache_write") or 0
+        try:
+            input_int = int(input_value)
+        except Exception:
+            input_int = 0
+        try:
+            output_int = int(output_value)
+        except Exception:
+            output_int = 0
+        try:
+            latest_input = input_int + int(cache_read) + int(cache_write)
+        except Exception:
+            latest_input = input_int
+        input_tokens += input_int
+        output_tokens += output_int
+        total_value = usage.get("total_tokens")
+        if isinstance(total_value, (int, float)):
+            total_tokens += int(total_value)
+        else:
+            total_tokens += input_int + output_int
+
+    return {
+        "ok": True,
+        "source": "hermes",
+        "session_id": session_id,
+        "total_cost": total_cost,
+        "total_tokens": total_tokens,
+        "input_tokens": input_tokens,
+        "output_tokens": output_tokens,
+        "latest_input": latest_input,
+        "error_count": error_count,
+    }
+
+
+def _pi_observability_stream_batch_sync(
+    pool: str,
+    tag: Optional[str],
+    session_id: Optional[str],
+    last_seq_by_session: Dict[str, int],
+) -> List[Dict[str, Any]]:
+    sessions: List[Dict[str, Any]]
+    if session_id:
+        sessions = [{"session_id": session_id}]
+    else:
+        sessions_payload = _pi_observability_sessions_sync(pool=pool, tag=tag, limit=50)
+        sessions = [
+            session
+            for session in sessions_payload.get("sessions", [])
+            if isinstance(session, dict) and session.get("session_id")
+        ]
+
+    batch: List[Dict[str, Any]] = []
+    for session in sessions[:12]:
+        sid = str(session.get("session_id") or "")
+        if not sid:
+            continue
+        since_seq = last_seq_by_session.get(sid)
+        events_payload = _pi_observability_session_events_sync(
+            sid,
+            limit=100 if since_seq is None else 1000,
+            since_seq=since_seq,
+        )
+        events = [
+            event
+            for event in events_payload.get("events", [])
+            if isinstance(event, dict) and event.get("event_id")
+        ]
+        events.sort(key=lambda event: (int(event.get("seq") or 0), str(event.get("ts") or "")))
+        for event in events:
+            seq = int(event.get("seq") or 0)
+            if since_seq is None or seq > since_seq:
+                batch.append(event)
+                last_seq_by_session[sid] = max(last_seq_by_session.get(sid, -1), seq)
+    batch.sort(key=lambda event: (str(event.get("ts") or ""), str(event.get("event_id") or "")))
+    return batch
+
+
+def _pi_observability_snapshot_sync(pool: str, limit: int) -> Dict[str, Any]:
+    upstream_url, token = _pi_observability_config()
+    safe_pool = urllib.parse.quote(pool, safe="")
+    safe_limit = max(1, min(int(limit), 50))
+
+    health = _pi_observability_json(f"{upstream_url}/health", token)
+    sessions_payload = _pi_observability_json(
+        f"{upstream_url}/sessions?pool={safe_pool}&limit={safe_limit}",
+        token,
+    )
+    sessions = sessions_payload.get("sessions") or []
+    if not isinstance(sessions, list):
+        sessions = []
+
+    events: List[Dict[str, Any]] = []
+    for session in sessions[:8]:
+        if not isinstance(session, dict):
+            continue
+        sid = str(session.get("session_id") or "")
+        if not sid:
+            continue
+        sid_q = urllib.parse.quote(sid, safe="")
+        event_payload = _pi_observability_json(
+            f"{upstream_url}/sessions/{sid_q}/events?limit=250",
+            token,
+        )
+        session_events = event_payload.get("events") or []
+        if isinstance(session_events, list):
+            events.extend(event for event in session_events if isinstance(event, dict))
+
+    return {
+        "ok": True,
+        "source": "hermes",
+        "pool": pool,
+        "health": health,
+        "sessions": sessions,
+        "events": events,
+        "upstream": {
+            "configured": True,
+            "url_origin": urllib.parse.urlparse(upstream_url).netloc,
+        },
+    }
+
+
+@app.get("/api/gbauto/pi-observability/snapshot")
+async def get_gbauto_pi_observability_snapshot(pool: str = "smoke-client", limit: int = 25):
+    if pool != "smoke-client":
+        raise HTTPException(status_code=400, detail="Only pool=smoke-client is exposed in this lane")
+    try:
+        return await asyncio.to_thread(_pi_observability_snapshot_sync, pool, limit)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        _log.exception("GET /api/gbauto/pi-observability/snapshot failed")
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.get("/api/gbauto/pi-observability/sessions")
+async def get_gbauto_pi_observability_sessions(
+    pool: str = "smoke-client",
+    tag: Optional[str] = None,
+    limit: int = 100,
+):
+    try:
+        return await asyncio.to_thread(
+            _pi_observability_sessions_sync,
+            pool or "smoke-client",
+            tag,
+            limit,
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        _log.exception("GET /api/gbauto/pi-observability/sessions failed")
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.get("/api/gbauto/pi-observability/sessions/{session_id}/events")
+async def get_gbauto_pi_observability_session_events(
+    session_id: str,
+    limit: int = 1000,
+    since_seq: Optional[int] = None,
+):
+    try:
+        return await asyncio.to_thread(
+            _pi_observability_session_events_sync,
+            session_id,
+            limit,
+            since_seq,
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        _log.exception("GET /api/gbauto/pi-observability/sessions/%s/events failed", session_id)
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.get("/api/gbauto/pi-observability/sessions/{session_id}/stats")
+async def get_gbauto_pi_observability_session_stats(session_id: str):
+    try:
+        return await asyncio.to_thread(_pi_observability_session_stats_sync, session_id)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        _log.exception("GET /api/gbauto/pi-observability/sessions/%s/stats failed", session_id)
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.get("/api/gbauto/pi-observability/events/stream")
+async def stream_gbauto_pi_observability_events(
+    request: Request,
+    pool: str = "smoke-client",
+    tag: Optional[str] = None,
+    session_id: Optional[str] = None,
+    token: str = "",
+):
+    if not hmac.compare_digest(token.encode(), _SESSION_TOKEN.encode()):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    async def event_generator():
+        last_seq_by_session: Dict[str, int] = {}
+        yield "event: hello\ndata: {\"source\":\"hermes\"}\n\n"
+        while True:
+            if await request.is_disconnected():
+                break
+            try:
+                events = await asyncio.to_thread(
+                    _pi_observability_stream_batch_sync,
+                    pool or "smoke-client",
+                    tag,
+                    session_id,
+                    last_seq_by_session,
+                )
+                for event in events:
+                    yield f"event: event\ndata: {json.dumps(event, separators=(',', ':'))}\n\n"
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                _log.warning("Hermes observability SSE poll failed: %s", exc)
+            await asyncio.sleep(1.0)
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @app.get("/api/logs/supabase/host-jobs")

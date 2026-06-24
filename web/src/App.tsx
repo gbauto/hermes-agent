@@ -75,6 +75,7 @@ import DocumentsPage from "@/pages/DocumentsPage";
 import GbAutomationOverviewPage from "@/pages/GbAutomationOverviewPage";
 import GbAutomationReposPage from "@/pages/GbAutomationReposPage";
 import { KanbanPage, LangfusePage, SupabasePage } from "@/pages/SupabaseIndexesPage";
+import SmokeClientObservabilityPage from "@/pages/SmokeClientObservabilityPage";
 import ProfilesPage, { ProfileDetailPage } from "@/pages/ProfilesPage";
 import SkillsPage from "@/pages/SkillsPage";
 import PluginsPage from "@/pages/PluginsPage";
@@ -130,6 +131,8 @@ const BUILTIN_ROUTES_CORE: Record<string, ComponentType> = {
   "/profiles/:profileId": ProfileDetailPage,
   "/overview": GbAutomationOverviewPage,
   "/repos": GbAutomationReposPage,
+  "/hermes-observability": SmokeClientObservabilityPage,
+  "/smoke-client": SmokeClientObservabilityPage,
   "/supabase": SupabasePage,
   "/langfuse": LangfusePage,
   "/kanban": KanbanPage,
@@ -185,6 +188,7 @@ const BUILTIN_NAV_REST: NavItem[] = [
 const GB_AUTOMATION_NAV: NavItem[] = [
   { path: "/overview", label: "Overview", icon: BarChart3 },
   { path: "/repos", label: "Repos", icon: GitBranch },
+  { path: "/hermes-observability", label: "Hermes Obs", icon: Activity },
   { path: "/supabase", label: "Supabase", icon: Database },
   { path: "/langfuse", label: "Langfuse", icon: RadioTower },
   { path: "/kanban", label: "Kanban", icon: Workflow },
@@ -357,6 +361,8 @@ export default function App() {
     pathname === "/artifacts/";
   const normalizedPath = pathname.replace(/\/$/, "") || "/";
   const isChatRoute = normalizedPath === "/chat";
+  const isHermesObservabilityRoute =
+    normalizedPath === "/hermes-observability" || normalizedPath === "/smoke-client";
   const embeddedChat = isDashboardEmbeddedChatEnabled();
 
   // `dashboard.show_token_analytics` gates the Analytics nav item.  The
@@ -590,6 +596,10 @@ export default function App() {
     mql.addEventListener("change", onChange);
     return () => mql.removeEventListener("change", onChange);
   }, []);
+
+  if (isHermesObservabilityRoute) {
+    return <SmokeClientObservabilityPage />;
+  }
 
   return (
     <div

@@ -1,0 +1,171 @@
+{
+  "generated_at": "2026-06-24T18:39:20.000Z",
+  "source": "seeded smoke-client Pi observability fixture",
+  "tenant": "smoke-client",
+  "server": {
+    "url_hint": "Set pi_obs_url and pi_obs_token query params to read a live Pi observability server.",
+    "version": "0.1.0"
+  },
+  "sessions": [
+    {
+      "session_id": "smoke-client-pi-observability-plan-20260624",
+      "pool": "smoke-client",
+      "agent_name": "smoke-client",
+      "cwd": "/Users/greg/repos/gbautomation/second-brain/systems/hermes-profiles/smoke-client",
+      "session_file": "/Users/greg/.hermes/profiles/smoke-client/sessions/smoke-client-pi-observability-plan-20260624.jsonl",
+      "provider": "openai-codex",
+      "model": "gpt-5.5",
+      "first_ts": "2026-06-24T18:37:45.095Z",
+      "last_ts": "2026-06-24T18:39:07.095Z",
+      "event_count": 9,
+      "tags": [
+        "profile:smoke-client",
+        "runtime:hermes",
+        "sample",
+        "surface:pi-observability",
+        "tenant:smoke-client"
+      ]
+    }
+  ],
+  "events": [
+    {
+      "event_id": "fixture-session-start",
+      "ts": "2026-06-24T18:37:45.095Z",
+      "type": "session_start",
+      "session_id": "smoke-client-pi-observability-plan-20260624",
+      "cwd": "/Users/greg/repos/gbautomation/second-brain/systems/hermes-profiles/smoke-client",
+      "agent_name": "smoke-client",
+      "pool": "smoke-client",
+      "tags": ["runtime:hermes", "tenant:smoke-client", "profile:smoke-client", "surface:pi-observability", "sample"],
+      "provider": "openai-codex",
+      "model": "gpt-5.5",
+      "payload": {"reason": "new", "pi_version": "0.1.0"},
+      "seq": 0
+    },
+    {
+      "event_id": "fixture-agent-start",
+      "ts": "2026-06-24T18:37:53.095Z",
+      "type": "agent_start",
+      "session_id": "smoke-client-pi-observability-plan-20260624",
+      "cwd": "/Users/greg/repos/gbautomation/second-brain/systems/hermes-profiles/smoke-client",
+      "agent_name": "smoke-client",
+      "pool": "smoke-client",
+      "tags": ["runtime:hermes", "tenant:smoke-client", "profile:smoke-client", "surface:pi-observability", "sample"],
+      "provider": "openai-codex",
+      "model": "gpt-5.5",
+      "payload": {"prompt": "Wire Hermes smoke-client into the Pi observability frontend.", "images_count": 0},
+      "seq": 1
+    },
+    {
+      "event_id": "fixture-surface-pinned",
+      "ts": "2026-06-24T18:38:02.095Z",
+      "type": "custom",
+      "session_id": "smoke-client-pi-observability-plan-20260624",
+      "cwd": "/Users/greg/repos/gbautomation/second-brain/systems/hermes-profiles/smoke-client",
+      "agent_name": "smoke-client",
+      "pool": "smoke-client",
+      "tags": ["runtime:hermes", "tenant:smoke-client", "profile:smoke-client", "surface:pi-observability", "sample"],
+      "provider": "openai-codex",
+      "model": "gpt-5.5",
+      "payload": {
+        "custom_type": "evidence_surface_pinned",
+        "data": {
+          "profile": "smoke-client",
+          "surfaces": ["pi_observability_events", "pi_observability_sessions"]
+        }
+      },
+      "seq": 2
+    },
+    {
+      "event_id": "fixture-tool-call",
+      "ts": "2026-06-24T18:38:17.095Z",
+      "type": "tool_call",
+      "session_id": "smoke-client-pi-observability-plan-20260624",
+      "cwd": "/Users/greg/repos/gbautomation/second-brain/systems/hermes-profiles/smoke-client",
+      "agent_name": "smoke-client",
+      "pool": "smoke-client",
+      "tags": ["runtime:hermes", "tenant:smoke-client", "profile:smoke-client", "surface:pi-observability", "sample"],
+      "provider": "openai-codex",
+      "model": "gpt-5.5",
+      "payload": {
+        "tool_call_id": "call-validate-smoke-profile",
+        "tool_name": "python",
+        "args": {"cmd": "python scripts/validate_smoke_client_skill_mapping.py"},
+        "args_truncated": false
+      },
+      "seq": 3
+    },
+    {
+      "event_id": "fixture-tool-result",
+      "ts": "2026-06-24T18:38:28.095Z",
+      "type": "tool_result",
+      "session_id": "smoke-client-pi-observability-plan-20260624",
+      "cwd": "/Users/greg/repos/gbautomation/second-brain/systems/hermes-profiles/smoke-client",
+      "agent_name": "smoke-client",
+      "pool": "smoke-client",
+      "tags": ["runtime:hermes", "tenant:smoke-client", "profile:smoke-client", "surface:pi-observability", "sample"],
+      "provider": "openai-codex",
+      "model": "gpt-5.5",
+      "payload": {
+        "tool_call_id": "call-validate-smoke-profile",
+        "tool_name": "python",
+        "content_text": "OK - required_skills and primary_tools resolve to real skill directories.",
+        "content_truncated": false,
+        "is_error": false,
+        "details_summary": {"exit_code": 0, "gate": "smoke_client_skill_mapping"}
+      },
+      "seq": 4
+    },
+    {
+      "event_id": "fixture-assistant-message",
+      "ts": "2026-06-24T18:38:56.095Z",
+      "type": "assistant_message",
+      "session_id": "smoke-client-pi-observability-plan-20260624",
+      "cwd": "/Users/greg/repos/gbautomation/second-brain/systems/hermes-profiles/smoke-client",
+      "agent_name": "smoke-client",
+      "pool": "smoke-client",
+      "tags": ["runtime:hermes", "tenant:smoke-client", "profile:smoke-client", "surface:pi-observability", "sample"],
+      "provider": "openai-codex",
+      "model": "gpt-5.5",
+      "payload": {
+        "text": "Smoke-client is now the first Hermes lane for the Pi observability frontend. Evidence surfaces: pi_observability_events and pi_observability_sessions.",
+        "thinking": "",
+        "tool_call_ids": ["call-validate-smoke-profile"],
+        "stop_reason": "stop",
+        "usage": {"input": 7200, "output": 780, "cache_read": 1800, "cache_write": 0, "total_tokens": 9780, "cost_total": 0.033},
+        "latency_ms": 4400,
+        "prefill_ms": 620,
+        "generation_ms": 3780,
+        "output_tps": 206,
+        "turn_index": 1
+      },
+      "seq": 7
+    },
+    {
+      "event_id": "fixture-session-shutdown",
+      "ts": "2026-06-24T18:39:07.095Z",
+      "type": "session_shutdown",
+      "session_id": "smoke-client-pi-observability-plan-20260624",
+      "cwd": "/Users/greg/repos/gbautomation/second-brain/systems/hermes-profiles/smoke-client",
+      "agent_name": "smoke-client",
+      "pool": "smoke-client",
+      "tags": ["runtime:hermes", "tenant:smoke-client", "profile:smoke-client", "surface:pi-observability", "sample"],
+      "provider": "openai-codex",
+      "model": "gpt-5.5",
+      "payload": {"reason": "quit"},
+      "seq": 8
+    }
+  ],
+  "validation": [
+    {
+      "gate": "smoke_client_skill_mapping",
+      "command": "python scripts/validate_smoke_client_skill_mapping.py",
+      "status": "pass"
+    },
+    {
+      "gate": "pi_server_seed_readback",
+      "command": "GET /sessions?pool=smoke-client",
+      "status": "pass"
+    }
+  ]
+}
