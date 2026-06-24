@@ -3851,6 +3851,8 @@ def mount_spa(application: FastAPI):
 # Built-in dashboard themes — label + description only.  The actual color
 # definitions live in the frontend (web/src/themes/presets.ts).
 _BUILTIN_DASHBOARD_THEMES = [
+    {"name": "gbautomation",       "label": "GBAutomation",      "description": "Cream canvas, terracotta accent - the GBAutomation brand"},
+    {"name": "gbautomation-full",  "label": "GBAutomation Full", "description": "Full GBautomation operations skin with Aura-derived glass chrome"},
     {"name": "default",       "label": "Hermes Teal",         "description": "Classic dark teal — the canonical Hermes look"},
     {"name": "default-large", "label": "Hermes Teal (Large)", "description": "Hermes Teal with bigger fonts and roomier spacing"},
     {"name": "midnight",      "label": "Midnight",            "description": "Deep blue-violet with cool accents"},

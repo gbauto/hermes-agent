@@ -1,0 +1,2574 @@
+{
+  "schema_version": "gbauto-github-index.v1",
+  "generated_at": "2026-06-15T16:00:28Z",
+  "window_days": 120,
+  "repo_count": 15,
+  "commit_count": 671,
+  "client_count": 7,
+  "repos": [
+    {
+      "repo": "gb-automation-landing",
+      "client": "gbautomation",
+      "role": "website shell (Amplify)",
+      "branch": "master",
+      "commit_count": 80,
+      "last_commit_at": "2026-06-14T13:06:08-07:00",
+      "recent_commits": [
+        {
+          "sha": "3106fef7a4af06f0a43f066f8901dcb39a91be28",
+          "short_sha": "3106fef7a",
+          "author": "gblack686",
+          "date": "2026-06-14T13:06:08-07:00",
+          "message": "feat(observability): Cmd+K palette entry for /observability spoke",
+          "scope": "observability",
+          "linear_refs": []
+        },
+        {
+          "sha": "1ffe10a83b3a7c3d533f7b921587c4140f08198a",
+          "short_sha": "1ffe10a83",
+          "author": "gblack686",
+          "date": "2026-06-13T13:01:59-07:00",
+          "message": "feat(observability): native React agent-DAG component (replace iframe)",
+          "scope": "observability",
+          "linear_refs": []
+        },
+        {
+          "sha": "7896351d1207d6d70ba7a8457ec72e70d97484bb",
+          "short_sha": "7896351d1",
+          "author": "gblack686",
+          "date": "2026-06-13T12:28:28-07:00",
+          "message": "feat(observability): /observability spoke — Langfuse agent DAG reports",
+          "scope": "observability",
+          "linear_refs": []
+        },
+        {
+          "sha": "07d8702b9c400d1a8f480761595f2e9c333fd97d",
+          "short_sha": "07d8702b9",
+          "author": "gblack686",
+          "date": "2026-06-12T18:46:07-07:00",
+          "message": "plan: publish 2026-06-12-ecom-telegram-realtime-updates-plan",
+          "scope": null,
+          "linear_refs": []
+        },
+        {
+          "sha": "33d1e223191cab064b691b3585cf9c8eda193f97",
+          "short_sha": "33d1e2231",
+          "author": "gblack686",
+          "date": "2026-06-12T15:42:33-07:00",
+          "message": "plan: publish 2026-06-12-tac-kanban-resilience-hardening-plan",
+          "scope": null,
+          "linear_refs": []
+        },
+        {
+          "sha": "3836ba5d96d0e18bde35d07b5e8a9accb70e71e2",
+          "short_sha": "3836ba5d9",
+          "author": "gblack686",
+          "date": "2026-06-12T12:10:36-07:00",
+          "message": "plan: publish 2026-06-12-prd-supabase-spine-and-enforcement-prd",
+          "scope": null,
+          "linear_refs": []
+        },
+        {
+          "sha": "e05acc7c99928c530fbf9fab6472f2976fc74f44",
+          "short_sha": "e05acc7c9",
+          "author": "gblack686",
+          "date": "2026-06-12T12:08:32-07:00",
+          "message": "feat(site): publish zero-touch-engineering + ai-resume static pages",
+          "scope": "site",
+          "linear_refs": []
+        },
+        {
+          "sha": "276313df45bcabeb8ab8fb3cf69002721214b24c",
+          "short_sha": "276313df4",
+          "author": "gblack686",
+          "date": "2026-06-09T17:52:05-07:00",
+          "message": "Add Mall Scanner site analytics modal",
+          "scope": null,
+          "linear_refs": []
+        },
+        {
+          "sha": "fcb20b9f6a6c31bf737757ebbfcd3678b107218f",
+          "short_sha": "fcb20b9f6",
+          "author": "gblack686",
+          "date": "2026-06-09T14:42:40-07:00",
+          "message": "feat(ui-agents): publish GB Auto gallery pages",
+          "scope": "ui-agents",
+          "linear_refs": []
+        },
+        {
+          "sha": "dc4d3bad420af1e521b0cfcd946281f814525c8f",
+          "short_sha": "dc4d3bad4",
+          "author": "gblack686",
+          "date": "2026-06-09T00:26:32-07:00",
+          "message": "feat: wire Hermes command feedback to Supabase",
+          "scope": null,
+          "linear_refs": []
+        },
+        {
+          "sha": "7747582fd6de9023990f9081653573c911381e9c",
+          "short_sha": "7747582fd",
+          "author": "gblack686",
+          "date": "2026-06-07T13:11:45-07:00",
+          "message": "plan: publish 2026-06-07-crawl-resilience-anti-bot-intelligence-prd",
+          "scope": null,
+          "linear_refs": []
+        },
+        {
+          "sha": "1eadcd8f6f0db845f22603a742885d7231eedc05",
+          "short_sha": "1eadcd8f6",
+          "author": "gblack686",
+          "date": "2026-06-06T21:05:42-07:00",
+          "message": "fix(apps): cache bust ui agents bundle",
+          "scope": "apps",
+          "linear_refs": []
+        },
+        {
+          "sha": "df3e275670b4a13061efa66f6d94eeafd83a9d11",
+          "short_sha": "df3e27567",
+          "author": "gblack686",
+          "date": "2026-06-06T20:53:33-07:00",
+          "message": "fix(apps): add ui agents static api extensions",
+          "scope": "apps",
+          "linear_refs": []
+        },
+        {
+          "sha": "4445d7bfeedd07f33ee6f37970d1f3a3f95db530",
+          "short_sha": "4445d7bfe",
+          "author": "gblack686",
+          "date": "2026-06-06T20:38:34-07:00",
+          "message": "fix(apps): serve ui agents under mini app path",
+          "scope": "apps",
+          "linear_refs": []
+        },
+        {
+          "sha": "f6274aba5b226ad1ce3d2d8901384018ac0c0319",
+          "short_sha": "f6274aba5",
+          "author": "gblack686",
+          "date": "2026-06-06T15:26:12-07:00",
+          "message": "Flag TAC catalog repo provenance",
+          "scope": null,
+          "linear_refs": []
+        },
+        {
+          "sha": "906f8b195b88868375906af0e62e1ff28e7541aa",
+          "short_sha": "906f8b195",
+          "author": "gblack686",
+          "date": "2026-06-06T15:15:41-07:00",
+          "message": "Refresh TAC catalog inventory",
+          "scope": null,
+          "linear_refs": []
+        },
+        {
+          "sha": "b3c437c5825063e9240f9f17a6d1b9bd5cf4fba3",
+          "short_sha": "b3c437c58",
+          "author": "gblack686",
+          "date": "2026-06-06T14:38:55-07:00",
+          "message": "Add TAC catalog page",
+          "scope": null,
+          "linear_refs": []
+        },
+        {
+          "sha": "198205451abf1cceeac2747003e5f854916b9450",
+          "short_sha": "198205451",
+          "author": "gblack686",
+          "date": "2026-06-05T14:24:04-07:00",
+          "message": "fix(apps): load ui agents static routes",
+          "scope": "apps",
+          "linear_refs": []
+        },
+        {
+          "sha": "505c186e6a8b89af5a8eae4886385b5330b8d08a",
+          "short_sha": "505c186e6",
+          "author": "gblack686",
+          "date": "2026-06-05T13:41:15-07:00",
+          "message": "feat(apps): expand ui agents site workbench",
+          "scope": "apps",
+          "linear_refs": []
+        },
+        {
+          "sha": "741cff4c3f71d36b5b411319d2ba286671ff5b31",
+          "short_sha": "741cff4c3",
+          "author": "gblack686",
+          "date": "2026-06-05T13:12:37-07:00",
+          "message": "feat(apps): publish ui agents mini app",
+          "scope": "apps",
+          "linear_refs": []
+        }
+      ]
+    },
+    {
+      "repo": "gbautomation",
+      "client": "gbautomation",
+      "role": "control repo — plans, scripts, migrations, skills",
+      "branch": "codex/artifact-drive-backfill",
+      "commit_count": 80,
+      "last_commit_at": "2026-06-13T11:57:27-07:00",
+      "recent_commits": [
+        {
+          "sha": "c8c9c22c20e9afcc3dc8cf9ced7c37536c22109b",
+          "short_sha": "c8c9c22c2",
+          "author": "gblack686",
+          "date": "2026-06-13T11:57:27-07:00",
+          "message": "chore: session: codex wip snapshot [7c6cc6c6]",
+          "scope": null,
+          "linear_refs": []
+        },
+        {
+          "sha": "1c70818a33a58bc01f1b908a069c8f7365ac8b26",
+          "short_sha": "1c70818a3",
+          "author": "gblack686",
+          "date": "2026-06-12T22:38:15-07:00",
+          "message": "session: codex wip snapshot [82d49340]",
+          "scope": null,
+          "linear_refs": []
+        },
+        {
+          "sha": "49d34380b0a4db4f92b9db65687974efb26dd5af",
+          "short_sha": "49d34380b",
+          "author": "gblack686",
+          "date": "2026-06-12T21:32:17-07:00",
+          "message": "feat(profiles): weave proven crawl4ai stealth escalation into ecom-intelligence team",
+          "scope": "profiles",
+          "linear_refs": []
+        },
+        {
+          "sha": "415f4b8b1285642e60fd2a13282c47b47824a0c2",
+          "short_sha": "415f4b8b1",
+          "author": "gblack686",
+          "date": "2026-06-12T21:00:51-07:00",
+          "message": "docs(ecom): fan-out triage — 4/5 bot-walled DTC sites crawl4ai-accessible",
+          "scope": "ecom",
+          "linear_refs": []
+        },
+        {
+          "sha": "cf90a859c4f3f2ea2f18fa3230f744661f96471d",
+          "short_sha": "cf90a859c",
+          "author": "gblack686",
+          "date": "2026-06-12T20:48:56-07:00",
+          "message": "docs(ecom): Vans GREEN — first live-persisted production run via crawl4ai",
+          "scope": "ecom",
+          "linear_refs": []
+        },
+        {
+          "sha": "095376fe50ff7155261bd52ee964c6c943945fcb",
+          "short_sha": "095376fe5",
+          "author": "gblack686",
+          "date": "2026-06-12T20:01:05-07:00",
+          "message": "docs(ecom): crawl4ai 0.8.9 installed on Mini + PX defeat confirmed from prod IP",
+          "scope": "ecom",
+          "linear_refs": []
+        },
+        {
+          "sha": "645a4cacbac3665cf9fe0f54315b1f5378f36472",
+          "short_sha": "645a4cacb",
+          "author": "gblack686",
+          "date": "2026-06-12T19:32:32-07:00",
+          "message": "docs(ecom): record crawl4ai stealth tier-1 empirical win vs Vans PX",
+          "scope": "ecom",
+          "linear_refs": []
+        },
+        {
+          "sha": "7cece3722271a6e53c6eb2633d6e760a636b85a1",
+          "short_sha": "7cece3722",
+          "author": "gblack686",
+          "date": "2026-06-12T19:05:11-07:00",
+          "message": "docs(systems): save ecom scrape lane system + session intelligence to second-brain",
+          "scope": "systems",
+          "linear_refs": []
+        },
+        {
+          "sha": "7ef1797b0f907cca15ea5ab882094d863bfd8424",
+          "short_sha": "7ef1797b0",
+          "author": "gblack686",
+          "date": "2026-06-12T17:54:35-07:00",
+          "message": "chore: session: codex wip snapshot [82d49340]",
+          "scope": null,
+          "linear_refs": []
+        },
+        {
+          "sha": "7f5e3f796a41a06c61a1336bb3998930383818cb",
+          "short_sha": "7f5e3f796",
+          "author": "gblack686",
+          "date": "2026-06-12T17:36:31-07:00",
+          "message": "session: codex wip snapshot [9dde55ac]",
+          "scope": null,
+          "linear_refs": []
+        },
+        {
+          "sha": "34b4e5cbba7ce43dc5e94ed59e10087e46370474",
+          "short_sha": "34b4e5cbb",
+          "author": "gblack686",
+          "date": "2026-06-12T16:01:36-07:00",
+          "message": "chore: session: codex wip snapshot [9dde55ac]",
+          "scope": null,
+          "linear_refs": []
+        },
+        {
+          "sha": "f993dbea6d6f7bea0e0deb3ec5ab081aacc72703",
+          "short_sha": "f993dbea6",
+          "author": "gblack686",
+          "date": "2026-06-12T15:59:43-07:00",
+          "message": "feat(ops): kanban crash-storm Telegram alert + TAC resilience hardening plan",
+          "scope": "ops",
+          "linear_refs": []
+        },
+        {
+          "sha": "82f98e909f0a8fa459f6bb74f2b37dc2148d712b",
+          "short_sha": "82f98e909",
+          "author": "gblack686",
+          "date": "2026-06-12T15:59:43-07:00",
+          "message": "feat(ops): kanban crash-storm Telegram alert + TAC resilience hardening plan",
+          "scope": "ops",
+          "linear_refs": []
+        },
+        {
+          "sha": "a83bba7f34b970803e18a7065f6e0076dd91afc9",
+          "short_sha": "a83bba7f3",
+          "author": "gblack686",
+          "date": "2026-06-12T15:31:47-07:00",
+          "message": "feat(reports): per-plan execution telemetry + agent DAGs in sprint plans index",
+          "scope": "reports",
+          "linear_refs": []
+        },
+        {
+          "sha": "bf965e8afcb01b0e80a36fa9d2cf4547d2c27977",
+          "short_sha": "bf965e8af",
+          "author": "gblack686",
+          "date": "2026-06-12T15:14:47-07:00",
+          "message": "feat(prd-index): stand up prd_artifacts Supabase index + fix array inserts",
+          "scope": "prd-index",
+          "linear_refs": []
+        },
+        {
+          "sha": "4f92cc189e296fb8a3974d199f6874aab837f28a",
+          "short_sha": "4f92cc189",
+          "author": "gblack686",
+          "date": "2026-06-12T12:42:55-07:00",
+          "message": "feat(reports): sprint report + plans index + PRD/TAC-component Supabase spine",
+          "scope": "reports",
+          "linear_refs": []
+        },
+        {
+          "sha": "6126427c45781e5c23fb97f58e1ba767afd3e09c",
+          "short_sha": "6126427c4",
+          "author": "gblack686",
+          "date": "2026-06-11T15:31:11-07:00",
+          "message": "chore: session: codex wip snapshot [20c66508]",
+          "scope": null,
+          "linear_refs": []
+        },
+        {
+          "sha": "099086c6d57bd809b1e85113b342ed66373e7e2b",
+          "short_sha": "099086c6d",
+          "author": "gblack686",
+          "date": "2026-06-11T14:08:15-07:00",
+          "message": "session: codex wip snapshot [20c66508]",
+          "scope": null,
+          "linear_refs": []
+        },
+        {
+          "sha": "c28da4aadbbba6aad787e57a4175ca24b1b3ea74",
+          "short_sha": "c28da4aad",
+          "author": "gblack686",
+          "date": "2026-06-11T11:34:46-07:00",
+          "message": "session: codex wip snapshot [20c66508]",
+          "scope": null,
+          "linear_refs": []
+        },
+        {
+          "sha": "03ebb82f3421450cc2e348c46473f490aee54d88",
+          "short_sha": "03ebb82f3",
+          "author": "gblack686",
+          "date": "2026-06-11T11:27:48-07:00",
+          "message": "session: codex wip snapshot [20c66508]",
+          "scope": null,
+          "linear_refs": []
+        }
+      ]
+    },
+    {
+      "repo": "ecom",
+      "client": "ecom",
+      "role": "ecommerce app / client slice",
+      "branch": "vans-hourly-cutover",
+      "commit_count": 77,
+      "last_commit_at": "2026-06-12T20:57:05-07:00",
+      "recent_commits": [
+        {
+          "sha": "99b28879ec2812affbb10626e7e0f5228a152182",
+          "short_sha": "99b28879e",
+          "author": "gblack686",
+          "date": "2026-06-12T20:57:05-07:00",
+          "message": "feat(ecom): generic crawl4ai stealth access probe — fan-out triage",
+          "scope": "ecom",
+          "linear_refs": []
+        },
+        {
+          "sha": "010d2dacfd55f46d2111052e520b8d4a2eb2b103",
+          "short_sha": "010d2dacf",
+          "author": "gblack686",
+          "date": "2026-06-12T20:50:02-07:00",
+          "message": "feat(vans): probe uses BrowserConfig.enable_stealth when available (0.7.3+/0.8.x)",
+          "scope": "vans",
+          "linear_refs": []
+        },
+        {
+          "sha": "048726266b39c299f2490bc3438f43004862cb02",
+          "short_sha": "048726266",
+          "author": "gblack686",
+          "date": "2026-06-12T20:31:16-07:00",
+          "message": "feat(vans): crawl4ai stealth is the production scraper — full persistable catalog",
+          "scope": "vans",
+          "linear_refs": []
+        },
+        {
+          "sha": "81f3d39ff8d33639b37f109c873c218b9875ec10",
+          "short_sha": "81f3d39ff",
+          "author": "gblack686",
+          "date": "2026-06-12T19:31:52-07:00",
+          "message": "feat(vans): crawl4ai stealth tier-1 probe — proves PX defeat + full-catalog scale",
+          "scope": "vans",
+          "linear_refs": []
+        },
+        {
+          "sha": "9df8b5ac1ab2a24b7a1706fd9f50aab71c48f733",
+          "short_sha": "9df8b5ac1",
+          "author": "gblack686",
+          "date": "2026-06-12T18:58:48-07:00",
+          "message": "docs(vans): record 2026-06-12/13 live cutover + hardening stack in readiness doc",
+          "scope": "vans",
+          "linear_refs": []
+        },
+        {
+          "sha": "3dd7f64f4f67676190d9a47f9f535d86d150dbfc",
+          "short_sha": "3dd7f64f4",
+          "author": "gblack686",
+          "date": "2026-06-12T18:57:02-07:00",
+          "message": "feat(notify): Telegram live-status sidecar - one silent message per run, edited in place",
+          "scope": "notify",
+          "linear_refs": []
+        },
+        {
+          "sha": "482815478a529dae9a5fd0e39d6309a4584c3a28",
+          "short_sha": "482815478",
+          "author": "gblack686",
+          "date": "2026-06-12T18:36:13-07:00",
+          "message": "feat(vans): tier-0 crawl hardening - persistent PX profile, redirect-trap check, bare-UA flag",
+          "scope": "vans",
+          "linear_refs": []
+        },
+        {
+          "sha": "40fb0c0ffa26425f69caf2e345b65908e12661cf",
+          "short_sha": "40fb0c0ff",
+          "author": "gblack686",
+          "date": "2026-06-12T17:17:59-07:00",
+          "message": "fix(vans): graceful SIGALRM/SIGTERM teardown - kill chrome, stale the CDP lease",
+          "scope": "vans",
+          "linear_refs": []
+        },
+        {
+          "sha": "4d83f39f907862a8a332cf8459e0b1f713ce5d0d",
+          "short_sha": "4d83f39f9",
+          "author": "gblack686",
+          "date": "2026-06-12T16:55:10-07:00",
+          "message": "feat(vans): 30s progress_heartbeat.json from recordAction",
+          "scope": "vans",
+          "linear_refs": []
+        },
+        {
+          "sha": "50a1c9fe2289624ace9fddb6802e4e293dc8d82d",
+          "short_sha": "50a1c9fe2",
+          "author": "gblack686",
+          "date": "2026-06-12T16:28:16-07:00",
+          "message": "feat(vans): cut hourly vans-com lane over to live persistence + fail-fast",
+          "scope": "vans",
+          "linear_refs": []
+        },
+        {
+          "sha": "94dbdad634b5788a5aebb951936bbb871d272633",
+          "short_sha": "94dbdad63",
+          "author": "gblack686",
+          "date": "2026-06-10T20:03:30-07:00",
+          "message": "Add ecom telemetry attribution backfill",
+          "scope": null,
+          "linear_refs": []
+        },
+        {
+          "sha": "b5b940df60bb881be546a3ceb3d4f410a87c1937",
+          "short_sha": "b5b940df6",
+          "author": "gblack686",
+          "date": "2026-06-10T13:10:56-07:00",
+          "message": "Document ecom Telegram bot name",
+          "scope": null,
+          "linear_refs": []
+        },
+        {
+          "sha": "7c0628a5ab54013a95edd554505a51c511dddecd",
+          "short_sha": "7c0628a5a",
+          "author": "gblack686",
+          "date": "2026-06-10T12:45:08-07:00",
+          "message": "Add ecom Telegram log update channel",
+          "scope": null,
+          "linear_refs": []
+        },
+        {
+          "sha": "2f0d33513a90764e24062be58b37fe2d17b18ed3",
+          "short_sha": "2f0d33513",
+          "author": "gblack686",
+          "date": "2026-06-10T12:05:19-07:00",
+          "message": "Add ecom website status snapshot command",
+          "scope": null,
+          "linear_refs": []
+        },
+        {
+          "sha": "10d992f477ca641c747424ef7071156bcfd7894a",
+          "short_sha": "10d992f47",
+          "author": "gblack686",
+          "date": "2026-06-10T11:16:27-07:00",
+          "message": "Route anti-bot blockers to handler retries",
+          "scope": null,
+          "linear_refs": []
+        },
+        {
+          "sha": "00b46a29f2b018b048937da4af3df28abf6c84e0",
+          "short_sha": "00b46a29f",
+          "author": "gblack686",
+          "date": "2026-06-10T08:53:38-07:00",
+          "message": "Add ecom agent plan mirror hooks",
+          "scope": null,
+          "linear_refs": []
+        },
+        {
+          "sha": "8a6da4a47240cb091cbdf64390c343437c181491",
+          "short_sha": "8a6da4a47",
+          "author": "GBAutomation Agent",
+          "date": "2026-06-10T07:37:16-07:00",
+          "message": "fix: harden lululemon browser scrape extraction",
+          "scope": null,
+          "linear_refs": []
+        },
+        {
+          "sha": "a0788b809b2a3e8df8cd06611eeaada02d5f6c21",
+          "short_sha": "a0788b809",
+          "author": "GBAutomation Agent",
+          "date": "2026-06-10T07:30:57-07:00",
+          "message": "feat: add lululemon browser harness scraper",
+          "scope": null,
+          "linear_refs": []
+        },
+        {
+          "sha": "70dcaa79a446487c2ec331fad5745d0745a88852",
+          "short_sha": "70dcaa79a",
+          "author": "GBAutomation Agent",
+          "date": "2026-06-10T07:30:57-07:00",
+          "message": "chore: update vans scrape intelligence",
+          "scope": null,
+          "linear_refs": []
+        },
+        {
+          "sha": "6f3dab367b9b92c3f9a0f0fb93559b84e6fe21cd",
+          "short_sha": "6f3dab367",
+          "author": "Greg Black",
+          "date": "2026-06-10T10:08:26-04:00",
+          "message": "feat: track scrape baseline metrics (#1)",
+          "scope": null,
+          "linear_refs": []
+        }
+      ]
+    },
+    {
+      "repo": "hermes-agent",
+      "client": "gbautomation",
+      "role": "Hermes dashboard / base",
+      "branch": "kanban-resilience-death-notes",
+      "commit_count": 80,
+      "last_commit_at": "2026-06-12T15:59:05-07:00",
+      "recent_commits": [
+        {
+          "sha": "38768e819ec7433bb2707b6f411c681689763508",
+          "short_sha": "38768e819",
+          "author": "gblack686",
+          "date": "2026-06-12T15:59:05-07:00",
+          "message": "feat(kanban): death-note log tails + persist block reasons on task rows",
+          "scope": "kanban",
+          "linear_refs": []
+        },
+        {
+          "sha": "4e799b6dbf95bbba4af7561e41aacf4aa5351d3e",
+          "short_sha": "4e799b6db",
+          "author": "gblack686",
+          "date": "2026-06-09T16:16:04-07:00",
+          "message": "Expose Kanban default-assignment result bucket",
+          "scope": null,
+          "linear_refs": []
+        },
+        {
+          "sha": "47c346e1ea14a49954cfa831faed39725b7d2288",
+          "short_sha": "47c346e1e",
+          "author": "gblack686",
+          "date": "2026-06-09T16:14:22-07:00",
+          "message": "Expose Kanban per-profile cap result bucket",
+          "scope": null,
+          "linear_refs": []
+        },
+        {
+          "sha": "eb01bbd18f3c28d2dea93a9b2f507babc1013a3a",
+          "short_sha": "eb01bbd18",
+          "author": "gblack686",
+          "date": "2026-06-09T16:12:39-07:00",
+          "message": "Accept newer Kanban dispatch kwargs",
+          "scope": null,
+          "linear_refs": []
+        },
+        {
+          "sha": "b628a22f5919cb39f02bc21937027c53604ba66b",
+          "short_sha": "b628a22f5",
+          "author": "gblack686",
+          "date": "2026-06-09T16:09:58-07:00",
+          "message": "Add closing Kanban connection helper",
+          "scope": null,
+          "linear_refs": []
+        },
+        {
+          "sha": "bb2d3d3b4a495985cf80394490edc6f505d42705",
+          "short_sha": "bb2d3d3b4",
+          "author": "gblack686",
+          "date": "2026-06-09T16:08:19-07:00",
+          "message": "Restore scoped Kanban board helper",
+          "scope": null,
+          "linear_refs": []
+        },
+        {
+          "sha": "fa11b8d152705ae5f7a3eb9bbab343cdec655101",
+          "short_sha": "fa11b8d15",
+          "author": "gblack686",
+          "date": "2026-06-09T16:02:09-07:00",
+          "message": "Propagate Kanban retry context to Langfuse",
+          "scope": null,
+          "linear_refs": []
+        },
+        {
+          "sha": "8e5734ca0d0ebff7891b1d70e0e220470bb1fb40",
+          "short_sha": "8e5734ca0",
+          "author": "gblack686",
+          "date": "2026-06-09T00:32:01-07:00",
+          "message": "feat(observability): tag Langfuse traces with Kanban ids",
+          "scope": "observability",
+          "linear_refs": []
+        },
+        {
+          "sha": "b838c2d2ec5642806ea71da22d39d34e681d462e",
+          "short_sha": "b838c2d2e",
+          "author": "gblack686",
+          "date": "2026-06-04T14:52:21-07:00",
+          "message": "feat(vendor): nest hermes-webui + multi-agent-workflow as submodules",
+          "scope": "vendor",
+          "linear_refs": []
+        },
+        {
+          "sha": "4cc18877c69bbc2663fab79eebacdb7018f85c14",
+          "short_sha": "4cc18877c",
+          "author": "Bartok9",
+          "date": "2026-05-12T03:36:38-04:00",
+          "message": "fix(computer_use): preserve app context for capture_after; fix element label parsing (#24170 bugs 2 & 5)",
+          "scope": "computer_use",
+          "linear_refs": []
+        },
+        {
+          "sha": "3fde8c153da14545b4a12a14383c6f0c927b8623",
+          "short_sha": "3fde8c153",
+          "author": "Teknium",
+          "date": "2026-05-21T14:18:02-07:00",
+          "message": "fix(skills): prune dependency/venv dirs from all skill scanners (#30042)",
+          "scope": "skills",
+          "linear_refs": []
+        },
+        {
+          "sha": "3462b097e2414f05102f36c2b1af016a5060aab1",
+          "short_sha": "3462b097e",
+          "author": "helix4u",
+          "date": "2026-05-21T14:15:47-06:00",
+          "message": "fix(voice): chunk oversized CLI recordings",
+          "scope": "voice",
+          "linear_refs": []
+        },
+        {
+          "sha": "552e9c7881acd8f84df5954191debc69fa87c9f9",
+          "short_sha": "552e9c788",
+          "author": "Teknium",
+          "date": "2026-05-21T14:10:34-07:00",
+          "message": "feat(secrets): Bitwarden Secrets Manager integration with lazy bws install (#30035)",
+          "scope": "secrets",
+          "linear_refs": []
+        },
+        {
+          "sha": "18cd1e5c728ddf93a854ac9818f527013a9f6daf",
+          "short_sha": "18cd1e5c7",
+          "author": "liuhao1024",
+          "date": "2026-05-12T13:02:28+08:00",
+          "message": "fix(computer_use): correct type_text MCP tool name and implement drag action",
+          "scope": "computer_use",
+          "linear_refs": []
+        },
+        {
+          "sha": "0ce12a9241051621af4c3406a27bb793bb3154d7",
+          "short_sha": "0ce12a924",
+          "author": "github-actions[bot]",
+          "date": "2026-05-21T20:11:48Z",
+          "message": "fix(nix): auto-refresh npm lockfile hashes",
+          "scope": "nix",
+          "linear_refs": []
+        },
+        {
+          "sha": "56b79f12ac68244da801fdf4aa3e65837aba0386",
+          "short_sha": "56b79f12a",
+          "author": "Teknium",
+          "date": "2026-05-21T13:10:52-07:00",
+          "message": "fix(dashboard): remove country flags from language picker (#29997)",
+          "scope": "dashboard",
+          "linear_refs": []
+        },
+        {
+          "sha": "3d2f146460a6347095ce0f65b622fff31e6a3f68",
+          "short_sha": "3d2f14646",
+          "author": "teknium1",
+          "date": "2026-05-21T13:01:19-07:00",
+          "message": "fix(tui): also pass --expose-gc on the wheel-bundled launch path",
+          "scope": "tui",
+          "linear_refs": []
+        },
+        {
+          "sha": "2e3f5762984a9716a35b7185e02205cd6a429843",
+          "short_sha": "2e3f57629",
+          "author": "teknium1",
+          "date": "2026-05-21T13:00:12-07:00",
+          "message": "chore(release): map yichengqiao21 to YarrowQiao",
+          "scope": "release",
+          "linear_refs": []
+        },
+        {
+          "sha": "2ea7cf287e8b8d9590cc5be901396aaa2704bc92",
+          "short_sha": "2ea7cf287",
+          "author": "YarrowQiao",
+          "date": "2026-05-08T13:14:52+08:00",
+          "message": "fix(tui): pass --expose-gc as node argv instead of NODE_OPTIONS",
+          "scope": "tui",
+          "linear_refs": []
+        },
+        {
+          "sha": "ba9964ff0d68002d9440f6b8a64276d7c34a77a4",
+          "short_sha": "ba9964ff0",
+          "author": "helix4u",
+          "date": "2026-05-21T19:45:15+05:30",
+          "message": "fix(custom): pass custom provider extra body",
+          "scope": "custom",
+          "linear_refs": []
+        }
+      ]
+    },
+    {
+      "repo": "ecom-vans-status",
+      "client": "ecom",
+      "role": "status app surface",
+      "branch": "vans-status-cutover",
+      "commit_count": 47,
+      "last_commit_at": "2026-06-09T00:50:00-07:00",
+      "recent_commits": [
+        {
+          "sha": "24ddb77db21b7aa19713f465095183b3f0abd74a",
+          "short_sha": "24ddb77db",
+          "author": "gblack686",
+          "date": "2026-06-09T00:50:00-07:00",
+          "message": "Document Vans cutover validation failure",
+          "scope": null,
+          "linear_refs": []
+        },
+        {
+          "sha": "15311712006d84b1937c0525393efe04c04ef2bf",
+          "short_sha": "153117120",
+          "author": "gblack686",
+          "date": "2026-06-09T00:28:29-07:00",
+          "message": "Cut over Vans hourly status path",
+          "scope": null,
+          "linear_refs": []
+        },
+        {
+          "sha": "c40322ac44a12657c2aef732dc1cf3a4d76c7523",
+          "short_sha": "c40322ac4",
+          "author": "GBAutomation Agent",
+          "date": "2026-06-08T23:37:00-07:00",
+          "message": "Fix",
+          "scope": null,
+          "linear_refs": []
+        },
+        {
+          "sha": "476e1b0f375c4a3a47775a0b2c5de3a4bdd23a10",
+          "short_sha": "476e1b0f3",
+          "author": "GBAutomation Agent",
+          "date": "2026-06-07T13:11:40-07:00",
+          "message": "feat:",
+          "scope": null,
+          "linear_refs": []
+        },
+        {
+          "sha": "62a8bf7de051ae0fd1634c587c8260511a2e799a",
+          "short_sha": "62a8bf7de",
+          "author": "GBAutomation Agent",
+          "date": "2026-06-06T22:18:17-07:00",
+          "message": "feat:",
+          "scope": null,
+          "linear_refs": []
+        },
+        {
+          "sha": "f0a9799561e4fce8b59af2d2c10242c70d36b399",
+          "short_sha": "f0a979956",
+          "author": "GBAutomation Agent",
+          "date": "2026-06-06T21:51:11-07:00",
+          "message": "feat:",
+          "scope": null,
+          "linear_refs": []
+        },
+        {
+          "sha": "b5e71dce50c84c4cd03808e15d3ddcb714ff6895",
+          "short_sha": "b5e71dce5",
+          "author": "GBAutomation Agent",
+          "date": "2026-06-06T21:37:29-07:00",
+          "message": "feat:",
+          "scope": null,
+          "linear_refs": []
+        },
+        {
+          "sha": "56f5af53173c2d96d323f6e3a88cffeddaf78ed4",
+          "short_sha": "56f5af531",
+          "author": "GBAutomation Agent",
+          "date": "2026-06-06T21:17:59-07:00",
+          "message": "feat:",
+          "scope": null,
+          "linear_refs": []
+        },
+        {
+          "sha": "f9ade5ef9a144e6d60155349ceebfd583619991f",
+          "short_sha": "f9ade5ef9",
+          "author": "Ecom Price Watch",
+          "date": "2026-06-04T15:03:12-07:00",
+          "message": "feat: add branded Vans scrape reports",
+          "scope": null,
+          "linear_refs": []
+        },
+        {
+          "sha": "83b9acff53d24c1724ea043f5820380430ee619f",
+          "short_sha": "83b9acff5",
+          "author": "gblack686",
+          "date": "2026-06-03T20:24:42-07:00",
+          "message": "feat: add ecom-triage as submodule (workflows/triage)",
+          "scope": null,
+          "linear_refs": []
+        },
+        {
+          "sha": "f8786dfb89cf51daa6d54afbb31f56d40d8bf164",
+          "short_sha": "f8786dfb8",
+          "author": "Ecom Price Watch",
+          "date": "2026-06-03T12:28:02-07:00",
+          "message": "docs: record Vans full-catalog crawl blocker",
+          "scope": null,
+          "linear_refs": []
+        },
+        {
+          "sha": "a95302cbb4cc99e06881be1e61cf84d68064ba71",
+          "short_sha": "a95302cbb",
+          "author": "Ecom Price Watch",
+          "date": "2026-06-03T08:48:41-07:00",
+          "message": "feat: clarify ecom run reports",
+          "scope": null,
+          "linear_refs": []
+        },
+        {
+          "sha": "81b1190cb1d5ee31426d2b9f959a37a2adde526f",
+          "short_sha": "81b1190cb",
+          "author": "Ecom Price Watch",
+          "date": "2026-06-03T01:03:26-07:00",
+          "message": "infra(cron): launchd plists + ecom-env Telegram/Browser-Use fallback",
+          "scope": "cron",
+          "linear_refs": []
+        },
+        {
+          "sha": "2aad6b2b07b97e9902c972abbce3959e538c0a3d",
+          "short_sha": "2aad6b2b0",
+          "author": "gblack686",
+          "date": "2026-06-03T00:13:06-07:00",
+          "message": "chore: add .gitattributes to force LF for scripts",
+          "scope": null,
+          "linear_refs": []
+        },
+        {
+          "sha": "9ddc561d7fb971ff54b0b68a7dc166444bf83105",
+          "short_sha": "9ddc561d7",
+          "author": "gblack686",
+          "date": "2026-06-03T00:12:22-07:00",
+          "message": "docs: add Mac runbook + cron wrappers + batch site mapper",
+          "scope": null,
+          "linear_refs": []
+        },
+        {
+          "sha": "6333a28b76a46f5909c83dd81dc28e0614726149",
+          "short_sha": "6333a28b7",
+          "author": "gblack686",
+          "date": "2026-06-03T00:06:07-07:00",
+          "message": "feat: bridge browser-harness site maps into codegen (ecom map --browser/--from-site-map)",
+          "scope": null,
+          "linear_refs": []
+        },
+        {
+          "sha": "0e8d2cf8c4ad26b1520e58bacab0204100eb4a75",
+          "short_sha": "0e8d2cf8c",
+          "author": "gblack686",
+          "date": "2026-06-03T00:00:03-07:00",
+          "message": "docs: add dynamic site-mapping agent prompt for browser-harness",
+          "scope": null,
+          "linear_refs": []
+        },
+        {
+          "sha": "8ab580e1f83223d416af02e6c868aaa98c589db1",
+          "short_sha": "8ab580e1f",
+          "author": "gblack686",
+          "date": "2026-06-02T23:46:54-07:00",
+          "message": "feat: hourly scrape digest + per-mapping Telegram reports",
+          "scope": null,
+          "linear_refs": []
+        },
+        {
+          "sha": "6b04590ee9fcbf58fa8aee122b53f6f1bd3b38b4",
+          "short_sha": "6b04590ee",
+          "author": "gblack686",
+          "date": "2026-06-02T23:34:17-07:00",
+          "message": "feat: alert to Telegram on a failed/blocked scheduled tick",
+          "scope": null,
+          "linear_refs": []
+        },
+        {
+          "sha": "432b49796e8b982207735a747f1339291a99e5c1",
+          "short_sha": "432b49796",
+          "author": "gblack686",
+          "date": "2026-06-02T22:45:35-07:00",
+          "message": "feat: add ecom map auto-mapper (any site -> manifest)",
+          "scope": null,
+          "linear_refs": []
+        }
+      ]
+    },
+    {
+      "repo": "jid5274",
+      "client": "jason-diaz",
+      "role": "client runtime (Carlos-Jason)",
+      "branch": "main",
+      "commit_count": 80,
+      "last_commit_at": "2026-06-07T13:00:38-07:00",
+      "recent_commits": [
+        {
+          "sha": "9b80b0a04cc3619de6f1c4050851d4cea49165bb",
+          "short_sha": "9b80b0a04",
+          "author": "gblack686",
+          "date": "2026-06-07T13:00:38-07:00",
+          "message": "chore(sessions): add local transcript archive",
+          "scope": "sessions",
+          "linear_refs": []
+        },
+        {
+          "sha": "14ce31222fc1ce59fef334d0a8d59b9e4b8baa07",
+          "short_sha": "14ce31222",
+          "author": "gblack686",
+          "date": "2026-06-04T19:35:07-07:00",
+          "message": "Add TAC Hermes team to Jason workspace",
+          "scope": null,
+          "linear_refs": []
+        },
+        {
+          "sha": "a4f19736b6d387dcb70eba64e5b771a3c8694665",
+          "short_sha": "a4f19736b",
+          "author": "Carlos (jason-agent)",
+          "date": "2026-06-04T19:20:30-07:00",
+          "message": "Escalation: @pmc_deliverables_bot — fleet now four-pillar, hybrid arch recommended",
+          "scope": null,
+          "linear_refs": []
+        },
+        {
+          "sha": "eaed6d388a469804313f264b0cee11e94c76df8b",
+          "short_sha": "eaed6d388",
+          "author": "Carlos (jason-agent)",
+          "date": "2026-06-04T19:15:44-07:00",
+          "message": "Escalation: @pmc_outreach_operator_bot — fleet pattern confirmed, arch ADR needed",
+          "scope": null,
+          "linear_refs": []
+        },
+        {
+          "sha": "26f700e96f3b0a134f4bcd69648e99fc6a0a3071",
+          "short_sha": "26f700e96",
+          "author": "Carlos (jason-agent)",
+          "date": "2026-06-04T19:07:47-07:00",
+          "message": "Escalation: @pmc_prospect_research_bot provisioned, fleet arch decision needed",
+          "scope": null,
+          "linear_refs": []
+        },
+        {
+          "sha": "f1c4af70ac82c3de334bed4d195f9d2544ede6b5",
+          "short_sha": "f1c4af70a",
+          "author": "Carlos (jason-agent)",
+          "date": "2026-06-04T19:06:59-07:00",
+          "message": "Escalation: @pmc_marketing_studio_bot provisioned, token rotate needed",
+          "scope": null,
+          "linear_refs": []
+        },
+        {
+          "sha": "0b5434ea8c9bc7c3f97ac39de817fd1b2673e06c",
+          "short_sha": "0b5434ea8",
+          "author": "Carlos (jason-agent)",
+          "date": "2026-06-04T19:04:25-07:00",
+          "message": "log: pin parent SHA on BusinessPage badge entry",
+          "scope": null,
+          "linear_refs": []
+        },
+        {
+          "sha": "a8bb6a59748e85737ecb6b48969d4c39d98c60e1",
+          "short_sha": "a8bb6a597",
+          "author": "Carlos (jason-agent)",
+          "date": "2026-06-04T19:04:10-07:00",
+          "message": "Archon: ivory badge palette for BusinessPage (sub-brand tabs)",
+          "scope": null,
+          "linear_refs": []
+        },
+        {
+          "sha": "6226c8fbd1da469175d19a955b9027d01ca043e7",
+          "short_sha": "6226c8fbd",
+          "author": "Carlos (jason-agent)",
+          "date": "2026-06-04T15:04:08-07:00",
+          "message": "log: backfill parent SHA on EWC overview entry",
+          "scope": null,
+          "linear_refs": []
+        },
+        {
+          "sha": "e36e26788a3fb1c7d0baf1c200aa1bee04c07b1a",
+          "short_sha": "e36e26788",
+          "author": "Carlos (jason-agent)",
+          "date": "2026-06-04T15:03:51-07:00",
+          "message": "vault: flesh out EWC overview to portfolio-standard (43 → 143 lines)",
+          "scope": null,
+          "linear_refs": []
+        },
+        {
+          "sha": "d2b5ca913810784b16d775d1fa670ec487ad56b6",
+          "short_sha": "d2b5ca913",
+          "author": "Carlos (jason-agent)",
+          "date": "2026-06-04T11:04:17-07:00",
+          "message": "log: backfill parent SHA for fa69c0e8 entry",
+          "scope": null,
+          "linear_refs": []
+        },
+        {
+          "sha": "1009728248f083e8a25449ccb95cc370712cf6b3",
+          "short_sha": "100972824",
+          "author": "Carlos (jason-agent)",
+          "date": "2026-06-04T11:04:02-07:00",
+          "message": "archon: bump pin to fa69c0e8 (PMCPage live-counts wiring)",
+          "scope": null,
+          "linear_refs": []
+        },
+        {
+          "sha": "97024248bdc883f8339dd1293e35d4e82df75f65",
+          "short_sha": "97024248b",
+          "author": "Carlos (jason-agent)",
+          "date": "2026-06-04T10:37:16-07:00",
+          "message": "Corrine Buchanan pre-call personal intel brief",
+          "scope": null,
+          "linear_refs": []
+        },
+        {
+          "sha": "a8754fd48f56c287e6b050c460b569973b385dca",
+          "short_sha": "a8754fd48",
+          "author": "Carlos (jason-agent)",
+          "date": "2026-06-04T10:26:14-07:00",
+          "message": "Corrine Buchanan: consolidated BRT call script + EMDR market data",
+          "scope": null,
+          "linear_refs": []
+        },
+        {
+          "sha": "d2a75d355e97271ab1a54f5150e2e4876b341532",
+          "short_sha": "d2a75d355",
+          "author": "Carlos (jason-agent)",
+          "date": "2026-06-04T10:19:38-07:00",
+          "message": "Add Corrine Buchanan (Tall Grass Therapy) BRT call prep",
+          "scope": null,
+          "linear_refs": []
+        },
+        {
+          "sha": "7e443af5cf1501a2f6de129ba9456320b9e6dbee",
+          "short_sha": "7e443af5c",
+          "author": "Carlos (jason-agent)",
+          "date": "2026-06-04T09:02:29-07:00",
+          "message": "Add Sales Nav InMail batch: Rosado + Bonar parallel-touch",
+          "scope": null,
+          "linear_refs": []
+        },
+        {
+          "sha": "21439707a7bd044b34587e60a902a9cd8df547d2",
+          "short_sha": "21439707a",
+          "author": "Carlos (jason-agent)",
+          "date": "2026-06-04T06:15:33-07:00",
+          "message": "PMC pitch-deck HypeReel r2: real logo on s01 + website-only on s07 (no email)",
+          "scope": null,
+          "linear_refs": []
+        },
+        {
+          "sha": "ecc01dfa4ff5166175091ed0fc6b4c74a4cce5d1",
+          "short_sha": "ecc01dfa4",
+          "author": "Carlos (jason-agent)",
+          "date": "2026-06-04T06:10:16-07:00",
+          "message": "Asset manifest: PMC pitch-deck HypeReel (60s, Template B) — Andrew outbound use",
+          "scope": null,
+          "linear_refs": []
+        },
+        {
+          "sha": "facd985af938565e9c1ec24090f7ed55512bccfb",
+          "short_sha": "facd985af",
+          "author": "Carlos (jason-agent)",
+          "date": "2026-06-04T05:56:59-07:00",
+          "message": "Seed dashboard-improvement-log + start dashboard-improvement-pass cron (3x/day PT)",
+          "scope": null,
+          "linear_refs": []
+        },
+        {
+          "sha": "1fbdc027af2fd995dbbbe513af7074491516a800",
+          "short_sha": "1fbdc027a",
+          "author": "Carlos (jason-agent)",
+          "date": "2026-06-04T05:47:29-07:00",
+          "message": "Dashboard: ivory contrast + live counts + IHHT/QEP/Fountain vault flesh-out",
+          "scope": null,
+          "linear_refs": []
+        }
+      ]
+    },
+    {
+      "repo": "fisch-group",
+      "client": "fish-group",
+      "role": "client repo slice",
+      "branch": "main",
+      "commit_count": 50,
+      "last_commit_at": "2026-06-06T12:42:42-07:00",
+      "recent_commits": [
+        {
+          "sha": "16debb77f2b4c2bf122789e16644ca8e438c88cc",
+          "short_sha": "16debb77f",
+          "author": "gblack686",
+          "date": "2026-06-06T12:42:42-07:00",
+          "message": "docs(finn): add welcome email template",
+          "scope": "finn",
+          "linear_refs": []
+        },
+        {
+          "sha": "437aafff022727e03c4f5b1324464293a556e6b3",
+          "short_sha": "437aafff0",
+          "author": "gblack686",
+          "date": "2026-06-06T12:26:54-07:00",
+          "message": "feat(finn): compose Hermes runtime config",
+          "scope": "finn",
+          "linear_refs": []
+        },
+        {
+          "sha": "0143d1eb11a4cfc06739b0ae5e99d2afef44304e",
+          "short_sha": "0143d1eb1",
+          "author": "gblack686",
+          "date": "2026-06-06T12:13:37-07:00",
+          "message": "feat(finn): add observability triage experts",
+          "scope": "finn",
+          "linear_refs": []
+        },
+        {
+          "sha": "4ef4b41bffa14b5b4ec8e57e16757d2a3edbf53c",
+          "short_sha": "4ef4b41bf",
+          "author": "gblack686",
+          "date": "2026-06-06T11:48:35-07:00",
+          "message": "feat(finn): add agent expert command set",
+          "scope": "finn",
+          "linear_refs": []
+        },
+        {
+          "sha": "3142c90ff397bc3526cd3bd54b4221adbbae1087",
+          "short_sha": "3142c90ff",
+          "author": "gblack686",
+          "date": "2026-06-03T17:39:26-07:00",
+          "message": "feat: add fisch-group-triage as submodule (workflows/triage)",
+          "scope": null,
+          "linear_refs": []
+        },
+        {
+          "sha": "3bba6190a5cbfe2293284f32d37219c6622e2291",
+          "short_sha": "3bba6190a",
+          "author": "gblack686",
+          "date": "2026-06-03T15:37:44-07:00",
+          "message": "feat(brand): add theme.css placeholder (GBAuto tokens, swap for Fish Group brand)",
+          "scope": "brand",
+          "linear_refs": []
+        },
+        {
+          "sha": "7660cbbaf3d0b53f5329197038afe3e70f0af0c3",
+          "short_sha": "7660cbbaf",
+          "author": "gblack686",
+          "date": "2026-06-03T15:24:06-07:00",
+          "message": "feat(finn): session greeting primer + Lovable skill wired into data-integrations",
+          "scope": "finn",
+          "linear_refs": []
+        },
+        {
+          "sha": "d6732062dca3bfeb1e380db82e08febec2f913a6",
+          "short_sha": "d6732062d",
+          "author": "gblack686",
+          "date": "2026-06-03T14:46:38-07:00",
+          "message": "feat(finn): Hermes agent in-repo (GPT-5.5/Codex) + Jason-parity telemetry",
+          "scope": "finn",
+          "linear_refs": [
+            "GPT-5"
+          ]
+        },
+        {
+          "sha": "48d90b1bfb30afa8d53268d4414ac16a1fdae5fb",
+          "short_sha": "48d90b1bf",
+          "author": "GBAutomation Agent",
+          "date": "2026-05-15T14:36:57-07:00",
+          "message": "feat: add hermes-gbauto as submodule at hermes/",
+          "scope": null,
+          "linear_refs": []
+        },
+        {
+          "sha": "5b2ee2a08e1a073bc05d47d3961f919918507365",
+          "short_sha": "5b2ee2a08",
+          "author": "Emil Caplow",
+          "date": "2026-05-15T13:55:13-04:00",
+          "message": "docs(mark): add security audit for mark.fischgroup.com (Mark Schiffer Wealth Portal)",
+          "scope": "mark",
+          "linear_refs": []
+        },
+        {
+          "sha": "0a1684a4e2d5378024dc8165770f72a4d137789e",
+          "short_sha": "0a1684a4e",
+          "author": "GBAutomation Dispatcher",
+          "date": "2026-05-09T20:51:25-07:00",
+          "message": "fix(tasks): add linear + description frontmatter (FSH-10)",
+          "scope": "tasks",
+          "linear_refs": [
+            "FSH-10"
+          ]
+        },
+        {
+          "sha": "900eaf9eb5bb15195c49f75f1d898a365cc7a92b",
+          "short_sha": "900eaf9eb",
+          "author": "GBAutomation Dispatcher",
+          "date": "2026-05-08T06:37:22-07:00",
+          "message": "chore: apply gbautomation canonical alignment (FSH-10)",
+          "scope": null,
+          "linear_refs": [
+            "FSH-10"
+          ]
+        },
+        {
+          "sha": "768c97e6fdaa672634bc49deb4d7f7971abac11e",
+          "short_sha": "768c97e6f",
+          "author": "Emil Caplow",
+          "date": "2026-04-24T16:55:28-04:00",
+          "message": "docs(tls): append frontend security audit findings to TLS-Audit (2026-04-24)",
+          "scope": "tls",
+          "linear_refs": []
+        },
+        {
+          "sha": "e78c23398bb68ec39be7712d11e60d6d8be229da",
+          "short_sha": "e78c23398",
+          "author": "Emil Caplow",
+          "date": "2026-04-24T13:11:10-04:00",
+          "message": "docs(tls): append backend security audit findings to TLS-Audit (2026-04-24)",
+          "scope": "tls",
+          "linear_refs": []
+        },
+        {
+          "sha": "0038890dbe376129a41c59d644201a45469524cc",
+          "short_sha": "0038890db",
+          "author": "Emil Caplow",
+          "date": "2026-04-24T13:03:34-04:00",
+          "message": "feat(clients): add TLS client card + TLS-Audit conversation log",
+          "scope": "clients",
+          "linear_refs": []
+        },
+        {
+          "sha": "d3ae411330f2c40e5f0e20f0b09b8510db6f0c6c",
+          "short_sha": "d3ae41133",
+          "author": "gblack686",
+          "date": "2026-04-23T22:55:37-07:00",
+          "message": "fix(config): strip heartbeat target and damage-control plugin",
+          "scope": "config",
+          "linear_refs": []
+        },
+        {
+          "sha": "f03a21afd85f6b11debbd78f961f687e6e541f4d",
+          "short_sha": "f03a21afd",
+          "author": "gblack686",
+          "date": "2026-04-23T22:54:23-07:00",
+          "message": "fix(config): schema-migrate to openclaw 2026.3.13",
+          "scope": "config",
+          "linear_refs": []
+        },
+        {
+          "sha": "259cae85b7a74ce0cb083228d904ef6cad6712ca",
+          "short_sha": "259cae85b",
+          "author": "gblack686",
+          "date": "2026-04-23T21:36:06-07:00",
+          "message": "feat(config): port 18789 to 18790 per ADR-001, bind telegram allowlist",
+          "scope": "config",
+          "linear_refs": [
+            "ADR-001"
+          ]
+        },
+        {
+          "sha": "1e365c4dfa7078cff58728b7bfd7ea90e5a1ef46",
+          "short_sha": "1e365c4df",
+          "author": "Emil Caplow",
+          "date": "2026-04-23T17:14:19-04:00",
+          "message": "sync: add 4 new Granola notes + stage prior untracked vault files (Apr 23 2026)",
+          "scope": null,
+          "linear_refs": []
+        },
+        {
+          "sha": "75e2330e941b93badfea9a4078e240f83404a15f",
+          "short_sha": "75e2330e9",
+          "author": "gblack686",
+          "date": "2026-04-21T23:43:51-07:00",
+          "message": "docs(correspondence): draft Thursday-session-prep email to Mike + Emil",
+          "scope": "correspondence",
+          "linear_refs": []
+        }
+      ]
+    },
+    {
+      "repo": "agent-harness",
+      "client": "gbautomation",
+      "role": "agent runtime / harness generator",
+      "branch": "main",
+      "commit_count": 15,
+      "last_commit_at": "2026-06-04T15:53:45-07:00",
+      "recent_commits": [
+        {
+          "sha": "099e9f713678a3fcf137964d6c3631316f899f53",
+          "short_sha": "099e9f713",
+          "author": "gblack686",
+          "date": "2026-06-04T15:53:45-07:00",
+          "message": "feat: emit session worktree hints",
+          "scope": null,
+          "linear_refs": []
+        },
+        {
+          "sha": "a72adebda75f02c0e8186993535165dbbd262cb8",
+          "short_sha": "a72adebda",
+          "author": "gblack686",
+          "date": "2026-06-04T06:56:54-07:00",
+          "message": "feat(skill): add setup-telegram-bot to CORE skills (per-agent bot provisioning)",
+          "scope": "skill",
+          "linear_refs": []
+        },
+        {
+          "sha": "4845edcec567bfeb5aca917c1c662c2bca165b31",
+          "short_sha": "4845edcec",
+          "author": "gblack686",
+          "date": "2026-06-03T15:23:32-07:00",
+          "message": "feat(primer): session greeting + 'context loaded' manifest; add lovable domain skill hint",
+          "scope": "primer",
+          "linear_refs": []
+        },
+        {
+          "sha": "a2f92d2214b2c0348dafd7035c261ed0da03cafe",
+          "short_sha": "a2f92d221",
+          "author": "gblack686",
+          "date": "2026-06-03T14:33:52-07:00",
+          "message": "feat(model): add codex tier (GPT-5.5 via openai-codex OAuth pool) + Telegram VA block",
+          "scope": "model",
+          "linear_refs": [
+            "GPT-5"
+          ]
+        },
+        {
+          "sha": "acf812c20bb44487704a58127cf44519a52320cf",
+          "short_sha": "acf812c20",
+          "author": "gblack686",
+          "date": "2026-06-03T01:05:40-07:00",
+          "message": "feat(model-tier): route provider/model by intake model_tier",
+          "scope": "model-tier",
+          "linear_refs": []
+        },
+        {
+          "sha": "341f59b21d123d8f1f6e4bd48d8a469a3480a13a",
+          "short_sha": "341f59b21",
+          "author": "gblack686",
+          "date": "2026-06-03T00:37:21-07:00",
+          "message": "chore: remove stray test-output file",
+          "scope": null,
+          "linear_refs": []
+        },
+        {
+          "sha": "538c554a8d2a3656d71a2ca269f7fd1066e49982",
+          "short_sha": "538c554a8",
+          "author": "gblack686",
+          "date": "2026-06-03T00:36:56-07:00",
+          "message": "feat(p6): clarify loop, deployment patterns, second example, docs",
+          "scope": "p6",
+          "linear_refs": []
+        },
+        {
+          "sha": "6c8ca883788dfb5bc75e5c7371ef22bdc27c99cd",
+          "short_sha": "6c8ca8837",
+          "author": "gblack686",
+          "date": "2026-06-03T00:31:53-07:00",
+          "message": "feat(p5): core operational pipelines + L18/L19 + build-report pairing",
+          "scope": "p5",
+          "linear_refs": []
+        },
+        {
+          "sha": "54078673935c857f0adde239a0aa21f18ab310b2",
+          "short_sha": "540786739",
+          "author": "gblack686",
+          "date": "2026-06-03T00:28:34-07:00",
+          "message": "feat(p4): OpenClaw emitter, owned context layer, LEARN hooks, CI/CD",
+          "scope": "p4",
+          "linear_refs": []
+        },
+        {
+          "sha": "d29c57e5cda9ad9e2be82cd5e5ffb0dc9e8a18dd",
+          "short_sha": "d29c57e5c",
+          "author": "gblack686",
+          "date": "2026-06-03T00:20:45-07:00",
+          "message": "feat(emitters+validator): P3 Claude Code & Codex emitters, validator, receipt",
+          "scope": "emitters+validator",
+          "linear_refs": []
+        },
+        {
+          "sha": "35100591295742ec401733879c3facfca496e6c8",
+          "short_sha": "351005912",
+          "author": "gblack686",
+          "date": "2026-06-03T00:14:41-07:00",
+          "message": "feat(generator): P2 Hermes generator MVP",
+          "scope": "generator",
+          "linear_refs": []
+        },
+        {
+          "sha": "a9e2996edb2e9398d9135aa03579815dade86218",
+          "short_sha": "a9e2996ed",
+          "author": "gblack686",
+          "date": "2026-06-03T00:07:13-07:00",
+          "message": "feat(schemas): P1 runtime schemas (hermes PRIMARY + openclaw)",
+          "scope": "schemas",
+          "linear_refs": []
+        },
+        {
+          "sha": "a0c477fa4554ec4851c17c859c28407ce074bfd1",
+          "short_sha": "a0c477fa4",
+          "author": "gblack686",
+          "date": "2026-06-02T23:18:56-07:00",
+          "message": "feat(intake): P1 typed intake contract + JSON Schema",
+          "scope": "intake",
+          "linear_refs": []
+        },
+        {
+          "sha": "e83a5a6384207d9e67011e035e09f95cb56c525d",
+          "short_sha": "e83a5a638",
+          "author": "gblack686",
+          "date": "2026-06-02T23:13:23-07:00",
+          "message": "chore: enforce LF via .gitattributes",
+          "scope": null,
+          "linear_refs": []
+        },
+        {
+          "sha": "16ac0bd71b35f6fa98166244e2a9e9628c4ad216",
+          "short_sha": "16ac0bd71",
+          "author": "gblack686",
+          "date": "2026-06-02T23:13:03-07:00",
+          "message": "feat(scaffold): P0 agent-harness skeleton",
+          "scope": "scaffold",
+          "linear_refs": []
+        }
+      ]
+    },
+    {
+      "repo": "greg-trading",
+      "client": "greg-trading",
+      "role": "internal trading slice (Sebastian)",
+      "branch": "main",
+      "commit_count": 10,
+      "last_commit_at": "2026-06-04T00:00:49-07:00",
+      "recent_commits": [
+        {
+          "sha": "abf120284c4085cd6ed4f16b76a3082497575801",
+          "short_sha": "abf120284",
+          "author": "gblack686",
+          "date": "2026-06-04T00:00:49-07:00",
+          "message": "fix(L1): vendor the MCP server's bundled Hyperliquid SDK module (dist/)",
+          "scope": "L1",
+          "linear_refs": []
+        },
+        {
+          "sha": "cac248989b2d74dc9ca3e75a8a301099a744e060",
+          "short_sha": "cac248989",
+          "author": "gblack686",
+          "date": "2026-06-03T23:38:22-07:00",
+          "message": "feat(L5): port full Kiyotaka + expert knowledge base (104 files)",
+          "scope": "L5",
+          "linear_refs": []
+        },
+        {
+          "sha": "7baeb108cffaee1b84b31ea81c306b5693a43b44",
+          "short_sha": "7baeb108c",
+          "author": "gblack686",
+          "date": "2026-06-03T23:37:26-07:00",
+          "message": "chore(L4): bump greg-trading-triage to trading-domain pipeline",
+          "scope": "L4",
+          "linear_refs": []
+        },
+        {
+          "sha": "75db33335c79045b89616571fc8f4c41420244df",
+          "short_sha": "75db33335",
+          "author": "gblack686",
+          "date": "2026-06-03T23:34:20-07:00",
+          "message": "feat(L3): port Sebastian 16-agent team (agents + mental-models + config) + profile map",
+          "scope": "L3",
+          "linear_refs": []
+        },
+        {
+          "sha": "40c96ec203d00b76828767db1041f19a0c8ad889",
+          "short_sha": "40c96ec20",
+          "author": "gblack686",
+          "date": "2026-06-03T23:32:58-07:00",
+          "message": "feat(L2): add trade-manager skill (trailing stops + stop enforcement + position audit)",
+          "scope": "L2",
+          "linear_refs": []
+        },
+        {
+          "sha": "3e365bce472cf19461fa53c3ef0b8850bceeca06",
+          "short_sha": "3e365bce4",
+          "author": "gblack686",
+          "date": "2026-06-03T23:32:14-07:00",
+          "message": "feat(L1): vendor Hyperliquid SDK + strategy scripts + Balthazar MCP (execution layer)",
+          "scope": "L1",
+          "linear_refs": []
+        },
+        {
+          "sha": "2ce3e6f80bc8a7a158cd789deae5a59c52facefb",
+          "short_sha": "2ce3e6f80",
+          "author": "gblack686",
+          "date": "2026-06-03T23:21:47-07:00",
+          "message": "chore(triage): bump greg-trading-triage to include Kanban smoke test",
+          "scope": "triage",
+          "linear_refs": []
+        },
+        {
+          "sha": "cd68a1b0064efe6a7dfc21eaf1be6cd21aca0a4f",
+          "short_sha": "cd68a1b00",
+          "author": "gblack686",
+          "date": "2026-06-03T22:48:10-07:00",
+          "message": "feat: bring greg-trading up to standard config (telemetry + hermes + triage)",
+          "scope": null,
+          "linear_refs": []
+        },
+        {
+          "sha": "06ce971ba7f9693af8bf2359968245d055216e78",
+          "short_sha": "06ce971ba",
+          "author": "gblack686",
+          "date": "2026-04-28T17:44:07-07:00",
+          "message": "seed: import trading content from gbautomation",
+          "scope": null,
+          "linear_refs": []
+        },
+        {
+          "sha": "fda9fab40f393aeb1fc3fa5549c410ea447fa71f",
+          "short_sha": "fda9fab40",
+          "author": "Greg",
+          "date": "2026-04-05T22:33:46-07:00",
+          "message": "feat: add context primer + log structure",
+          "scope": null,
+          "linear_refs": []
+        }
+      ]
+    },
+    {
+      "repo": "hermes-multi-agent-workflow",
+      "client": "gbautomation",
+      "role": "multi-agent workflow reference",
+      "branch": "main",
+      "commit_count": 6,
+      "last_commit_at": "2026-06-03T22:57:36-07:00",
+      "recent_commits": [
+        {
+          "sha": "807e6dcb71789c51a417f34528d2ae3f2aef7097",
+          "short_sha": "807e6dcb7",
+          "author": "gblack686",
+          "date": "2026-06-03T22:57:36-07:00",
+          "message": "test: add hello-world multi-agent Kanban smoke",
+          "scope": null,
+          "linear_refs": []
+        },
+        {
+          "sha": "411f5edf04cf0691315cbaedbd10dd6108c3b074",
+          "short_sha": "411f5edf0",
+          "author": "gblack686",
+          "date": "2026-06-03T01:02:50-07:00",
+          "message": "docs(examples): record GBA hello world live smoke",
+          "scope": "examples",
+          "linear_refs": []
+        },
+        {
+          "sha": "ad403c1f43acdb73907c356551ab28f20df6c567",
+          "short_sha": "ad403c1f4",
+          "author": "gblack686",
+          "date": "2026-06-03T00:44:50-07:00",
+          "message": "feat(examples): generate GBA hello world reports",
+          "scope": "examples",
+          "linear_refs": []
+        },
+        {
+          "sha": "300201f0709a6610a49611b49ed3df77fafa89f9",
+          "short_sha": "300201f07",
+          "author": "gblack686",
+          "date": "2026-06-03T00:42:09-07:00",
+          "message": "feat(examples): add GBAutomation hello world pipelines",
+          "scope": "examples",
+          "linear_refs": []
+        },
+        {
+          "sha": "fa4a9dea2bbf86c89ef5887af9a05da64d041b4a",
+          "short_sha": "fa4a9dea2",
+          "author": "ntombisol",
+          "date": "2026-06-01T09:07:10-07:00",
+          "message": "Add real pain-point-scout-x as a reference skill",
+          "scope": null,
+          "linear_refs": []
+        },
+        {
+          "sha": "fa0d221f7c9735e41bee785a6a3fa50d999debc5",
+          "short_sha": "fa0d221f7",
+          "author": "ntombisol",
+          "date": "2026-05-29T14:03:21-07:00",
+          "message": "Initial commit",
+          "scope": null,
+          "linear_refs": []
+        }
+      ]
+    },
+    {
+      "repo": "the-mall",
+      "client": "the-mall",
+      "role": "client repo slice",
+      "branch": "main",
+      "commit_count": 2,
+      "last_commit_at": "2026-06-01T14:06:16-07:00",
+      "recent_commits": [
+        {
+          "sha": "be6a7dd7b9ded278e997ee105c69f120b80e1c48",
+          "short_sha": "be6a7dd7b",
+          "author": "gblack686",
+          "date": "2026-06-01T14:06:16-07:00",
+          "message": "feat(skill): persist catalog to Supabase (mall_persist.py)",
+          "scope": "skill",
+          "linear_refs": []
+        },
+        {
+          "sha": "5a57ec650ffd68467b6903a6d14b83159dc0d348",
+          "short_sha": "5a57ec650",
+          "author": "gblack686",
+          "date": "2026-05-26T17:25:00-07:00",
+          "message": "chore: initial import from Mac Mini",
+          "scope": null,
+          "linear_refs": []
+        }
+      ]
+    },
+    {
+      "repo": "browser-harness",
+      "client": "gbautomation",
+      "role": "browser automation substrate",
+      "branch": "HEAD",
+      "commit_count": 80,
+      "last_commit_at": "2026-05-19T16:55:56-07:00",
+      "recent_commits": [
+        {
+          "sha": "ad7f4f233cbde8bb21ecf93c2e8b3297abcba093",
+          "short_sha": "ad7f4f233",
+          "author": "MagMueller",
+          "date": "2026-05-19T16:55:56-07:00",
+          "message": "Remove Firecrawl mentions from Facebook skills",
+          "scope": null,
+          "linear_refs": []
+        },
+        {
+          "sha": "ae831519a908c8432dbeb537e92f6e4fb60be020",
+          "short_sha": "ae831519a",
+          "author": "MagMueller",
+          "date": "2026-05-19T16:50:24-07:00",
+          "message": "Remove stale top-level domain skills",
+          "scope": null,
+          "linear_refs": []
+        },
+        {
+          "sha": "1599ba195186d277f9ebf4909bb015ae900e4c4e",
+          "short_sha": "1599ba195",
+          "author": "mathisdittrich",
+          "date": "2026-05-15T00:17:53-07:00",
+          "message": "Revert \"Stage file uploads for remote browsers\"",
+          "scope": null,
+          "linear_refs": []
+        },
+        {
+          "sha": "93ce332934225583e6939a9c6f584d68d115b90b",
+          "short_sha": "93ce33293",
+          "author": "mathisdittrich",
+          "date": "2026-05-14T23:42:52-07:00",
+          "message": "Revert \"Add LLM discovery file\"",
+          "scope": null,
+          "linear_refs": []
+        },
+        {
+          "sha": "87fe826b5eb3ba575a7ff6d09fd39c12ca09af31",
+          "short_sha": "87fe826b5",
+          "author": "mathisdittrich",
+          "date": "2026-05-14T23:40:46-07:00",
+          "message": "Revert \"Link Browser Use Box deployment demo\"",
+          "scope": null,
+          "linear_refs": []
+        },
+        {
+          "sha": "f2dca2bc0c8c33555129b05fac97843d4f125ef1",
+          "short_sha": "f2dca2bc0",
+          "author": "shawn pana",
+          "date": "2026-05-15T05:35:01Z",
+          "message": "Add LLM discovery file",
+          "scope": null,
+          "linear_refs": []
+        },
+        {
+          "sha": "bdd550b9be0f3efd3c58aea9cf729eafe8c16ed5",
+          "short_sha": "bdd550b9b",
+          "author": "bux",
+          "date": "2026-05-15T00:03:22Z",
+          "message": "Link Browser Use Box deployment demo",
+          "scope": null,
+          "linear_refs": []
+        },
+        {
+          "sha": "f2269723022c3cdf620b9d13ac6978112a1d178e",
+          "short_sha": "f22697230",
+          "author": "shawn pana",
+          "date": "2026-05-14T19:14:44Z",
+          "message": "Stage file uploads for remote browsers",
+          "scope": null,
+          "linear_refs": []
+        },
+        {
+          "sha": "2fa1b1e1e2612c48c273977bdf75d3f7cbea916c",
+          "short_sha": "2fa1b1e1e",
+          "author": "Saurav Panda",
+          "date": "2026-05-13T16:15:35-07:00",
+          "message": "Move HubSpot skill into agent workspace",
+          "scope": null,
+          "linear_refs": []
+        },
+        {
+          "sha": "21c94e342c76e5c238cb2135012986f535e75e6a",
+          "short_sha": "21c94e342",
+          "author": "Saurav Panda",
+          "date": "2026-05-13T15:40:27-07:00",
+          "message": "Fix Snap Chromium symlink detection",
+          "scope": null,
+          "linear_refs": []
+        },
+        {
+          "sha": "a6957b8a5fa123bd858935a276417cebf6afb405",
+          "short_sha": "a6957b8a5",
+          "author": "Clayton",
+          "date": "2026-05-12T07:45:42-05:00",
+          "message": "feat: warn on Snap Chromium and add doctor --fix-snap guide",
+          "scope": null,
+          "linear_refs": []
+        },
+        {
+          "sha": "a9f7b1d5473e0bb54b6813993bfc4d4bfaecf8cd",
+          "short_sha": "a9f7b1d54",
+          "author": "Sarath Suresh",
+          "date": "2026-05-12T15:31:55+05:30",
+          "message": "Remove -c script execution",
+          "scope": null,
+          "linear_refs": []
+        },
+        {
+          "sha": "62894f2c60a37531dcd731c2888e78b59ac2e668",
+          "short_sha": "62894f2c6",
+          "author": "Axel Clark",
+          "date": "2026-05-10T15:06:50-07:00",
+          "message": "skill: HubSpot Private App webhook subscriptions",
+          "scope": null,
+          "linear_refs": []
+        },
+        {
+          "sha": "e0e7f0b1095359fe1d77bc4b8e2e4b95ad9670c1",
+          "short_sha": "e0e7f0b10",
+          "author": "Kaihang An",
+          "date": "2026-05-11T02:17:08+08:00",
+          "message": "feat: add close_tab() helper to close browser tabs via CDP Target.closeTarget",
+          "scope": null,
+          "linear_refs": []
+        },
+        {
+          "sha": "0d6e472c7ccc895b059fff8b4d2bac873f35e1e2",
+          "short_sha": "0d6e472c7",
+          "author": "Alezander9",
+          "date": "2026-05-07T13:04:40-07:00",
+          "message": "feat: use 🐴 (horse) instead of 🟢 as the controlled-tab marker",
+          "scope": null,
+          "linear_refs": []
+        },
+        {
+          "sha": "32be32fa66b297540882eb619b4689196a8934bf",
+          "short_sha": "32be32fa6",
+          "author": "Magnus Müller",
+          "date": "2026-05-07T16:49:14Z",
+          "message": "install.md: drop star-the-repo prompt from first-run demo",
+          "scope": null,
+          "linear_refs": []
+        },
+        {
+          "sha": "226876d56e46ff755b7f5049b088f76be65bce65",
+          "short_sha": "226876d56",
+          "author": "MinJaeLee1",
+          "date": "2026-05-07T21:16:03+09:00",
+          "message": "docs: nudge agents to read matching domain skills",
+          "scope": null,
+          "linear_refs": []
+        },
+        {
+          "sha": "6e86f7cf2be7daeda3f01a12f55de0214e3b0ba7",
+          "short_sha": "6e86f7cf2",
+          "author": "Alezander9",
+          "date": "2026-05-06T14:37:03-07:00",
+          "message": "feat(ipc): split BH_RUNTIME_DIR (sock) from BH_TMP_DIR (logs/screenshots)",
+          "scope": "ipc",
+          "linear_refs": []
+        },
+        {
+          "sha": "1583bd7c0b98629bfabcfd6e61051138de9495f1",
+          "short_sha": "1583bd7c0",
+          "author": "alexph-dev",
+          "date": "2026-05-06T17:55:26+07:00",
+          "message": "docs: add QBO report export domain skill",
+          "scope": null,
+          "linear_refs": []
+        },
+        {
+          "sha": "16925613bf2458123247f660290565c7d4d516b4",
+          "short_sha": "16925613b",
+          "author": "J3m5",
+          "date": "2026-05-06T11:26:21+02:00",
+          "message": "fix: detect Helium as a local browser",
+          "scope": null,
+          "linear_refs": []
+        }
+      ]
+    },
+    {
+      "repo": "logo-motion-app",
+      "client": "gbautomation",
+      "role": "app / demo surface",
+      "branch": "main",
+      "commit_count": 3,
+      "last_commit_at": "2026-04-24T14:45:22-07:00",
+      "recent_commits": [
+        {
+          "sha": "d215666320b08090a1d8606356d523d98f2c0277",
+          "short_sha": "d21566632",
+          "author": "gblack686",
+          "date": "2026-04-24T14:45:22-07:00",
+          "message": "fix(pipeline): gpt-image-2 + claude-p validator + agent-bypass runner",
+          "scope": "pipeline",
+          "linear_refs": []
+        },
+        {
+          "sha": "7c72192c03b0c8d86f856b8177983e4f6a089790",
+          "short_sha": "7c72192c0",
+          "author": "gblack686",
+          "date": "2026-04-24T12:58:57-07:00",
+          "message": "feat(backend): scaffold agent-team helpers + FastAPI skeleton",
+          "scope": "backend",
+          "linear_refs": []
+        },
+        {
+          "sha": "867c26e6ccb12ebd8594ec0eaf459b4fe391a485",
+          "short_sha": "867c26e6c",
+          "author": "gblack686",
+          "date": "2026-04-24T12:49:20-07:00",
+          "message": "feat: scaffold logo-motion-app from TAC Coder v4 PRD",
+          "scope": null,
+          "linear_refs": []
+        }
+      ]
+    },
+    {
+      "repo": "second-brain",
+      "client": "gbautomation",
+      "role": "vault / knowledge mirror",
+      "branch": "main",
+      "commit_count": 59,
+      "last_commit_at": "2026-04-20T17:03:25-07:00",
+      "recent_commits": [
+        {
+          "sha": "25c1cbb42ffdbce4bce0eea66578f97cfbbdfb52",
+          "short_sha": "25c1cbb42",
+          "author": "Greg",
+          "date": "2026-04-20T17:03:25-07:00",
+          "message": "sebastian: wiki sync — remove stale scoping commands (deleted from consulting-co)",
+          "scope": null,
+          "linear_refs": []
+        },
+        {
+          "sha": "e8d98dd3f17b1ea2afe05019ea9806e528e44399",
+          "short_sha": "e8d98dd3f",
+          "author": "Greg",
+          "date": "2026-04-20T14:03:02-07:00",
+          "message": "sebastian: wiki sync — added library.yaml and SKILL.md from the-library",
+          "scope": null,
+          "linear_refs": []
+        },
+        {
+          "sha": "5150773cc713c443ffbe06a97f6174704057f1aa",
+          "short_sha": "5150773cc",
+          "author": "Greg",
+          "date": "2026-04-20T12:03:17-07:00",
+          "message": "sebastian: wiki sync — added skills/TAC_INDEX.md from the-library (83 skills cataloged)",
+          "scope": null,
+          "linear_refs": []
+        },
+        {
+          "sha": "b7e43681ce19aefafbd8181ff30906a9ec7852cd",
+          "short_sha": "b7e43681c",
+          "author": "Greg",
+          "date": "2026-04-19T21:03:40-07:00",
+          "message": "sebastian: wiki sync — added the-library README.md",
+          "scope": null,
+          "linear_refs": []
+        },
+        {
+          "sha": "c153f2630cfb4014f36c23aa2a89854acc46e079",
+          "short_sha": "c153f2630",
+          "author": "Greg",
+          "date": "2026-04-18T13:03:19-07:00",
+          "message": "sebastian: wiki sync — add the-library TAC_INDEX.md (was missing from vault)",
+          "scope": null,
+          "linear_refs": []
+        },
+        {
+          "sha": "488c2aabf656bcd24b2c68a02d954231e6778f2b",
+          "short_sha": "488c2aabf",
+          "author": "Greg",
+          "date": "2026-04-18T07:03:58-07:00",
+          "message": "sebastian: wiki sync — added the-library SKILL.md, synced library.yaml",
+          "scope": null,
+          "linear_refs": []
+        },
+        {
+          "sha": "a7e2877c0545a95199a21248f3c860c145269f4f",
+          "short_sha": "a7e2877c0",
+          "author": "Greg",
+          "date": "2026-04-17T15:03:29-07:00",
+          "message": "sebastian: wiki sync — updated the-library overview from README",
+          "scope": null,
+          "linear_refs": []
+        },
+        {
+          "sha": "092c5c6f1e02c7c0f8959cc2598fc9304288efbc",
+          "short_sha": "092c5c6f1",
+          "author": "Greg",
+          "date": "2026-04-17T07:03:35-07:00",
+          "message": "sebastian: wiki sync — the-library cookbook + scripts + library.yaml",
+          "scope": null,
+          "linear_refs": []
+        },
+        {
+          "sha": "3a147fe2be0c4bb5f4ed75a81eb802ae71023f3e",
+          "short_sha": "3a147fe2b",
+          "author": "Greg",
+          "date": "2026-04-17T05:04:06-07:00",
+          "message": "sebastian: wiki sync — removed stale commands (adw, codebase-knowledge-extract)",
+          "scope": null,
+          "linear_refs": []
+        },
+        {
+          "sha": "939b7333e4e9c756cdda1108174e3ce61044ec5f",
+          "short_sha": "939b7333e",
+          "author": "Greg",
+          "date": "2026-04-16T21:04:17-07:00",
+          "message": "sebastian: wiki sync — added tac-learning-system/TAC_INDEX.md from consulting-co",
+          "scope": null,
+          "linear_refs": []
+        },
+        {
+          "sha": "aa4060e13dbe715ab1de640484f7781a54d28374",
+          "short_sha": "aa4060e13",
+          "author": "Greg",
+          "date": "2026-04-16T17:03:30-07:00",
+          "message": "sebastian: wiki sync — updated library.yaml (removed revstar-quickstart), cleaned stale ecosystem commands",
+          "scope": null,
+          "linear_refs": []
+        },
+        {
+          "sha": "2d4264f8effddd3b757f4b6ad7edfee02236e2dc",
+          "short_sha": "2d4264f8e",
+          "author": "Greg",
+          "date": "2026-04-16T15:03:54-07:00",
+          "message": "sebastian: wiki sync — removed 15 stale agents, updated expertise.yaml, added sync_viewer.py",
+          "scope": null,
+          "linear_refs": []
+        },
+        {
+          "sha": "e8384bdff0f7120fedbf78a7e0364c6071b52164",
+          "short_sha": "e8384bdff",
+          "author": "Greg",
+          "date": "2026-04-16T14:03:10-07:00",
+          "message": "sebastian: wiki sync — updated library.yaml to latest",
+          "scope": null,
+          "linear_refs": []
+        },
+        {
+          "sha": "f8ffde3a1efac5fe7dc869703b463d47432695e9",
+          "short_sha": "f8ffde3a1",
+          "author": "Greg",
+          "date": "2026-04-16T09:03:41-07:00",
+          "message": "sebastian: wiki sync — add the-library domain overview",
+          "scope": null,
+          "linear_refs": []
+        },
+        {
+          "sha": "ef23800ee18317ad2c34e208211c2834b7eb3ec5",
+          "short_sha": "ef23800ee",
+          "author": "Greg",
+          "date": "2026-04-15T21:03:50-07:00",
+          "message": "sebastian: wiki sync — commit pending expert library files",
+          "scope": null,
+          "linear_refs": []
+        },
+        {
+          "sha": "73c004c52aa427c02803e549a08743b5c608e426",
+          "short_sha": "73c004c52",
+          "author": "Greg",
+          "date": "2026-04-15T14:19:55-07:00",
+          "message": "sebastian: wiki sync — library.yaml updated (+295 lines, new skill entries)",
+          "scope": null,
+          "linear_refs": []
+        },
+        {
+          "sha": "d66a799a2b082ee767379c7a0d59565d431a33c4",
+          "short_sha": "d66a799a2",
+          "author": "Greg",
+          "date": "2026-04-15T08:04:30-07:00",
+          "message": "sebastian: wiki sync — added consulting-agent + library-expert-agent, added the-library cookbook docs",
+          "scope": null,
+          "linear_refs": []
+        },
+        {
+          "sha": "6a68a47238c4ff3fe294ed278cd2d412283b9040",
+          "short_sha": "6a68a4723",
+          "author": "Greg",
+          "date": "2026-04-15T07:03:57-07:00",
+          "message": "sebastian: wiki sync — added 9 expert command groups + the-library catalog",
+          "scope": null,
+          "linear_refs": []
+        },
+        {
+          "sha": "38cbfb5a981120366e942c0bdbc3408c7b85963a",
+          "short_sha": "38cbfb5a9",
+          "author": "Greg",
+          "date": "2026-04-15T06:03:24-07:00",
+          "message": "sebastian: wiki sync — agents, commands, library, cookbook from consulting-co + the-library",
+          "scope": null,
+          "linear_refs": []
+        },
+        {
+          "sha": "626c2fac09b5fefca1ff6619d2945bbd2d861ec1",
+          "short_sha": "626c2fac0",
+          "author": "Greg",
+          "date": "2026-04-15T05:03:49-07:00",
+          "message": "sebastian: wiki sync — 0 new + 0 updated agents, 0 new + 0 updated commands",
+          "scope": null,
+          "linear_refs": []
+        }
+      ]
+    },
+    {
+      "repo": "sm-eagle-scaffold",
+      "client": "eagle-app",
+      "role": "demo / client app slice",
+      "branch": "main",
+      "commit_count": 2,
+      "last_commit_at": "2026-04-10T03:22:02-04:00",
+      "recent_commits": [
+        {
+          "sha": "617182d47c1cb81132545e6cb0080d0224aea8fb",
+          "short_sha": "617182d47",
+          "author": "gblack686",
+          "date": "2026-04-10T03:22:02-04:00",
+          "message": "Add data schema registry and overhaul plan v1",
+          "scope": null,
+          "linear_refs": []
+        },
+        {
+          "sha": "78e8226b458fce0b76ecf40db6032382f9e44146",
+          "short_sha": "78e8226b4",
+          "author": "gblack686",
+          "date": "2026-04-09T19:21:03-04:00",
+          "message": "Initial scaffold from sm_eagle (scrubbed, no history)",
+          "scope": null,
+          "linear_refs": []
+        }
+      ]
+    }
+  ],
+  "recent_activity": [
+    {
+      "sha": "3106fef7a4af06f0a43f066f8901dcb39a91be28",
+      "short_sha": "3106fef7a",
+      "author": "gblack686",
+      "date": "2026-06-14T13:06:08-07:00",
+      "message": "feat(observability): Cmd+K palette entry for /observability spoke",
+      "scope": "observability",
+      "linear_refs": [],
+      "repo": "gb-automation-landing",
+      "client": "gbautomation"
+    },
+    {
+      "sha": "1ffe10a83b3a7c3d533f7b921587c4140f08198a",
+      "short_sha": "1ffe10a83",
+      "author": "gblack686",
+      "date": "2026-06-13T13:01:59-07:00",
+      "message": "feat(observability): native React agent-DAG component (replace iframe)",
+      "scope": "observability",
+      "linear_refs": [],
+      "repo": "gb-automation-landing",
+      "client": "gbautomation"
+    },
+    {
+      "sha": "7896351d1207d6d70ba7a8457ec72e70d97484bb",
+      "short_sha": "7896351d1",
+      "author": "gblack686",
+      "date": "2026-06-13T12:28:28-07:00",
+      "message": "feat(observability): /observability spoke — Langfuse agent DAG reports",
+      "scope": "observability",
+      "linear_refs": [],
+      "repo": "gb-automation-landing",
+      "client": "gbautomation"
+    },
+    {
+      "sha": "c8c9c22c20e9afcc3dc8cf9ced7c37536c22109b",
+      "short_sha": "c8c9c22c2",
+      "author": "gblack686",
+      "date": "2026-06-13T11:57:27-07:00",
+      "message": "chore: session: codex wip snapshot [7c6cc6c6]",
+      "scope": null,
+      "linear_refs": [],
+      "repo": "gbautomation",
+      "client": "gbautomation"
+    },
+    {
+      "sha": "1c70818a33a58bc01f1b908a069c8f7365ac8b26",
+      "short_sha": "1c70818a3",
+      "author": "gblack686",
+      "date": "2026-06-12T22:38:15-07:00",
+      "message": "session: codex wip snapshot [82d49340]",
+      "scope": null,
+      "linear_refs": [],
+      "repo": "gbautomation",
+      "client": "gbautomation"
+    },
+    {
+      "sha": "49d34380b0a4db4f92b9db65687974efb26dd5af",
+      "short_sha": "49d34380b",
+      "author": "gblack686",
+      "date": "2026-06-12T21:32:17-07:00",
+      "message": "feat(profiles): weave proven crawl4ai stealth escalation into ecom-intelligence team",
+      "scope": "profiles",
+      "linear_refs": [],
+      "repo": "gbautomation",
+      "client": "gbautomation"
+    },
+    {
+      "sha": "415f4b8b1285642e60fd2a13282c47b47824a0c2",
+      "short_sha": "415f4b8b1",
+      "author": "gblack686",
+      "date": "2026-06-12T21:00:51-07:00",
+      "message": "docs(ecom): fan-out triage — 4/5 bot-walled DTC sites crawl4ai-accessible",
+      "scope": "ecom",
+      "linear_refs": [],
+      "repo": "gbautomation",
+      "client": "gbautomation"
+    },
+    {
+      "sha": "99b28879ec2812affbb10626e7e0f5228a152182",
+      "short_sha": "99b28879e",
+      "author": "gblack686",
+      "date": "2026-06-12T20:57:05-07:00",
+      "message": "feat(ecom): generic crawl4ai stealth access probe — fan-out triage",
+      "scope": "ecom",
+      "linear_refs": [],
+      "repo": "ecom",
+      "client": "ecom"
+    },
+    {
+      "sha": "010d2dacfd55f46d2111052e520b8d4a2eb2b103",
+      "short_sha": "010d2dacf",
+      "author": "gblack686",
+      "date": "2026-06-12T20:50:02-07:00",
+      "message": "feat(vans): probe uses BrowserConfig.enable_stealth when available (0.7.3+/0.8.x)",
+      "scope": "vans",
+      "linear_refs": [],
+      "repo": "ecom",
+      "client": "ecom"
+    },
+    {
+      "sha": "cf90a859c4f3f2ea2f18fa3230f744661f96471d",
+      "short_sha": "cf90a859c",
+      "author": "gblack686",
+      "date": "2026-06-12T20:48:56-07:00",
+      "message": "docs(ecom): Vans GREEN — first live-persisted production run via crawl4ai",
+      "scope": "ecom",
+      "linear_refs": [],
+      "repo": "gbautomation",
+      "client": "gbautomation"
+    },
+    {
+      "sha": "048726266b39c299f2490bc3438f43004862cb02",
+      "short_sha": "048726266",
+      "author": "gblack686",
+      "date": "2026-06-12T20:31:16-07:00",
+      "message": "feat(vans): crawl4ai stealth is the production scraper — full persistable catalog",
+      "scope": "vans",
+      "linear_refs": [],
+      "repo": "ecom",
+      "client": "ecom"
+    },
+    {
+      "sha": "095376fe50ff7155261bd52ee964c6c943945fcb",
+      "short_sha": "095376fe5",
+      "author": "gblack686",
+      "date": "2026-06-12T20:01:05-07:00",
+      "message": "docs(ecom): crawl4ai 0.8.9 installed on Mini + PX defeat confirmed from prod IP",
+      "scope": "ecom",
+      "linear_refs": [],
+      "repo": "gbautomation",
+      "client": "gbautomation"
+    },
+    {
+      "sha": "645a4cacbac3665cf9fe0f54315b1f5378f36472",
+      "short_sha": "645a4cacb",
+      "author": "gblack686",
+      "date": "2026-06-12T19:32:32-07:00",
+      "message": "docs(ecom): record crawl4ai stealth tier-1 empirical win vs Vans PX",
+      "scope": "ecom",
+      "linear_refs": [],
+      "repo": "gbautomation",
+      "client": "gbautomation"
+    },
+    {
+      "sha": "81f3d39ff8d33639b37f109c873c218b9875ec10",
+      "short_sha": "81f3d39ff",
+      "author": "gblack686",
+      "date": "2026-06-12T19:31:52-07:00",
+      "message": "feat(vans): crawl4ai stealth tier-1 probe — proves PX defeat + full-catalog scale",
+      "scope": "vans",
+      "linear_refs": [],
+      "repo": "ecom",
+      "client": "ecom"
+    },
+    {
+      "sha": "7cece3722271a6e53c6eb2633d6e760a636b85a1",
+      "short_sha": "7cece3722",
+      "author": "gblack686",
+      "date": "2026-06-12T19:05:11-07:00",
+      "message": "docs(systems): save ecom scrape lane system + session intelligence to second-brain",
+      "scope": "systems",
+      "linear_refs": [],
+      "repo": "gbautomation",
+      "client": "gbautomation"
+    },
+    {
+      "sha": "9df8b5ac1ab2a24b7a1706fd9f50aab71c48f733",
+      "short_sha": "9df8b5ac1",
+      "author": "gblack686",
+      "date": "2026-06-12T18:58:48-07:00",
+      "message": "docs(vans): record 2026-06-12/13 live cutover + hardening stack in readiness doc",
+      "scope": "vans",
+      "linear_refs": [],
+      "repo": "ecom",
+      "client": "ecom"
+    },
+    {
+      "sha": "3dd7f64f4f67676190d9a47f9f535d86d150dbfc",
+      "short_sha": "3dd7f64f4",
+      "author": "gblack686",
+      "date": "2026-06-12T18:57:02-07:00",
+      "message": "feat(notify): Telegram live-status sidecar - one silent message per run, edited in place",
+      "scope": "notify",
+      "linear_refs": [],
+      "repo": "ecom",
+      "client": "ecom"
+    },
+    {
+      "sha": "07d8702b9c400d1a8f480761595f2e9c333fd97d",
+      "short_sha": "07d8702b9",
+      "author": "gblack686",
+      "date": "2026-06-12T18:46:07-07:00",
+      "message": "plan: publish 2026-06-12-ecom-telegram-realtime-updates-plan",
+      "scope": null,
+      "linear_refs": [],
+      "repo": "gb-automation-landing",
+      "client": "gbautomation"
+    },
+    {
+      "sha": "482815478a529dae9a5fd0e39d6309a4584c3a28",
+      "short_sha": "482815478",
+      "author": "gblack686",
+      "date": "2026-06-12T18:36:13-07:00",
+      "message": "feat(vans): tier-0 crawl hardening - persistent PX profile, redirect-trap check, bare-UA flag",
+      "scope": "vans",
+      "linear_refs": [],
+      "repo": "ecom",
+      "client": "ecom"
+    },
+    {
+      "sha": "7ef1797b0f907cca15ea5ab882094d863bfd8424",
+      "short_sha": "7ef1797b0",
+      "author": "gblack686",
+      "date": "2026-06-12T17:54:35-07:00",
+      "message": "chore: session: codex wip snapshot [82d49340]",
+      "scope": null,
+      "linear_refs": [],
+      "repo": "gbautomation",
+      "client": "gbautomation"
+    },
+    {
+      "sha": "7f5e3f796a41a06c61a1336bb3998930383818cb",
+      "short_sha": "7f5e3f796",
+      "author": "gblack686",
+      "date": "2026-06-12T17:36:31-07:00",
+      "message": "session: codex wip snapshot [9dde55ac]",
+      "scope": null,
+      "linear_refs": [],
+      "repo": "gbautomation",
+      "client": "gbautomation"
+    },
+    {
+      "sha": "40fb0c0ffa26425f69caf2e345b65908e12661cf",
+      "short_sha": "40fb0c0ff",
+      "author": "gblack686",
+      "date": "2026-06-12T17:17:59-07:00",
+      "message": "fix(vans): graceful SIGALRM/SIGTERM teardown - kill chrome, stale the CDP lease",
+      "scope": "vans",
+      "linear_refs": [],
+      "repo": "ecom",
+      "client": "ecom"
+    },
+    {
+      "sha": "4d83f39f907862a8a332cf8459e0b1f713ce5d0d",
+      "short_sha": "4d83f39f9",
+      "author": "gblack686",
+      "date": "2026-06-12T16:55:10-07:00",
+      "message": "feat(vans): 30s progress_heartbeat.json from recordAction",
+      "scope": "vans",
+      "linear_refs": [],
+      "repo": "ecom",
+      "client": "ecom"
+    },
+    {
+      "sha": "50a1c9fe2289624ace9fddb6802e4e293dc8d82d",
+      "short_sha": "50a1c9fe2",
+      "author": "gblack686",
+      "date": "2026-06-12T16:28:16-07:00",
+      "message": "feat(vans): cut hourly vans-com lane over to live persistence + fail-fast",
+      "scope": "vans",
+      "linear_refs": [],
+      "repo": "ecom",
+      "client": "ecom"
+    },
+    {
+      "sha": "34b4e5cbba7ce43dc5e94ed59e10087e46370474",
+      "short_sha": "34b4e5cbb",
+      "author": "gblack686",
+      "date": "2026-06-12T16:01:36-07:00",
+      "message": "chore: session: codex wip snapshot [9dde55ac]",
+      "scope": null,
+      "linear_refs": [],
+      "repo": "gbautomation",
+      "client": "gbautomation"
+    },
+    {
+      "sha": "f993dbea6d6f7bea0e0deb3ec5ab081aacc72703",
+      "short_sha": "f993dbea6",
+      "author": "gblack686",
+      "date": "2026-06-12T15:59:43-07:00",
+      "message": "feat(ops): kanban crash-storm Telegram alert + TAC resilience hardening plan",
+      "scope": "ops",
+      "linear_refs": [],
+      "repo": "gbautomation",
+      "client": "gbautomation"
+    },
+    {
+      "sha": "82f98e909f0a8fa459f6bb74f2b37dc2148d712b",
+      "short_sha": "82f98e909",
+      "author": "gblack686",
+      "date": "2026-06-12T15:59:43-07:00",
+      "message": "feat(ops): kanban crash-storm Telegram alert + TAC resilience hardening plan",
+      "scope": "ops",
+      "linear_refs": [],
+      "repo": "gbautomation",
+      "client": "gbautomation"
+    },
+    {
+      "sha": "38768e819ec7433bb2707b6f411c681689763508",
+      "short_sha": "38768e819",
+      "author": "gblack686",
+      "date": "2026-06-12T15:59:05-07:00",
+      "message": "feat(kanban): death-note log tails + persist block reasons on task rows",
+      "scope": "kanban",
+      "linear_refs": [],
+      "repo": "hermes-agent",
+      "client": "gbautomation"
+    },
+    {
+      "sha": "33d1e223191cab064b691b3585cf9c8eda193f97",
+      "short_sha": "33d1e2231",
+      "author": "gblack686",
+      "date": "2026-06-12T15:42:33-07:00",
+      "message": "plan: publish 2026-06-12-tac-kanban-resilience-hardening-plan",
+      "scope": null,
+      "linear_refs": [],
+      "repo": "gb-automation-landing",
+      "client": "gbautomation"
+    },
+    {
+      "sha": "a83bba7f34b970803e18a7065f6e0076dd91afc9",
+      "short_sha": "a83bba7f3",
+      "author": "gblack686",
+      "date": "2026-06-12T15:31:47-07:00",
+      "message": "feat(reports): per-plan execution telemetry + agent DAGs in sprint plans index",
+      "scope": "reports",
+      "linear_refs": [],
+      "repo": "gbautomation",
+      "client": "gbautomation"
+    },
+    {
+      "sha": "bf965e8afcb01b0e80a36fa9d2cf4547d2c27977",
+      "short_sha": "bf965e8af",
+      "author": "gblack686",
+      "date": "2026-06-12T15:14:47-07:00",
+      "message": "feat(prd-index): stand up prd_artifacts Supabase index + fix array inserts",
+      "scope": "prd-index",
+      "linear_refs": [],
+      "repo": "gbautomation",
+      "client": "gbautomation"
+    },
+    {
+      "sha": "4f92cc189e296fb8a3974d199f6874aab837f28a",
+      "short_sha": "4f92cc189",
+      "author": "gblack686",
+      "date": "2026-06-12T12:42:55-07:00",
+      "message": "feat(reports): sprint report + plans index + PRD/TAC-component Supabase spine",
+      "scope": "reports",
+      "linear_refs": [],
+      "repo": "gbautomation",
+      "client": "gbautomation"
+    },
+    {
+      "sha": "3836ba5d96d0e18bde35d07b5e8a9accb70e71e2",
+      "short_sha": "3836ba5d9",
+      "author": "gblack686",
+      "date": "2026-06-12T12:10:36-07:00",
+      "message": "plan: publish 2026-06-12-prd-supabase-spine-and-enforcement-prd",
+      "scope": null,
+      "linear_refs": [],
+      "repo": "gb-automation-landing",
+      "client": "gbautomation"
+    },
+    {
+      "sha": "e05acc7c99928c530fbf9fab6472f2976fc74f44",
+      "short_sha": "e05acc7c9",
+      "author": "gblack686",
+      "date": "2026-06-12T12:08:32-07:00",
+      "message": "feat(site): publish zero-touch-engineering + ai-resume static pages",
+      "scope": "site",
+      "linear_refs": [],
+      "repo": "gb-automation-landing",
+      "client": "gbautomation"
+    },
+    {
+      "sha": "6126427c45781e5c23fb97f58e1ba767afd3e09c",
+      "short_sha": "6126427c4",
+      "author": "gblack686",
+      "date": "2026-06-11T15:31:11-07:00",
+      "message": "chore: session: codex wip snapshot [20c66508]",
+      "scope": null,
+      "linear_refs": [],
+      "repo": "gbautomation",
+      "client": "gbautomation"
+    },
+    {
+      "sha": "099086c6d57bd809b1e85113b342ed66373e7e2b",
+      "short_sha": "099086c6d",
+      "author": "gblack686",
+      "date": "2026-06-11T14:08:15-07:00",
+      "message": "session: codex wip snapshot [20c66508]",
+      "scope": null,
+      "linear_refs": [],
+      "repo": "gbautomation",
+      "client": "gbautomation"
+    },
+    {
+      "sha": "c28da4aadbbba6aad787e57a4175ca24b1b3ea74",
+      "short_sha": "c28da4aad",
+      "author": "gblack686",
+      "date": "2026-06-11T11:34:46-07:00",
+      "message": "session: codex wip snapshot [20c66508]",
+      "scope": null,
+      "linear_refs": [],
+      "repo": "gbautomation",
+      "client": "gbautomation"
+    },
+    {
+      "sha": "03ebb82f3421450cc2e348c46473f490aee54d88",
+      "short_sha": "03ebb82f3",
+      "author": "gblack686",
+      "date": "2026-06-11T11:27:48-07:00",
+      "message": "session: codex wip snapshot [20c66508]",
+      "scope": null,
+      "linear_refs": [],
+      "repo": "gbautomation",
+      "client": "gbautomation"
+    },
+    {
+      "sha": "94dbdad634b5788a5aebb951936bbb871d272633",
+      "short_sha": "94dbdad63",
+      "author": "gblack686",
+      "date": "2026-06-10T20:03:30-07:00",
+      "message": "Add ecom telemetry attribution backfill",
+      "scope": null,
+      "linear_refs": [],
+      "repo": "ecom",
+      "client": "ecom"
+    },
+    {
+      "sha": "b5b940df60bb881be546a3ceb3d4f410a87c1937",
+      "short_sha": "b5b940df6",
+      "author": "gblack686",
+      "date": "2026-06-10T13:10:56-07:00",
+      "message": "Document ecom Telegram bot name",
+      "scope": null,
+      "linear_refs": [],
+      "repo": "ecom",
+      "client": "ecom"
+    }
+  ]
+}

@@ -1,0 +1,170 @@
+﻿[
+    {
+        "key":  "design-system",
+        "title":  "Design systems",
+        "group":  "angel",
+        "source":  "angel\\01-lgn-1-akroma-angel-of-wrath.jpg",
+        "publicPath":  "/skill-art/design-system.jpg"
+    },
+    {
+        "key":  "marketing",
+        "title":  "Marketing",
+        "group":  "cleric",
+        "source":  "cleric\\01-leonin-elder.jpg",
+        "publicPath":  "/skill-art/marketing.jpg"
+    },
+    {
+        "key":  "media",
+        "title":  "Media",
+        "group":  "spirit",
+        "source":  "spirit\\01-eternal-dragon.jpg",
+        "publicPath":  "/skill-art/media.jpg"
+    },
+    {
+        "key":  "motion",
+        "title":  "Motion",
+        "group":  "elemental",
+        "source":  "elemental\\01-rockshard-elemental.jpg",
+        "publicPath":  "/skill-art/motion.jpg"
+    },
+    {
+        "key":  "responsive",
+        "title":  "Responsive",
+        "group":  "moonfolk",
+        "source":  "moonfolk\\01-erayo-soratami-ascendant-erayos-essence.jpg",
+        "publicPath":  "/skill-art/responsive.jpg"
+    },
+    {
+        "key":  "review",
+        "title":  "Review",
+        "group":  "knight",
+        "source":  "knight\\01-dakmor-lancer.jpg",
+        "publicPath":  "/skill-art/review.jpg"
+    },
+    {
+        "key":  "threejs",
+        "title":  "Three.js",
+        "group":  "dragon",
+        "source":  "dragon\\01-scg-136-bladewing-the-risen.jpg",
+        "publicPath":  "/skill-art/threejs.jpg"
+    },
+    {
+        "key":  "ui-skill",
+        "title":  "UI skill",
+        "group":  "wizard",
+        "source":  "wizard\\01-artful-looter.jpg",
+        "publicPath":  "/skill-art/ui-skill.jpg"
+    },
+    {
+        "key":  "visual-effect",
+        "title":  "Visual effect",
+        "group":  "spirit",
+        "source":  "spirit\\01-eternal-dragon.jpg",
+        "publicPath":  "/skill-art/visual-effect.jpg"
+    },
+    {
+        "key":  "mlops",
+        "title":  "MLOps",
+        "group":  "golem",
+        "source":  "golem\\01-tribal-golem.jpg",
+        "publicPath":  "/skill-art/mlops.jpg"
+    },
+    {
+        "key":  "mlops-cloud",
+        "title":  "MLOps Cloud",
+        "group":  "moonfolk",
+        "source":  "moonfolk\\01-erayo-soratami-ascendant-erayos-essence.jpg",
+        "publicPath":  "/skill-art/mlops-cloud.jpg"
+    },
+    {
+        "key":  "mlops-evaluation",
+        "title":  "MLOps Evaluation",
+        "group":  "wizard",
+        "source":  "wizard\\01-artful-looter.jpg",
+        "publicPath":  "/skill-art/mlops-evaluation.jpg"
+    },
+    {
+        "key":  "mlops-inference",
+        "title":  "MLOps Inference",
+        "group":  "elemental",
+        "source":  "elemental\\01-rockshard-elemental.jpg",
+        "publicPath":  "/skill-art/mlops-inference.jpg"
+    },
+    {
+        "key":  "mlops-models",
+        "title":  "MLOps Models",
+        "group":  "dragon",
+        "source":  "dragon\\01-scg-136-bladewing-the-risen.jpg",
+        "publicPath":  "/skill-art/mlops-models.jpg"
+    },
+    {
+        "key":  "mlops-training",
+        "title":  "MLOps Training",
+        "group":  "soldier",
+        "source":  "soldier\\01-descendant-of-kiyomaro.jpg",
+        "publicPath":  "/skill-art/mlops-training.jpg"
+    },
+    {
+        "key":  "mlops-vector-databases",
+        "title":  "Vector Databases",
+        "group":  "myr",
+        "source":  "myr\\01-myr-quadropod.jpg",
+        "publicPath":  "/skill-art/mlops-vector-databases.jpg"
+    },
+    {
+        "key":  "mcp",
+        "title":  "MCP",
+        "group":  "wizard",
+        "source":  "wizard\\01-artful-looter.jpg",
+        "publicPath":  "/skill-art/mcp.jpg"
+    },
+    {
+        "key":  "red-teaming",
+        "title":  "Red Teaming",
+        "group":  "demon",
+        "source":  "demon\\01-gutwrencher-oni.jpg",
+        "publicPath":  "/skill-art/red-teaming.jpg"
+    },
+    {
+        "key":  "ocr",
+        "title":  "OCR",
+        "group":  "spirit",
+        "source":  "spirit\\01-eternal-dragon.jpg",
+        "publicPath":  "/skill-art/ocr.jpg"
+    },
+    {
+        "key":  "p5js",
+        "title":  "p5.js",
+        "group":  "elemental",
+        "source":  "elemental\\01-rockshard-elemental.jpg",
+        "publicPath":  "/skill-art/p5js.jpg"
+    },
+    {
+        "key":  "ai",
+        "title":  "AI",
+        "group":  "wizard",
+        "source":  "wizard\\01-artful-looter.jpg",
+        "publicPath":  "/skill-art/ai.jpg"
+    },
+    {
+        "key":  "ux",
+        "title":  "UX",
+        "group":  "angel",
+        "source":  "angel\\01-lgn-1-akroma-angel-of-wrath.jpg",
+        "publicPath":  "/skill-art/ux.jpg"
+    },
+    {
+        "key":  "ui",
+        "title":  "UI",
+        "group":  "angel",
+        "source":  "angel\\01-lgn-1-akroma-angel-of-wrath.jpg",
+        "publicPath":  "/skill-art/ui.jpg"
+    },
+    {
+        "key":  "general",
+        "title":  "General",
+        "group":  "fifth-dawn-artifact",
+        "source":  "fifth-dawn-artifact\\01-anodet-lurker.jpg",
+        "publicPath":  "/skill-art/general.jpg"
+    }
+]

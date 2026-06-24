@@ -26,8 +26,16 @@ function hermesDevToken(): Plugin {
     name: "hermes:dev-session-token",
     apply: "serve",
     async transformIndexHtml() {
+      if (process.env.HERMES_ENABLE_DEV_TOKEN !== "1") {
+        return;
+      }
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 1200);
       try {
-        const res = await fetch(BACKEND, { headers: { accept: "text/html" } });
+        const res = await fetch(BACKEND, {
+          headers: { accept: "text/html" },
+          signal: controller.signal,
+        });
         const html = await res.text();
         const match = html.match(TOKEN_RE);
         if (!match) {
@@ -59,6 +67,8 @@ function hermesDevToken(): Plugin {
             `start it with \`hermes dashboard\` or set HERMES_DASHBOARD_URL. ` +
             `(${(err as Error).message})`,
         );
+      } finally {
+        clearTimeout(timeout);
       }
     },
   };

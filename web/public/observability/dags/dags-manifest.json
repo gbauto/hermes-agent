@@ -1,0 +1,40 @@
+[
+  {
+    "slug": "2026-06-10-multi-agent-workflows-fisch-hermes-tac",
+    "title": "Multi-Agent Workflows: Fisch Hermes TAC Run",
+    "date": "2026-06-10",
+    "node_count": 9,
+    "agent_count": 7,
+    "types": {
+      "approval": 1,
+      "agent": 7,
+      "data": 1
+    }
+  },
+  {
+    "slug": "2026-06-08-dbforge-supabase-schema-unification",
+    "title": "DBForge Supabase Schema Unification TAC DAG",
+    "date": "2026-06-08",
+    "node_count": 10,
+    "agent_count": 5,
+    "types": {
+      "approval": 2,
+      "agent": 5,
+      "tool": 2,
+      "artifact": 1
+    }
+  },
+  {
+    "slug": "2026-06-07-the-mall-app-ecom",
+    "title": "The Mall App Ecom Multi-Agent DAG Report",
+    "date": "2026-06-07",
+    "node_count": 11,
+    "agent_count": 5,
+    "types": {
+      "approval": 3,
+      "agent": 5,
+      "tool": 1,
+      "artifact": 2
+    }
+  }
+]

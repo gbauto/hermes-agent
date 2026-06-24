@@ -1,5 +1,18 @@
 import { useCallback, useEffect, useState } from "react";
-import { ExternalLink, RefreshCw, Puzzle, Trash2, Eye, EyeOff } from "lucide-react";
+import {
+  Clock,
+  ExternalLink,
+  Eye,
+  EyeOff,
+  FileText,
+  Palette,
+  Package,
+  Puzzle,
+  RefreshCw,
+  Sparkles,
+  Trash2,
+  Users,
+} from "lucide-react";
 import type { Translations } from "@/i18n/types";
 import { Link } from "react-router-dom";
 import { api } from "@/lib/api";
@@ -23,6 +36,39 @@ import { usePageHeader } from "@/contexts/usePageHeader";
 
 /** Select value for built-in memory (`config` uses empty string). Never use `""` — UI Select maps empty value to an empty label. */
 const MEMORY_PROVIDER_BUILTIN = "__hermes_memory_builtin__";
+
+const GB_AUTOMATION_LINKS = [
+  {
+    to: "/cron",
+    title: "Cron",
+    description: "Scheduled agent jobs, delivery targets, run state, and manual triggers.",
+    icon: Clock,
+  },
+  {
+    to: "/skills",
+    title: "Skills",
+    description: "Installed capabilities, toolsets, category filters, and runtime toggles.",
+    icon: Package,
+  },
+  {
+    to: "/profiles",
+    title: "Profiles",
+    description: "Agent identities, SOUL editors, profile cloning, and terminal setup commands.",
+    icon: Users,
+  },
+  {
+    to: "/plugins",
+    title: "Plugins",
+    description: "Dashboard extensions, providers, visibility, and install controls.",
+    icon: Puzzle,
+  },
+  {
+    to: "/documents",
+    title: "Documents",
+    description: "HTML preview renders, gallery styles, reports, PRDs, and receipt surfaces.",
+    icon: FileText,
+  },
+];
 
 export default function PluginsPage() {
   const [hub, setHub] = useState<PluginsHubResponse | null>(null);
@@ -155,6 +201,41 @@ export default function PluginsPage() {
       <PluginSlot name="plugins:top" />
 
       <div className={cn("flex w-full flex-col gap-8")}>
+
+        <section className="gbauto-ops-surface">
+          <div className="gbauto-ops-header">
+            <div className="min-w-0">
+              <p className="gbauto-eyebrow">GBAutomation control plane</p>
+              <h2>Agent operations</h2>
+              <p>
+                The GBautomation pages stay inside the Hermes shell while using the richer
+                cream, terracotta, glass-panel treatment from the Aura theme review.
+              </p>
+            </div>
+
+            <Badge tone="outline" className="gbauto-theme-badge">
+              <Palette className="h-3 w-3" />
+              GB Full
+            </Badge>
+          </div>
+
+          <div className="gbauto-ops-grid">
+            {GB_AUTOMATION_LINKS.map(({ to, title, description, icon: Icon }) => (
+              <Link className="gbauto-ops-card group" key={to} to={to}>
+                <span className="gbauto-icon-badge">
+                  <Icon className="h-4 w-4" />
+                </span>
+
+                <span className="min-w-0">
+                  <span className="gbauto-card-title">{title}</span>
+                  <span className="gbauto-card-description">{description}</span>
+                </span>
+
+                <Sparkles className="gbauto-card-action h-3.5 w-3.5" />
+              </Link>
+            ))}
+          </div>
+        </section>
 
         {providers && (
           <Card>

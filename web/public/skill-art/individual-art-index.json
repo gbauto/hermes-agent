@@ -1,0 +1,643 @@
+{
+  "generatedAt": "2026-06-23T20:58:04.744Z",
+  "version": "individual-mtg-20260623",
+  "sourceRoot": "C:/Users/gblac/OneDrive/Desktop/gbauto/gbautomation-main-artifacts-view/second-brain/intelligence/artifact-registry/gbautomation/tac-lead-profile-artifacts-2026-06-13/avatar-sets/mtg-creature-types",
+  "counts": {
+    "agents": 70,
+    "auraSkills": 0,
+    "uniqueArtFiles": 70
+  },
+  "agents": [
+    {
+      "id": "apollo-v2-build-apollo-architect",
+      "name": "Apollo Architect",
+      "team": "apollo-v2-build",
+      "artId": "01-akki-avalanchers",
+      "sourceGroup": "akki",
+      "sourceFile": "akki/01-akki-avalanchers.jpg",
+      "publicPath": "/skill-art/agents/apollo-v2-build-apollo-architect.jpg"
+    },
+    {
+      "id": "apollo-v2-build-apollo-builder",
+      "name": "Apollo Builder",
+      "team": "apollo-v2-build",
+      "artId": "02-akki-blizzard-herder",
+      "sourceGroup": "akki",
+      "sourceFile": "akki/02-akki-blizzard-herder.jpg",
+      "publicPath": "/skill-art/agents/apollo-v2-build-apollo-builder.jpg"
+    },
+    {
+      "id": "apollo-v2-build-apollo-reviewer",
+      "name": "Apollo Reviewer",
+      "team": "apollo-v2-build",
+      "artId": "03-akki-coalflinger",
+      "sourceGroup": "akki",
+      "sourceFile": "akki/03-akki-coalflinger.jpg",
+      "publicPath": "/skill-art/agents/apollo-v2-build-apollo-reviewer.jpg"
+    },
+    {
+      "id": "aws-cloud-ops-account-administrator",
+      "name": "Account Administrator",
+      "team": "aws-cloud-ops",
+      "artId": "04-akki-drillmaster",
+      "sourceGroup": "akki",
+      "sourceFile": "akki/04-akki-drillmaster.jpg",
+      "publicPath": "/skill-art/agents/aws-cloud-ops-account-administrator.jpg"
+    },
+    {
+      "id": "aws-cloud-ops-billing-analyst",
+      "name": "Billing Analyst",
+      "team": "aws-cloud-ops",
+      "artId": "05-akki-lavarunner-tok-tok-volcano-born",
+      "sourceGroup": "akki",
+      "sourceFile": "akki/05-akki-lavarunner-tok-tok-volcano-born.jpg",
+      "publicPath": "/skill-art/agents/aws-cloud-ops-billing-analyst.jpg"
+    },
+    {
+      "id": "aws-cloud-ops-iam-security-steward",
+      "name": "IAM Security Steward",
+      "team": "aws-cloud-ops",
+      "artId": "06-akki-raider",
+      "sourceGroup": "akki",
+      "sourceFile": "akki/06-akki-raider.jpg",
+      "publicPath": "/skill-art/agents/aws-cloud-ops-iam-security-steward.jpg"
+    },
+    {
+      "id": "aws-cloud-ops-dynamodb-operator",
+      "name": "DynamoDB Operator",
+      "team": "aws-cloud-ops",
+      "artId": "07-akki-rockspeaker",
+      "sourceGroup": "akki",
+      "sourceFile": "akki/07-akki-rockspeaker.jpg",
+      "publicPath": "/skill-art/agents/aws-cloud-ops-dynamodb-operator.jpg"
+    },
+    {
+      "id": "aws-cloud-ops-serverless-integrator",
+      "name": "Serverless Integrator",
+      "team": "aws-cloud-ops",
+      "artId": "08-akki-underling",
+      "sourceGroup": "akki",
+      "sourceFile": "akki/08-akki-underling.jpg",
+      "publicPath": "/skill-art/agents/aws-cloud-ops-serverless-integrator.jpg"
+    },
+    {
+      "id": "aws-cloud-ops-observability-engineer",
+      "name": "Observability Engineer",
+      "team": "aws-cloud-ops",
+      "artId": "09-akki-underminer",
+      "sourceGroup": "akki",
+      "sourceFile": "akki/09-akki-underminer.jpg",
+      "publicPath": "/skill-art/agents/aws-cloud-ops-observability-engineer.jpg"
+    },
+    {
+      "id": "aws-cloud-ops-iac-release-runner",
+      "name": "IaC Release Runner",
+      "team": "aws-cloud-ops",
+      "artId": "10-ben-ben-akki-hermit",
+      "sourceGroup": "akki",
+      "sourceFile": "akki/10-ben-ben-akki-hermit.jpg",
+      "publicPath": "/skill-art/agents/aws-cloud-ops-iac-release-runner.jpg"
+    },
+    {
+      "id": "ceo-board-ceo",
+      "name": "CEO",
+      "team": "ceo-board",
+      "artId": "11-ishi-ishi-akki-crackshot",
+      "sourceGroup": "akki",
+      "sourceFile": "akki/11-ishi-ishi-akki-crackshot.jpg",
+      "publicPath": "/skill-art/agents/ceo-board-ceo.jpg"
+    },
+    {
+      "id": "ceo-board-revenue",
+      "name": "Revenue",
+      "team": "ceo-board",
+      "artId": "12-patron-of-the-akki",
+      "sourceGroup": "akki",
+      "sourceFile": "akki/12-patron-of-the-akki.jpg",
+      "publicPath": "/skill-art/agents/ceo-board-revenue.jpg"
+    },
+    {
+      "id": "ceo-board-contrarian",
+      "name": "Contrarian",
+      "team": "ceo-board",
+      "artId": "01-lgn-1-akroma-angel-of-wrath",
+      "sourceGroup": "angel",
+      "sourceFile": "angel/01-lgn-1-akroma-angel-of-wrath.jpg",
+      "publicPath": "/skill-art/agents/ceo-board-contrarian.jpg"
+    },
+    {
+      "id": "ceo-board-compounder",
+      "name": "Compounder",
+      "team": "ceo-board",
+      "artId": "02-8ed-2-angelic-page",
+      "sourceGroup": "angel",
+      "sourceFile": "angel/02-8ed-2-angelic-page.jpg",
+      "publicPath": "/skill-art/agents/ceo-board-compounder.jpg"
+    },
+    {
+      "id": "ceo-board-product-strategist",
+      "name": "Product Strategist",
+      "team": "ceo-board",
+      "artId": "03-10e-2-angel-of-mercy",
+      "sourceGroup": "angel",
+      "sourceFile": "angel/03-10e-2-angel-of-mercy.jpg",
+      "publicPath": "/skill-art/agents/ceo-board-product-strategist.jpg"
+    },
+    {
+      "id": "ceo-board-technical-architect",
+      "name": "Technical Architect",
+      "team": "ceo-board",
+      "artId": "04-9ed-7-blinding-angel",
+      "sourceGroup": "angel",
+      "sourceFile": "angel/04-9ed-7-blinding-angel.jpg",
+      "publicPath": "/skill-art/agents/ceo-board-technical-architect.jpg"
+    },
+    {
+      "id": "ceo-board-market-strategist",
+      "name": "Market Strategist",
+      "team": "ceo-board",
+      "artId": "05-ons-28-exalted-angel",
+      "sourceGroup": "angel",
+      "sourceFile": "angel/05-ons-28-exalted-angel.jpg",
+      "publicPath": "/skill-art/agents/ceo-board-market-strategist.jpg"
+    },
+    {
+      "id": "ceo-board-moonshot",
+      "name": "Moonshot",
+      "team": "ceo-board",
+      "artId": "06-8ed-133-fallen-angel",
+      "sourceGroup": "angel",
+      "sourceFile": "angel/06-8ed-133-fallen-angel.jpg",
+      "publicPath": "/skill-art/agents/ceo-board-moonshot.jpg"
+    },
+    {
+      "id": "ceo-board-customer-oracle",
+      "name": "Customer Oracle",
+      "team": "ceo-board",
+      "artId": "07-ody-288-iridescent-angel",
+      "sourceGroup": "angel",
+      "sourceFile": "angel/07-ody-288-iridescent-angel.jpg",
+      "publicPath": "/skill-art/agents/ceo-board-customer-oracle.jpg"
+    },
+    {
+      "id": "database-schema-architect",
+      "name": "Schema Architect",
+      "team": "database",
+      "artId": "08-mrd-15-luminous-angel",
+      "sourceGroup": "angel",
+      "sourceFile": "angel/08-mrd-15-luminous-angel.jpg",
+      "publicPath": "/skill-art/agents/database-schema-architect.jpg"
+    },
+    {
+      "id": "database-rls-author",
+      "name": "RLS Author",
+      "team": "database",
+      "artId": "09-10e-339-platinum-angel",
+      "sourceGroup": "angel",
+      "sourceFile": "angel/09-10e-339-platinum-angel.jpg",
+      "publicPath": "/skill-art/agents/database-rls-author.jpg"
+    },
+    {
+      "id": "database-query-optimizer",
+      "name": "Query Optimizer",
+      "team": "database",
+      "artId": "10-dst-9-pristine-angel",
+      "sourceGroup": "angel",
+      "sourceFile": "angel/10-dst-9-pristine-angel.jpg",
+      "publicPath": "/skill-art/agents/database-query-optimizer.jpg"
+    },
+    {
+      "id": "database-migration-runner",
+      "name": "Migration Runner",
+      "team": "database",
+      "artId": "11-10e-35-reya-dawnbringer",
+      "sourceGroup": "angel",
+      "sourceFile": "angel/11-10e-35-reya-dawnbringer.jpg",
+      "publicPath": "/skill-art/agents/database-migration-runner.jpg"
+    },
+    {
+      "id": "database-schema-drift-detector",
+      "name": "Schema Drift Detector",
+      "team": "database",
+      "artId": "12-7ed-41-serra-advocate",
+      "sourceGroup": "angel",
+      "sourceFile": "angel/12-7ed-41-serra-advocate.jpg",
+      "publicPath": "/skill-art/agents/database-schema-drift-detector.jpg"
+    },
+    {
+      "id": "design-pixel",
+      "name": "Pixel",
+      "team": "design",
+      "artId": "13-10e-39-serra-angel",
+      "sourceGroup": "angel",
+      "sourceFile": "angel/13-10e-39-serra-angel.jpg",
+      "publicPath": "/skill-art/agents/design-pixel.jpg"
+    },
+    {
+      "id": "design-luna",
+      "name": "Luna",
+      "team": "design",
+      "artId": "14-7ed-52-sustainer-of-the-realm",
+      "sourceGroup": "angel",
+      "sourceFile": "angel/14-7ed-52-sustainer-of-the-realm.jpg",
+      "publicPath": "/skill-art/agents/design-luna.jpg"
+    },
+    {
+      "id": "development-aria",
+      "name": "Aria",
+      "team": "development",
+      "artId": "15-10e-56-voice-of-all",
+      "sourceGroup": "angel",
+      "sourceFile": "angel/15-10e-56-voice-of-all.jpg",
+      "publicPath": "/skill-art/agents/development-aria.jpg"
+    },
+    {
+      "id": "development-bolt",
+      "name": "Bolt",
+      "team": "development",
+      "artId": "16-ody-57-wayward-angel",
+      "sourceGroup": "angel",
+      "sourceFile": "angel/16-ody-57-wayward-angel.jpg",
+      "publicPath": "/skill-art/agents/development-bolt.jpg"
+    },
+    {
+      "id": "development-nova",
+      "name": "Nova",
+      "team": "development",
+      "artId": "01-arcbound-ravager",
+      "sourceGroup": "beast",
+      "sourceFile": "beast/01-arcbound-ravager.jpg",
+      "publicPath": "/skill-art/agents/development-nova.jpg"
+    },
+    {
+      "id": "devsecops-vault",
+      "name": "Vault",
+      "team": "devsecops",
+      "artId": "02-copperhoof-vorrac",
+      "sourceGroup": "beast",
+      "sourceFile": "beast/02-copperhoof-vorrac.jpg",
+      "publicPath": "/skill-art/agents/devsecops-vault.jpg"
+    },
+    {
+      "id": "devsecops-pipe",
+      "name": "Pipe",
+      "team": "devsecops",
+      "artId": "03-lesser-gargadon",
+      "sourceGroup": "beast",
+      "sourceFile": "beast/03-lesser-gargadon.jpg",
+      "publicPath": "/skill-art/agents/devsecops-pipe.jpg"
+    },
+    {
+      "id": "eagle-ui-redesign-eagle-orchestrator",
+      "name": "Eagle Orchestrator",
+      "team": "eagle-ui-redesign",
+      "artId": "04-krosan-warchief",
+      "sourceGroup": "beast",
+      "sourceFile": "beast/04-krosan-warchief.jpg",
+      "publicPath": "/skill-art/agents/eagle-ui-redesign-eagle-orchestrator.jpg"
+    },
+    {
+      "id": "eagle-ui-redesign-setup-lead",
+      "name": "Setup Lead",
+      "team": "eagle-ui-redesign",
+      "artId": "05-macetail-hystrodon",
+      "sourceGroup": "beast",
+      "sourceFile": "beast/05-macetail-hystrodon.jpg",
+      "publicPath": "/skill-art/agents/eagle-ui-redesign-setup-lead.jpg"
+    },
+    {
+      "id": "eagle-ui-redesign-brand-guardian",
+      "name": "Brand Guardian",
+      "team": "eagle-ui-redesign",
+      "artId": "06-slipstream-eel",
+      "sourceGroup": "beast",
+      "sourceFile": "beast/06-slipstream-eel.jpg",
+      "publicPath": "/skill-art/agents/eagle-ui-redesign-brand-guardian.jpg"
+    },
+    {
+      "id": "eagle-ui-redesign-ui-generator-alpha",
+      "name": "UI Generator Alpha",
+      "team": "eagle-ui-redesign",
+      "artId": "07-thought-devourer",
+      "sourceGroup": "beast",
+      "sourceFile": "beast/07-thought-devourer.jpg",
+      "publicPath": "/skill-art/agents/eagle-ui-redesign-ui-generator-alpha.jpg"
+    },
+    {
+      "id": "eagle-ui-redesign-ui-generator-beta",
+      "name": "UI Generator Beta",
+      "team": "eagle-ui-redesign",
+      "artId": "08-vizzerdrix",
+      "sourceGroup": "beast",
+      "sourceFile": "beast/08-vizzerdrix.jpg",
+      "publicPath": "/skill-art/agents/eagle-ui-redesign-ui-generator-beta.jpg"
+    },
+    {
+      "id": "eagle-ui-redesign-ui-generator-gamma",
+      "name": "UI Generator Gamma",
+      "team": "eagle-ui-redesign",
+      "artId": "09-scalpelexis",
+      "sourceGroup": "beast",
+      "sourceFile": "beast/09-scalpelexis.jpg",
+      "publicPath": "/skill-art/agents/eagle-ui-redesign-ui-generator-gamma.jpg"
+    },
+    {
+      "id": "eagle-ui-redesign-validator-alpha",
+      "name": "Validator Alpha",
+      "team": "eagle-ui-redesign",
+      "artId": "10-flowstone-crusher",
+      "sourceGroup": "beast",
+      "sourceFile": "beast/10-flowstone-crusher.jpg",
+      "publicPath": "/skill-art/agents/eagle-ui-redesign-validator-alpha.jpg"
+    },
+    {
+      "id": "eagle-ui-redesign-validator-beta",
+      "name": "Validator Beta",
+      "team": "eagle-ui-redesign",
+      "artId": "01-leonin-elder",
+      "sourceGroup": "cleric",
+      "sourceFile": "cleric/01-leonin-elder.jpg",
+      "publicPath": "/skill-art/agents/eagle-ui-redesign-validator-beta.jpg"
+    },
+    {
+      "id": "eagle-ui-redesign-validator-gamma",
+      "name": "Validator Gamma",
+      "team": "eagle-ui-redesign",
+      "artId": "02-master-healer",
+      "sourceGroup": "cleric",
+      "sourceFile": "cleric/02-master-healer.jpg",
+      "publicPath": "/skill-art/agents/eagle-ui-redesign-validator-gamma.jpg"
+    },
+    {
+      "id": "ecom-intelligence-mall-scanner-orchestrator",
+      "name": "Mall Scanner Orchestrator",
+      "team": "ecom-intelligence",
+      "artId": "03-exiled-doomsayer",
+      "sourceGroup": "cleric",
+      "sourceFile": "cleric/03-exiled-doomsayer.jpg",
+      "publicPath": "/skill-art/agents/ecom-intelligence-mall-scanner-orchestrator.jpg"
+    },
+    {
+      "id": "ecom-intelligence-source-discovery-mapper",
+      "name": "Source Discovery Mapper",
+      "team": "ecom-intelligence",
+      "artId": "04-defender-of-the-order",
+      "sourceGroup": "cleric",
+      "sourceFile": "cleric/04-defender-of-the-order.jpg",
+      "publicPath": "/skill-art/agents/ecom-intelligence-source-discovery-mapper.jpg"
+    },
+    {
+      "id": "ecom-intelligence-platform-adapter-researcher",
+      "name": "Platform Adapter Researcher",
+      "team": "ecom-intelligence",
+      "artId": "05-boneknitter",
+      "sourceGroup": "cleric",
+      "sourceFile": "cleric/05-boneknitter.jpg",
+      "publicPath": "/skill-art/agents/ecom-intelligence-platform-adapter-researcher.jpg"
+    },
+    {
+      "id": "ecom-intelligence-scraper-profile-builder",
+      "name": "Scraper Profile Builder",
+      "team": "ecom-intelligence",
+      "artId": "06-beloved-chaplain",
+      "sourceGroup": "cleric",
+      "sourceFile": "cleric/06-beloved-chaplain.jpg",
+      "publicPath": "/skill-art/agents/ecom-intelligence-scraper-profile-builder.jpg"
+    },
+    {
+      "id": "ecom-intelligence-browser-harness-runner",
+      "name": "Browser Harness Runner",
+      "team": "ecom-intelligence",
+      "artId": "07-storm-shaman",
+      "sourceGroup": "cleric",
+      "sourceFile": "cleric/07-storm-shaman.jpg",
+      "publicPath": "/skill-art/agents/ecom-intelligence-browser-harness-runner.jpg"
+    },
+    {
+      "id": "ecom-intelligence-anti-bot-deep-researcher",
+      "name": "Anti-Bot Deep Researcher",
+      "team": "ecom-intelligence",
+      "artId": "08-ancestor-s-chosen",
+      "sourceGroup": "cleric",
+      "sourceFile": "cleric/08-ancestor-s-chosen.jpg",
+      "publicPath": "/skill-art/agents/ecom-intelligence-anti-bot-deep-researcher.jpg"
+    },
+    {
+      "id": "ecom-intelligence-data-contract-steward",
+      "name": "Data Contract Steward",
+      "team": "ecom-intelligence",
+      "artId": "09-samite-healer",
+      "sourceGroup": "cleric",
+      "sourceFile": "cleric/09-samite-healer.jpg",
+      "publicPath": "/skill-art/agents/ecom-intelligence-data-contract-steward.jpg"
+    },
+    {
+      "id": "ecom-intelligence-supabase-datafeed-manager",
+      "name": "Supabase Datafeed Manager",
+      "team": "ecom-intelligence",
+      "artId": "10-kitsune-bonesetter",
+      "sourceGroup": "cleric",
+      "sourceFile": "cleric/10-kitsune-bonesetter.jpg",
+      "publicPath": "/skill-art/agents/ecom-intelligence-supabase-datafeed-manager.jpg"
+    },
+    {
+      "id": "ecom-intelligence-change-intelligence-analyst",
+      "name": "Change Intelligence Analyst",
+      "team": "ecom-intelligence",
+      "artId": "01-gutwrencher-oni",
+      "sourceGroup": "demon",
+      "sourceFile": "demon/01-gutwrencher-oni.jpg",
+      "publicPath": "/skill-art/agents/ecom-intelligence-change-intelligence-analyst.jpg"
+    },
+    {
+      "id": "ecom-intelligence-read-view-builder",
+      "name": "Read View Builder",
+      "team": "ecom-intelligence",
+      "artId": "02-kagemaro-first-to-suffer",
+      "sourceGroup": "demon",
+      "sourceFile": "demon/02-kagemaro-first-to-suffer.jpg",
+      "publicPath": "/skill-art/agents/ecom-intelligence-read-view-builder.jpg"
+    },
+    {
+      "id": "ecom-intelligence-verifier-reporter",
+      "name": "Verifier Reporter",
+      "team": "ecom-intelligence",
+      "artId": "03-kuro-pitlord",
+      "sourceGroup": "demon",
+      "sourceFile": "demon/03-kuro-pitlord.jpg",
+      "publicPath": "/skill-art/agents/ecom-intelligence-verifier-reporter.jpg"
+    },
+    {
+      "id": "ecom-intelligence-alert-scheduler-operator",
+      "name": "Alert Scheduler Operator",
+      "team": "ecom-intelligence",
+      "artId": "04-kyoki-sanitys-eclipse",
+      "sourceGroup": "demon",
+      "sourceFile": "demon/04-kyoki-sanitys-eclipse.jpg",
+      "publicPath": "/skill-art/agents/ecom-intelligence-alert-scheduler-operator.jpg"
+    },
+    {
+      "id": "logomotion-v5-motion-orchestrator",
+      "name": "motion-orchestrator",
+      "team": "logomotion-v5",
+      "artId": "05-oni-of-wild-places",
+      "sourceGroup": "demon",
+      "sourceFile": "demon/05-oni-of-wild-places.jpg",
+      "publicPath": "/skill-art/agents/logomotion-v5-motion-orchestrator.jpg"
+    },
+    {
+      "id": "logomotion-v5-remotion-composer-agent",
+      "name": "remotion-composer-agent",
+      "team": "logomotion-v5",
+      "artId": "06-painwracker-oni",
+      "sourceGroup": "demon",
+      "sourceFile": "demon/06-painwracker-oni.jpg",
+      "publicPath": "/skill-art/agents/logomotion-v5-remotion-composer-agent.jpg"
+    },
+    {
+      "id": "logomotion-v5-scaffold-agent",
+      "name": "scaffold-agent",
+      "team": "logomotion-v5",
+      "artId": "07-razorjaw-oni",
+      "sourceGroup": "demon",
+      "sourceFile": "demon/07-razorjaw-oni.jpg",
+      "publicPath": "/skill-art/agents/logomotion-v5-scaffold-agent.jpg"
+    },
+    {
+      "id": "logomotion-v5-docs-research-agent",
+      "name": "docs-research-agent",
+      "team": "logomotion-v5",
+      "artId": "08-scourge-of-numai",
+      "sourceGroup": "demon",
+      "sourceFile": "demon/08-scourge-of-numai.jpg",
+      "publicPath": "/skill-art/agents/logomotion-v5-docs-research-agent.jpg"
+    },
+    {
+      "id": "logomotion-v5-logo-analyzer-agent",
+      "name": "logo-analyzer-agent",
+      "team": "logomotion-v5",
+      "artId": "09-seizan-perverter-of-truth",
+      "sourceGroup": "demon",
+      "sourceFile": "demon/09-seizan-perverter-of-truth.jpg",
+      "publicPath": "/skill-art/agents/logomotion-v5-logo-analyzer-agent.jpg"
+    },
+    {
+      "id": "logomotion-v5-frontend-builder-agent",
+      "name": "frontend-builder-agent",
+      "team": "logomotion-v5",
+      "artId": "10-shimatsu-the-bloodcloaked",
+      "sourceGroup": "demon",
+      "sourceFile": "demon/10-shimatsu-the-bloodcloaked.jpg",
+      "publicPath": "/skill-art/agents/logomotion-v5-frontend-builder-agent.jpg"
+    },
+    {
+      "id": "logomotion-v5-backend-builder-agent",
+      "name": "backend-builder-agent",
+      "team": "logomotion-v5",
+      "artId": "11-yukora-the-prisoner",
+      "sourceGroup": "demon",
+      "sourceFile": "demon/11-yukora-the-prisoner.jpg",
+      "publicPath": "/skill-art/agents/logomotion-v5-backend-builder-agent.jpg"
+    },
+    {
+      "id": "logomotion-v5-logo-validator-agent",
+      "name": "logo-validator-agent",
+      "team": "logomotion-v5",
+      "artId": "01-scg-136-bladewing-the-risen",
+      "sourceGroup": "dragon",
+      "sourceFile": "dragon/01-scg-136-bladewing-the-risen.jpg",
+      "publicPath": "/skill-art/agents/logomotion-v5-logo-validator-agent.jpg"
+    },
+    {
+      "id": "operations-atlas",
+      "name": "Atlas",
+      "team": "operations",
+      "artId": "02-mrd-155-clockwork-dragon",
+      "sourceGroup": "dragon",
+      "sourceFile": "dragon/02-mrd-155-clockwork-dragon.jpg",
+      "publicPath": "/skill-art/agents/operations-atlas.jpg"
+    },
+    {
+      "id": "operations-turbo",
+      "name": "Turbo",
+      "team": "operations",
+      "artId": "03-7ed-178-crimson-hellkite",
+      "sourceGroup": "dragon",
+      "sourceFile": "dragon/03-7ed-178-crimson-hellkite.jpg",
+      "publicPath": "/skill-art/agents/operations-turbo.jpg"
+    },
+    {
+      "id": "planning-sage",
+      "name": "Sage",
+      "team": "planning",
+      "artId": "04-scg-87-dragon-mage",
+      "sourceGroup": "dragon",
+      "sourceFile": "dragon/04-scg-87-dragon-mage.jpg",
+      "publicPath": "/skill-art/agents/planning-sage.jpg"
+    },
+    {
+      "id": "planning-clio",
+      "name": "Clio",
+      "team": "planning",
+      "artId": "05-scg-88-dragon-tyrant",
+      "sourceGroup": "dragon",
+      "sourceFile": "dragon/05-scg-88-dragon-tyrant.jpg",
+      "publicPath": "/skill-art/agents/planning-clio.jpg"
+    },
+    {
+      "id": "qa-qc-hawk",
+      "name": "Hawk",
+      "team": "qa-qc",
+      "artId": "06-scg-12-eternal-dragon",
+      "sourceGroup": "dragon",
+      "sourceFile": "dragon/06-scg-12-eternal-dragon.jpg",
+      "publicPath": "/skill-art/agents/qa-qc-hawk.jpg"
+    },
+    {
+      "id": "qa-qc-lint",
+      "name": "Lint",
+      "team": "qa-qc",
+      "artId": "07-dst-62-furnace-dragon",
+      "sourceGroup": "dragon",
+      "sourceFile": "dragon/07-dst-62-furnace-dragon.jpg",
+      "publicPath": "/skill-art/agents/qa-qc-lint.jpg"
+    },
+    {
+      "id": "qa-qc-doro",
+      "name": "DORO",
+      "team": "qa-qc",
+      "artId": "08-10e-205-furnace-whelp",
+      "sourceGroup": "dragon",
+      "sourceFile": "dragon/08-10e-205-furnace-whelp.jpg",
+      "publicPath": "/skill-art/agents/qa-qc-doro.jpg"
+    },
+    {
+      "id": "trader-bot-scaffold-architect",
+      "name": "Architect",
+      "team": "trader-bot-scaffold",
+      "artId": "09-lgn-103-imperial-hellkite",
+      "sourceGroup": "dragon",
+      "sourceFile": "dragon/09-lgn-103-imperial-hellkite.jpg",
+      "publicPath": "/skill-art/agents/trader-bot-scaffold-architect.jpg"
+    },
+    {
+      "id": "trader-bot-scaffold-builder",
+      "name": "Builder",
+      "team": "trader-bot-scaffold",
+      "artId": "10-chk-217-jugan-the-rising-star",
+      "sourceGroup": "dragon",
+      "sourceFile": "dragon/10-chk-217-jugan-the-rising-star.jpg",
+      "publicPath": "/skill-art/agents/trader-bot-scaffold-builder.jpg"
+    },
+    {
+      "id": "trader-bot-scaffold-reviewer",
+      "name": "Reviewer",
+      "team": "trader-bot-scaffold",
+      "artId": "11-chk-72-keiga-the-tide-star",
+      "sourceGroup": "dragon",
+      "sourceFile": "dragon/11-chk-72-keiga-the-tide-star.jpg",
+      "publicPath": "/skill-art/agents/trader-bot-scaffold-reviewer.jpg"
+    }
+  ],
+  "auraSkills": []
+}

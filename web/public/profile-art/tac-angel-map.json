@@ -1,0 +1,65 @@
+﻿[
+    {
+        "profile":  "tac-architect",
+        "title":  "Akroma, Angel of Wrath",
+        "source":  "avatar-sets/mtg-creature-types/angel/01-lgn-1-akroma-angel-of-wrath.jpg",
+        "edition":  "LGN",
+        "color":  "White"
+    },
+    {
+        "profile":  "tac-artifact-generator",
+        "title":  "Angelic Page",
+        "source":  "avatar-sets/mtg-creature-types/angel/02-8ed-2-angelic-page.jpg",
+        "edition":  "8ED",
+        "color":  "White"
+    },
+    {
+        "profile":  "tac-builder",
+        "title":  "Angel of Mercy",
+        "source":  "avatar-sets/mtg-creature-types/angel/03-10e-2-angel-of-mercy.jpg",
+        "edition":  "10E",
+        "color":  "White"
+    },
+    {
+        "profile":  "tac-director",
+        "title":  "Blinding Angel",
+        "source":  "avatar-sets/mtg-creature-types/angel/04-9ed-7-blinding-angel.jpg",
+        "edition":  "9ED",
+        "color":  "White"
+    },
+    {
+        "profile":  "tac-lead",
+        "title":  "Exalted Angel",
+        "source":  "avatar-sets/mtg-creature-types/angel/05-ons-28-exalted-angel.jpg",
+        "edition":  "ONS",
+        "color":  "White"
+    },
+    {
+        "profile":  "tac-ops",
+        "title":  "Fallen Angel",
+        "source":  "avatar-sets/mtg-creature-types/angel/06-8ed-133-fallen-angel.jpg",
+        "edition":  "8ED",
+        "color":  "Black"
+    },
+    {
+        "profile":  "tac-researcher",
+        "title":  "Iridescent Angel",
+        "source":  "avatar-sets/mtg-creature-types/angel/07-ody-288-iridescent-angel.jpg",
+        "edition":  "ODY",
+        "color":  "Multicolor"
+    },
+    {
+        "profile":  "tac-self-improve",
+        "title":  "Luminous Angel",
+        "source":  "avatar-sets/mtg-creature-types/angel/08-mrd-15-luminous-angel.jpg",
+        "edition":  "MRD",
+        "color":  "White"
+    },
+    {
+        "profile":  "tac-validator",
+        "title":  "Platinum Angel",
+        "source":  "avatar-sets/mtg-creature-types/angel/09-10e-339-platinum-angel.jpg",
+        "edition":  "10E",
+        "color":  "Colorless"
+    }
+]

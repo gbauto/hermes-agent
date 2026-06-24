@@ -1,0 +1,243 @@
+[
+  {
+    "slug": "2026-06-22-tonbi-triage-tac-integration-and-plugin-conversion-prd",
+    "title": "Tonbi Triage \u2192 TAC Dispatch: permanent integration + native Hermes plugin conversion",
+    "date": "2026-06-22",
+    "status": "ready",
+    "client": "gbautomation",
+    "priority": "high",
+    "description": "Permanently wire the Tonbi triage engine as the qualification front-end feeding the existing TAC dispatch/build team (reuse-first), then convert the GBAutomation triage+dispatch system to a native Hermes plugin \u2014 documented cleanly and built to the existing ~1,700-test suite incl. the golden-thread e2e lane.",
+    "category": "plan",
+    "public_url": "https://gbautomation.xyz/prds/2026-06-22-tonbi-triage-tac-integration-and-plugin-conversion-prd"
+  },
+  {
+    "slug": "2026-06-21-client-portal-hermes-wrapper",
+    "title": "Client Portal \u2192 Hermes-dashboard wrapper",
+    "date": "2026-06-21",
+    "status": "ready",
+    "client": "",
+    "priority": "",
+    "description": "",
+    "category": "plan",
+    "public_url": "https://gbautomation.xyz/prds/2026-06-21-client-portal-hermes-wrapper"
+  },
+  {
+    "slug": "2026-06-17-openclaw-retirement-hermes-migration-prd",
+    "title": "Retire OpenClaw (Jerry) on the Mac Mini entirely, migrate its functions to the Hermes harness, un-nest all repos/client ",
+    "date": "2026-06-17",
+    "status": "draft",
+    "client": "gbautomation",
+    "priority": "high",
+    "description": "Retire OpenClaw (Jerry) on the Mac Mini entirely, migrate its functions to the Hermes harness, un-nest all repos/client work out of ~/.openclaw/workspace/ into /Users/greg/repos/ + per-client <client>/hermes/, repoint the cron coupling, decommission ~/.openclaw/, and fix the embedded-token remotes.",
+    "category": "plan",
+    "public_url": "https://gbautomation.xyz/prds/2026-06-17-openclaw-retirement-hermes-migration-prd"
+  },
+  {
+    "slug": "2026-06-12-prd-supabase-spine-and-enforcement-prd",
+    "title": "PRD Supabase Spine and Schema Enforcement",
+    "date": "2026-06-12",
+    "status": "ready_for_dispatch",
+    "client": "gbautomation",
+    "priority": "high",
+    "description": "Stand up the canonical PRD object in Supabase (prd_artifacts + sprint_rock_prd_links), run the index_prds sync, add a blocking write-hook that enforces gbauto-prd.v1 conformance, and join PRDs to commits and PRs so the sprint report can prove plan-to-PR traceability.",
+    "category": "plan",
+    "public_url": "https://gbautomation.xyz/prds/2026-06-12-prd-supabase-spine-and-enforcement-prd"
+  },
+  {
+    "slug": "2026-06-12-tac-kanban-resilience-hardening-plan",
+    "title": "TAC Kanban Team Resilience Hardening \u2014 crash loops, silent deaths, empty blocks",
+    "date": "2026-06-12",
+    "status": "draft",
+    "client": "gbautomation",
+    "priority": "high",
+    "description": "",
+    "category": "plan",
+    "public_url": "https://gbautomation.xyz/prds/2026-06-12-tac-kanban-resilience-hardening-plan"
+  },
+  {
+    "slug": "2026-06-12-ecom-telegram-realtime-updates-plan",
+    "title": "Ecom Telegram realtime updates \u2014 single edited message per run",
+    "date": "2026-06-12",
+    "status": "draft",
+    "client": "gbautomation",
+    "priority": "medium",
+    "description": "Plan for dense realtime run updates to the existing ecom Telegram log channel: one sendMessage per run edited in place every ~75s from progress_heartbeat.json, 3-line emoji/x-of-x format, edge-triggered production-gate transitions. Builds on ecom_runtime/notify.py which already resolves the log channel and returns message_id.",
+    "category": "plan",
+    "public_url": "https://gbautomation.xyz/prds/2026-06-12-ecom-telegram-realtime-updates-plan"
+  },
+  {
+    "slug": "2026-06-04-harness-per-session-git-worktree-plan",
+    "title": "Plan: Per-session git worktrees across harnesses",
+    "date": "2026-06-04",
+    "status": "planned",
+    "client": "",
+    "priority": "high",
+    "description": "Unify git worktree isolation for interactive Claude Code, Codex, Cursor, and Hermes-delegated coding. Reuse cron_worktree.py; optional per-task trees; registry maps sessions to cwd. Cron lane already isolated \u2014 this plan covers human and orchestrator surfaces.",
+    "category": "plan",
+    "public_url": "https://gbautomation.xyz/prds/2026-06-04-harness-per-session-git-worktree-plan"
+  },
+  {
+    "slug": "graphify-sync-local-execution-lakehouse-countable-taxonomies",
+    "title": "Graphify-Sync: Local Execution + Lakehouse + Countable Taxonomies",
+    "url": "/prds/graphify-sync-local-execution-lakehouse-countable-taxonomies",
+    "date": "2026-05-18",
+    "size_kb": 256.9
+  },
+  {
+    "slug": "graphify-sync-wave-3-intelligence-layer",
+    "title": "graphify-sync Wave-3 \u2014 Intelligence Layer",
+    "url": "/prds/graphify-sync-wave-3-intelligence-layer",
+    "date": "2026-05-18",
+    "size_kb": 70.6
+  },
+  {
+    "slug": "hourly-job-stats-telegram-ping-1h-24h-rollup-with-linked-prd-titles",
+    "title": "Hourly Job-Stats Telegram Ping \u2014 1h + 24h rollup with linked PRD titles",
+    "url": "/prds/hourly-job-stats-telegram-ping-1h-24h-rollup-with-linked-prd-titles",
+    "date": "2026-05-18",
+    "size_kb": 36.0
+  },
+  {
+    "slug": "prd-render-email-pipeline-branded-delivery-for-every-dispatched-prd",
+    "title": "PRD Render &amp; Email Pipeline \u2014 branded delivery for every dispatched PRD",
+    "url": "/prds/prd-render-email-pipeline-branded-delivery-for-every-dispatched-prd",
+    "date": "2026-05-18",
+    "size_kb": 87.6
+  },
+  {
+    "slug": "template-improvements-discovered-during-test-clients-dry-run",
+    "title": "Template Improvements \u2014 discovered during test-clients dry-run",
+    "date": "",
+    "status": "",
+    "wave": null,
+    "client": "",
+    "purpose": "",
+    "priority": "",
+    "linear_id": "",
+    "category": "devops",
+    "description": "",
+    "public_url": "https://gbautomation.xyz/prds/template-improvements-discovered-during-test-clients-dry-run"
+  },
+  {
+    "slug": "test-clients-hermes-iac-prd",
+    "title": "test-clients Hermes IaC PRD",
+    "date": "",
+    "status": "",
+    "wave": null,
+    "client": "",
+    "purpose": "",
+    "priority": "",
+    "linear_id": "",
+    "category": "devops",
+    "description": "",
+    "public_url": "https://gbautomation.xyz/prds/test-clients-hermes-iac-prd"
+  },
+  {
+    "slug": "test-clients-linear-stack-prd-dry-run",
+    "title": "test-clients Linear Stack PRD Dry Run",
+    "date": "",
+    "status": "",
+    "wave": null,
+    "client": "",
+    "purpose": "",
+    "priority": "",
+    "linear_id": "",
+    "category": "devops",
+    "description": "",
+    "public_url": "https://gbautomation.xyz/prds/test-clients-linear-stack-prd-dry-run"
+  },
+  {
+    "slug": "adjust-ai-7-day-developer-observability-build",
+    "title": "Adjust Ai 7 Day Developer Observability Build",
+    "date": "",
+    "status": "",
+    "wave": null,
+    "client": "",
+    "purpose": "",
+    "priority": "",
+    "linear_id": "",
+    "category": "devops",
+    "description": "",
+    "public_url": "https://gbautoxyz.netlify.app/prds/adjust-ai-7-day-developer-observability-build"
+  },
+  {
+    "slug": "the-mall-app-sprint-1-crawl-map-watch",
+    "title": "The Mall App Sprint 1 Crawl Map Watch",
+    "date": "",
+    "status": "",
+    "wave": null,
+    "client": "",
+    "purpose": "",
+    "priority": "",
+    "linear_id": "",
+    "category": "devops",
+    "description": "",
+    "public_url": "https://gbautoxyz.netlify.app/prds/the-mall-app-sprint-1-crawl-map-watch"
+  },
+  {
+    "slug": "2026-06-07-crawl-resilience-anti-bot-intelligence-prd",
+    "title": "Crawl Resilience & Anti-Bot Intelligence Layer",
+    "date": "",
+    "status": "draft_for_review",
+    "client": "the-mall",
+    "priority": "",
+    "description": "",
+    "category": "plan",
+    "public_url": "https://gbautomation.xyz/prds/2026-06-07-crawl-resilience-anti-bot-intelligence-prd"
+  },
+  {
+    "slug": "2026-06-17-hermes-template-canopy-parameterization-and-shared-core-plan",
+    "title": "Hermes template \u2014 Canopy parameterization + shared-core extraction",
+    "date": "",
+    "status": "active",
+    "client": "gbautomation",
+    "priority": "high",
+    "description": "",
+    "category": "plan",
+    "public_url": "https://gbautomation.xyz/prds/2026-06-17-hermes-template-canopy-parameterization-and-shared-core-plan"
+  },
+  {
+    "slug": "2026-06-17-hermes-step3-shared-core-and-canopy-lint-workstream",
+    "title": ">-",
+    "date": "",
+    "status": "active",
+    "client": "gbautomation",
+    "priority": "high",
+    "description": ">-",
+    "category": "plan",
+    "public_url": "https://gbautomation.xyz/prds/2026-06-17-hermes-step3-shared-core-and-canopy-lint-workstream"
+  },
+  {
+    "slug": "2026-06-17-hermes-cron-llm-manager-and-1h-smoke-test",
+    "title": ">-",
+    "date": "",
+    "status": "active",
+    "client": "gbautomation",
+    "priority": "high",
+    "description": ">-",
+    "category": "plan",
+    "public_url": "https://gbautomation.xyz/prds/2026-06-17-hermes-cron-llm-manager-and-1h-smoke-test"
+  },
+  {
+    "slug": "2026-06-17-hermes-skillify-followup-integration",
+    "title": ">-",
+    "date": "",
+    "status": "active",
+    "client": "gbautomation",
+    "priority": "high",
+    "description": ">-",
+    "category": "plan",
+    "public_url": "https://gbautomation.xyz/prds/2026-06-17-hermes-skillify-followup-integration"
+  },
+  {
+    "slug": "2026-06-17-hermes-cron-wiring-completion-and-dataout-plan",
+    "title": ">-",
+    "date": "",
+    "status": "active",
+    "client": "gbautomation",
+    "priority": "high",
+    "description": ">-",
+    "category": "plan",
+    "public_url": "https://gbautomation.xyz/prds/2026-06-17-hermes-cron-wiring-completion-and-dataout-plan"
+  }
+]
