@@ -2544,6 +2544,109 @@ async def get_logs(
     return {"file": file, "lines": result}
 
 
+@app.get("/api/logs/supabase/summary")
+async def get_supabase_logs_summary():
+    from hermes_cli.gbauto_supabase_logs import get_summary
+
+    return get_summary()
+
+
+@app.get("/api/logs/supabase/timeline")
+async def get_supabase_logs_timeline(
+    days: int = 3,
+    limit: int = 100,
+    status: Optional[str] = None,
+    source: Optional[str] = None,
+    search: Optional[str] = None,
+    repo: Optional[str] = None,
+    workdir: Optional[str] = None,
+):
+    from hermes_cli.gbauto_supabase_logs import get_timeline
+
+    return get_timeline(
+        days=days,
+        limit=limit,
+        status=status,
+        source=source,
+        search=search,
+        repo=repo,
+        workdir=workdir,
+    )
+
+
+@app.get("/api/logs/supabase/failures")
+async def get_supabase_logs_failures(
+    days: int = 14,
+    limit: int = 100,
+    search: Optional[str] = None,
+    repo: Optional[str] = None,
+    workdir: Optional[str] = None,
+):
+    from hermes_cli.gbauto_supabase_logs import get_failures
+
+    return get_failures(days=days, limit=limit, search=search, repo=repo, workdir=workdir)
+
+
+@app.get("/api/logs/supabase/artifacts")
+async def get_supabase_logs_artifacts(
+    days: int = 14,
+    limit: int = 100,
+    search: Optional[str] = None,
+    repo: Optional[str] = None,
+    workdir: Optional[str] = None,
+):
+    from hermes_cli.gbauto_supabase_logs import get_artifacts
+
+    return get_artifacts(days=days, limit=limit, search=search, repo=repo, workdir=workdir)
+
+
+@app.get("/api/logs/supabase/cron")
+async def get_supabase_logs_cron(
+    days: int = 14,
+    limit: int = 100,
+    search: Optional[str] = None,
+    repo: Optional[str] = None,
+    workdir: Optional[str] = None,
+):
+    from hermes_cli.gbauto_supabase_logs import get_cron
+
+    return get_cron(days=days, limit=limit, search=search, repo=repo, workdir=workdir)
+
+
+@app.get("/api/logs/supabase/host-jobs")
+async def get_supabase_logs_host_jobs(
+    days: int = 14,
+    limit: int = 100,
+    status: Optional[str] = None,
+    search: Optional[str] = None,
+    repo: Optional[str] = None,
+    workdir: Optional[str] = None,
+):
+    from hermes_cli.gbauto_supabase_logs import get_host_jobs
+
+    return get_host_jobs(
+        days=days,
+        limit=limit,
+        status=status,
+        search=search,
+        repo=repo,
+        workdir=workdir,
+    )
+
+
+@app.get("/api/logs/supabase/traces")
+async def get_supabase_logs_traces(
+    days: int = 7,
+    limit: int = 100,
+    search: Optional[str] = None,
+    repo: Optional[str] = None,
+    workdir: Optional[str] = None,
+):
+    from hermes_cli.gbauto_supabase_logs import get_traces
+
+    return get_traces(days=days, limit=limit, search=search, repo=repo, workdir=workdir)
+
+
 # ---------------------------------------------------------------------------
 # Cron job management endpoints
 # ---------------------------------------------------------------------------

@@ -83,6 +83,32 @@ export const api = {
     if (params.component && params.component !== "all") qs.set("component", params.component);
     return fetchJSON<LogsResponse>(`/api/logs?${qs.toString()}`);
   },
+  getSupabaseLogsSummary: () =>
+    fetchJSON<SupabaseLogsSummaryResponse>("/api/logs/supabase/summary"),
+  getSupabaseLogsTimeline: (params: SupabaseLogsQuery = {}) => {
+    const qs = supabaseLogsQueryString(params);
+    return fetchJSON<SupabaseRowsResponse>(`/api/logs/supabase/timeline?${qs}`);
+  },
+  getSupabaseLogsFailures: (params: SupabaseLogsQuery = {}) => {
+    const qs = supabaseLogsQueryString(params);
+    return fetchJSON<SupabaseRowsResponse>(`/api/logs/supabase/failures?${qs}`);
+  },
+  getSupabaseLogsArtifacts: (params: SupabaseLogsQuery = {}) => {
+    const qs = supabaseLogsQueryString(params);
+    return fetchJSON<SupabaseRowsResponse>(`/api/logs/supabase/artifacts?${qs}`);
+  },
+  getSupabaseLogsCron: (params: SupabaseLogsQuery = {}) => {
+    const qs = supabaseLogsQueryString(params);
+    return fetchJSON<SupabaseCronLogsResponse>(`/api/logs/supabase/cron?${qs}`);
+  },
+  getSupabaseLogsHostJobs: (params: SupabaseLogsQuery = {}) => {
+    const qs = supabaseLogsQueryString(params);
+    return fetchJSON<SupabaseRowsResponse>(`/api/logs/supabase/host-jobs?${qs}`);
+  },
+  getSupabaseLogsTraces: (params: SupabaseLogsQuery = {}) => {
+    const qs = supabaseLogsQueryString(params);
+    return fetchJSON<SupabaseTracesLogsResponse>(`/api/logs/supabase/traces?${qs}`);
+  },
   getAnalytics: (days: number) =>
     fetchJSON<AnalyticsResponse>(`/api/analytics/usage?days=${days}`),
   getModelsAnalytics: (days: number) =>
@@ -444,6 +470,65 @@ export interface SessionMessagesResponse {
 export interface LogsResponse {
   file: string;
   lines: string[];
+}
+
+function supabaseLogsQueryString(params: SupabaseLogsQuery): string {
+  const qs = new URLSearchParams();
+  if (params.days) qs.set("days", String(params.days));
+  if (params.limit) qs.set("limit", String(params.limit));
+  if (params.status && params.status !== "all") qs.set("status", params.status);
+  if (params.source && params.source !== "all") qs.set("source", params.source);
+  if (params.search) qs.set("search", params.search);
+  if (params.repo) qs.set("repo", params.repo);
+  if (params.workdir) qs.set("workdir", params.workdir);
+  return qs.toString();
+}
+
+export interface SupabaseLogsQuery {
+  days?: number;
+  limit?: number;
+  repo?: string;
+  search?: string;
+  source?: string;
+  status?: string;
+  workdir?: string;
+}
+
+export type SupabaseLogRow = Record<string, unknown>;
+
+export interface SupabaseRowsResponse {
+  days?: number;
+  error?: string;
+  limit?: number;
+  ok: boolean;
+  rows: SupabaseLogRow[];
+}
+
+export interface SupabaseCronLogsResponse {
+  days?: number;
+  error?: string;
+  limit?: number;
+  ok: boolean;
+  outputs: SupabaseLogRow[];
+  rollup: SupabaseLogRow[];
+}
+
+export interface SupabaseTracesLogsResponse extends SupabaseRowsResponse {
+  coverage: SupabaseLogRow[];
+  gaps: SupabaseLogRow[];
+}
+
+export interface SupabaseLogsSummaryResponse {
+  counts?: Record<string, number>;
+  error?: string;
+  generated_at?: string;
+  ok: boolean;
+  trace_coverage?: Record<string, number>;
+  trace_totals?: {
+    cost?: number;
+    tokens?: number;
+  };
+  windows?: Record<string, number>;
 }
 
 export interface AnalyticsDailyEntry {
