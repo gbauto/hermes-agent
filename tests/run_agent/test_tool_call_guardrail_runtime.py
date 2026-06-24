@@ -112,6 +112,58 @@ def test_default_sequential_path_warns_repeated_exact_failure_without_blocking_e
     assert agent._tool_guardrail_halt_decision is None
 
 
+def test_sequential_pre_tool_hook_gets_session_and_tool_call_ids():
+    agent = _make_agent("web_search")
+    agent.session_id = "session-observe"
+    args = {"query": "same"}
+    tc = _mock_tool_call("web_search", json.dumps(args), "call-observe")
+    msg = SimpleNamespace(content="", tool_calls=[tc])
+    messages = []
+
+    with (
+        patch(
+            "hermes_cli.plugins.get_pre_tool_call_block_message",
+            return_value=None,
+        ) as mock_pre,
+        patch("run_agent.handle_function_call", return_value=json.dumps({"ok": True})),
+    ):
+        agent._execute_tool_calls_sequential(msg, messages, "task-1")
+
+    mock_pre.assert_called_once_with(
+        "web_search",
+        args,
+        task_id="task-1",
+        session_id="session-observe",
+        tool_call_id="call-observe",
+    )
+
+
+def test_concurrent_pre_tool_hook_gets_session_and_tool_call_ids():
+    agent = _make_agent("web_search")
+    agent.session_id = "session-observe"
+    args = {"query": "same"}
+    tc = _mock_tool_call("web_search", json.dumps(args), "call-observe")
+    msg = SimpleNamespace(content="", tool_calls=[tc])
+    messages = []
+
+    with (
+        patch(
+            "hermes_cli.plugins.get_pre_tool_call_block_message",
+            return_value=None,
+        ) as mock_pre,
+        patch("run_agent.handle_function_call", return_value=json.dumps({"ok": True})),
+    ):
+        agent._execute_tool_calls_concurrent(msg, messages, "task-1")
+
+    mock_pre.assert_called_once_with(
+        "web_search",
+        args,
+        task_id="task-1",
+        session_id="session-observe",
+        tool_call_id="call-observe",
+    )
+
+
 def test_config_enabled_hard_stop_blocks_repeated_exact_failure_before_execution():
     agent = _make_agent("web_search", config=_hard_stop_config())
     args = {"query": "same"}

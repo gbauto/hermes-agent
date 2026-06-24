@@ -33,6 +33,43 @@ def test_project_env_overrides_stale_shell_values_when_user_env_missing(tmp_path
     assert os.getenv("OPENAI_BASE_URL") == "https://project.example/v1"
 
 
+def test_project_env_preserves_process_credentials_when_user_env_missing(
+    tmp_path, monkeypatch
+):
+    home = tmp_path / "hermes"
+    project_env = tmp_path / ".env"
+    project_env.write_text(
+        "OPENAI_BASE_URL=https://project.example/v1\n"
+        "OPENROUTER_API_KEY=sk-or-stale-project-key\n",
+        encoding="utf-8",
+    )
+
+    monkeypatch.setenv("OPENAI_BASE_URL", "https://old.example/v1")
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-process-key")
+
+    loaded = load_hermes_dotenv(hermes_home=home, project_env=project_env)
+
+    assert loaded == [project_env]
+    assert os.getenv("OPENAI_BASE_URL") == "https://project.example/v1"
+    assert os.getenv("OPENROUTER_API_KEY") == "sk-or-process-key"
+
+
+def test_project_env_fills_missing_process_credentials(tmp_path, monkeypatch):
+    home = tmp_path / "hermes"
+    project_env = tmp_path / ".env"
+    project_env.write_text(
+        "OPENROUTER_API_KEY=sk-or-project-key\n",
+        encoding="utf-8",
+    )
+
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+
+    loaded = load_hermes_dotenv(hermes_home=home, project_env=project_env)
+
+    assert loaded == [project_env]
+    assert os.getenv("OPENROUTER_API_KEY") == "sk-or-project-key"
+
+
 def test_project_env_is_sanitized_before_loading(tmp_path, monkeypatch):
     home = tmp_path / "hermes"
     project_env = tmp_path / ".env"

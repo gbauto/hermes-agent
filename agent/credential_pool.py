@@ -1419,6 +1419,7 @@ def _upsert_entry(entries: List[PooledCredential], provider: str, source: str, p
     field_updates = {}
     extra_updates = {}
     _field_names = {f.name for f in fields(existing)}
+    token_changed = False
     for key, value in payload.items():
         if key in {"id", "priority"} or value is None:
             continue
@@ -1427,9 +1428,22 @@ def _upsert_entry(entries: List[PooledCredential], provider: str, source: str, p
         if key in _field_names:
             if getattr(existing, key) != value:
                 field_updates[key] = value
+                if key in {"access_token", "refresh_token", "agent_key"}:
+                    token_changed = True
         elif key in _EXTRA_KEYS:
             if existing.extra.get(key) != value:
                 extra_updates[key] = value
+    if token_changed and existing.last_status == STATUS_EXHAUSTED:
+        field_updates.update(
+            {
+                "last_status": None,
+                "last_status_at": None,
+                "last_error_code": None,
+                "last_error_reason": None,
+                "last_error_message": None,
+                "last_error_reset_at": None,
+            }
+        )
     if field_updates or extra_updates:
         if extra_updates:
             field_updates["extra"] = {**existing.extra, **extra_updates}
