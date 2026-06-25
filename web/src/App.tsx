@@ -195,8 +195,7 @@ const GB_AUTOMATION_NAV: NavItem[] = [
   { path: "/cron", label: "Cron", icon: Clock },
   { path: "/skills", label: "Skills", icon: Package },
   { path: "/plugins", label: "Plugins", icon: Puzzle },
-  // Artifacts/Documents nav intentionally hidden — no client artifacts yet.
-  // Routes (/artifacts, /documents) remain reachable by URL.
+  { path: "/artifacts", label: "Artifacts", icon: FileText },
   { path: "/profiles", label: "Profiles", icon: Users },
 ];
 

@@ -12,6 +12,7 @@ import {
   Search,
   Sparkles,
   Star,
+  ThumbsDown,
   Trash2,
 } from "lucide-react";
 import { Badge } from "@nous-research/ui/ui/components/badge";
@@ -44,6 +45,7 @@ interface DocumentFeedback {
   comment: string;
   contentScore: number;
   deleted: boolean;
+  downvoted: boolean;
   favorite: boolean;
   formattingScore: number;
   regenerate: boolean;
@@ -51,6 +53,8 @@ interface DocumentFeedback {
 }
 
 const documents: DocumentArtifact[] = gbautoDocuments.map((document) => ({ ...document }));
+
+const FEEDBACK_STORAGE_KEY = "hermes.dashboard.documentFeedback";
 
 function formatDate(value: string) {
   const date = new Date(value);
@@ -120,6 +124,7 @@ function defaultFeedback(document: DocumentArtifact): DocumentFeedback {
     comment: "",
     contentScore: document.contentScore,
     deleted: false,
+    downvoted: false,
     favorite: document.favorite,
     formattingScore: document.formattingScore,
     regenerate: false,
@@ -157,6 +162,17 @@ function DocumentActionButtons({
         type="button"
       >
         <Archive className="h-3.5 w-3.5" />
+      </button>
+      <button
+        aria-label={
+          feedback.downvoted ? `Remove downvote from ${document.title}` : `Downvote ${document.title}`
+        }
+        className={feedback.downvoted ? "documents-icon-action is-danger" : "documents-icon-action"}
+        onClick={() => onUpdate(document, { downvoted: !feedback.downvoted })}
+        title="Downvote"
+        type="button"
+      >
+        <ThumbsDown className="h-3.5 w-3.5" />
       </button>
       <button
         aria-label={feedback.deleted ? `Restore ${document.title}` : `Delete ${document.title}`}
@@ -288,11 +304,33 @@ export default function DocumentsPage() {
   const [selectedDocumentId, setSelectedDocumentId] = useState<string | null>(documents[0]?.id ?? null);
   const [modalDocumentId, setModalDocumentId] = useState<string | null>(null);
   const [feedbackByDocument, setFeedbackByDocument] = useState<Record<string, DocumentFeedback>>(() => {
-    return documents.reduce<Record<string, DocumentFeedback>>((accumulator, document) => {
+    const defaults = documents.reduce<Record<string, DocumentFeedback>>((accumulator, document) => {
       accumulator[document.id] = defaultFeedback(document);
       return accumulator;
     }, {});
+    try {
+      const stored = window.localStorage.getItem(FEEDBACK_STORAGE_KEY);
+      if (stored) {
+        const parsed = JSON.parse(stored) as Record<string, Partial<DocumentFeedback>>;
+        for (const [id, value] of Object.entries(parsed)) {
+          if (defaults[id]) {
+            defaults[id] = { ...defaults[id], ...value };
+          }
+        }
+      }
+    } catch {
+      // localStorage may be unavailable or hold malformed JSON; fall back to defaults.
+    }
+    return defaults;
   });
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(FEEDBACK_STORAGE_KEY, JSON.stringify(feedbackByDocument));
+    } catch {
+      // localStorage may be unavailable; staged feedback stays in memory only.
+    }
+  }, [feedbackByDocument]);
 
   const docTypes = useMemo(() => ["All", ...Array.from(new Set(documents.map((document) => document.docType)))], [documents]);
   const taxonomies = useMemo(() => ["All", ...Array.from(new Set(documents.map((document) => document.taxonomy)))], [documents]);
@@ -302,16 +340,26 @@ export default function DocumentsPage() {
   );
 
   const filteredDocuments = useMemo(() => {
-    return documents.filter((document) => {
-      const matchesDocType = activeDocType === "All" || document.docType === activeDocType;
-      const matchesTaxonomy = activeTaxonomy === "All" || document.taxonomy === activeTaxonomy;
-      const matchesGroup = activeGroup === "All" || document.group === activeGroup;
-      return matchesDocType && matchesTaxonomy && matchesGroup;
-    });
-  }, [activeDocType, activeGroup, activeTaxonomy, documents]);
+    const toTime = (value: string) => {
+      const ms = new Date(value).getTime();
+      return Number.isNaN(ms) ? 0 : ms;
+    };
+    return documents
+      .filter((document) => {
+        // Drop artifacts the reviewer downvoted, deleted, or archived.
+        const fb = feedbackByDocument[document.id];
+        if (fb && (fb.archived || fb.deleted || fb.downvoted)) return false;
+        const matchesDocType = activeDocType === "All" || document.docType === activeDocType;
+        const matchesTaxonomy = activeTaxonomy === "All" || document.taxonomy === activeTaxonomy;
+        const matchesGroup = activeGroup === "All" || document.group === activeGroup;
+        return matchesDocType && matchesTaxonomy && matchesGroup;
+      })
+      // Newest first.
+      .sort((a, b) => toTime(b.modifiedAt) - toTime(a.modifiedAt));
+  }, [activeDocType, activeGroup, activeTaxonomy, feedbackByDocument]);
 
   const selectedDocument =
-    documents.find((document) => document.id === selectedDocumentId) ?? filteredDocuments[0] ?? documents[0] ?? null;
+    filteredDocuments.find((document) => document.id === selectedDocumentId) ?? filteredDocuments[0] ?? null;
   const selectedFeedback = selectedDocument ? feedbackByDocument[selectedDocument.id] ?? defaultFeedback(selectedDocument) : null;
   const modalDocument = documents.find((document) => document.id === modalDocumentId) ?? null;
   const modalFeedback = modalDocument ? feedbackByDocument[modalDocument.id] ?? defaultFeedback(modalDocument) : null;

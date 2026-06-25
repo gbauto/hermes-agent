@@ -1,0 +1,105 @@
+/* ------------------------------------------------------------------ */
+/* GBAutomation theme — canonical design tokens.                       */
+/*                                                                     */
+/* Single source of truth for the "Report-Paper" look (terracotta +    */
+/* cream + Newsreader serif) lifted from the published ai-resume.html  */
+/* artifact. The GBAutomation dashboard pages (gbhub-* / supabase-*)   */
+/* are a cream "paper" island inside the teal Hermes shell; this file  */
+/* gives that island a real token system + the serif/Inter type pair   */
+/* instead of system fonts and scattered hardcoded hex.                */
+/*                                                                     */
+/* Must stay among the leading @import group in index.css (CSS @import */
+/* rules have to precede other statements).                            */
+/* ------------------------------------------------------------------ */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=Newsreader:ital,opsz,wght@0,6..72,300;0,6..72,400;0,6..72,500;1,6..72,400;1,6..72,500&display=swap');
+
+:root {
+  /* Brand + ink (ai-resume :root). */
+  --gb-terracotta: #d97757;
+  --gb-terracotta-hover: #b75f43;
+  --gb-ink: #191919;
+
+  /* Paper surfaces. */
+  --gb-cream: #f3f1e7;
+  --gb-cream-2: #e6e4d9;
+  --gb-stone: #d6d4c8;
+
+  /* Muted text. */
+  --gb-text-mute: #8c8a84;
+  --gb-text-muted-2: #5c5c5c;
+
+  /* Status. */
+  --gb-green: #4f9d69;
+  --gb-amber: #c08a3e;
+  --gb-blue: #3d6ea8;
+
+  /* Type pairing. */
+  --gb-font-sans: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --gb-font-serif: 'Newsreader', Georgia, 'Times New Roman', serif;
+  --gb-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
+    'Liberation Mono', 'Courier New', monospace;
+
+  /* Shape. */
+  --gb-radius-sm: 8px;
+  --gb-radius: 14px;
+  --gb-radius-lg: 18px;
+  --gb-pill: 999px;
+}
+
+/* ------------------------------------------------------------------ */
+/* Apply the type pairing to the GBAutomation pages only.              */
+/*                                                                     */
+/* The gbhub-* / supabase-* headings already render with               */
+/* var(--theme-font-display) and body text with var(--theme-font-sans),*/
+/* so re-pointing those two tokens here flips every GB page to          */
+/* Newsreader headings + Inter body without touching each rule.        */
+/* ------------------------------------------------------------------ */
+.gbhub-page,
+.supabase-page {
+  --theme-font-sans: var(--gb-font-sans);
+  --theme-font-display: var(--gb-font-serif);
+  font-family: var(--gb-font-sans);
+  font-feature-settings: 'cv05' 1, 'ss01' 1;
+}
+
+/* ------------------------------------------------------------------ */
+/* Reusable conform-to-standard utilities (ai-resume motifs).          */
+/* Use these when building/refining GB page sections.                  */
+/* ------------------------------------------------------------------ */
+.gb-serif {
+  font-family: var(--gb-font-serif);
+  letter-spacing: -0.01em;
+}
+
+.gb-eyebrow {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--gb-text-mute);
+}
+
+.gb-glass {
+  background: rgba(230, 228, 217, 0.6);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(214, 212, 200, 0.6);
+}
+
+.gb-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  border-radius: var(--gb-pill);
+  border: 1px solid var(--gb-stone);
+  background: #fff;
+  color: var(--gb-ink);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  transition: all 0.3s ease;
+}
+.gb-pill:hover {
+  background: var(--gb-ink);
+  color: var(--gb-cream);
+}

@@ -1,5 +1,6 @@
 @import 'tailwindcss';
 @import '@nous-research/ui/styles/globals.css';
+@import './styles/gbauto-theme.css';
 
 /* Scan the published design-system bundle so its utility classes survive
    Tailwind's JIT purge. */
