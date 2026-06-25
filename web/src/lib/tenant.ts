@@ -17,13 +17,15 @@ export interface TenantOption {
   slug: string;
   label: string;
   role: TenantRole;
+  /** Accent used by the active-client indicator + change toast. */
+  color: string;
 }
 
 export const TENANTS: TenantOption[] = [
-  { slug: "smoke-client", label: "smoke-client", role: "user" },
-  { slug: "gbautomation", label: "gbautomation", role: "admin" },
-  { slug: "jid5274", label: "jid5274", role: "admin" },
-  { slug: "ecom", label: "ecom", role: "user" },
+  { slug: "smoke-client", label: "smoke-client", role: "user", color: "#8c8a84" },
+  { slug: "gbautomation", label: "gbautomation", role: "admin", color: "#d97757" },
+  { slug: "jid5274", label: "jid5274", role: "admin", color: "#3d6ea8" },
+  { slug: "ecom", label: "ecom", role: "user", color: "#4f9d69" },
 ];
 
 export const DEFAULT_TENANT = "smoke-client";

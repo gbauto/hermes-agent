@@ -2551,6 +2551,33 @@ async def get_supabase_logs_summary():
     return get_summary()
 
 
+@app.get("/api/gbauto/chat")
+async def gbauto_chat_read(tenant: str = "smoke-client", since: Optional[str] = None, limit: int = 100):
+    # Session-token gated (not in _PUBLIC_API_PATHS). Reads go through the
+    # gbauto-supabase CLI server-side, so client chat is never anon-exposed.
+    from hermes_cli.gbauto_chat import load_messages
+
+    try:
+        return load_messages(tenant, since=since, limit=limit)
+    except Exception as exc:  # surface as {ok:false} rather than a 500 page
+        return {"ok": False, "error": str(exc), "rows": []}
+
+
+@app.post("/api/gbauto/chat")
+async def gbauto_chat_send(request: Request):
+    from hermes_cli.gbauto_chat import send_message
+
+    try:
+        body = await request.json()
+        return send_message(
+            str(body.get("tenant") or ""),
+            str(body.get("session_id") or "dashboard-web"),
+            str(body.get("text") or ""),
+        )
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)}
+
+
 @app.get("/api/logs/supabase/timeline")
 async def get_supabase_logs_timeline(
     days: int = 3,

@@ -1,6 +1,11 @@
 @import 'tailwindcss';
 @import '@nous-research/ui/styles/globals.css';
+/* Load the design-system @font-face set (Mondwest, etc.). globals.css does
+   NOT pull these in, so the shell's `font-mondwest` brand chrome (incl. the
+   "Hermes Agent" wordmark) was silently falling back to plain sans-serif. */
+@import '@nous-research/ui/styles/fonts.css';
 @import './styles/gbauto-theme.css';
+@import './styles/tenant-indicator.css';
 
 /* Scan the published design-system bundle so its utility classes survive
    Tailwind's JIT purge. */

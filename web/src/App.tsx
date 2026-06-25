@@ -54,6 +54,7 @@ import { Typography } from "@/components/NouiTypography";
 import { cn } from "@/lib/utils";
 import { Backdrop } from "@/components/Backdrop";
 import { TenantSwitcher } from "@/components/TenantSwitcher";
+import { TenantChangeToast } from "@/components/TenantChangeToast";
 import {
   CommandLayerOverlay,
   type CommandLayerAction,
@@ -80,6 +81,7 @@ import ProfilesPage, { ProfileDetailPage } from "@/pages/ProfilesPage";
 import SkillsPage from "@/pages/SkillsPage";
 import PluginsPage from "@/pages/PluginsPage";
 import ChatPage from "@/pages/ChatPage";
+import SupabaseChatPage from "@/pages/SupabaseChatPage";
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import { ThemeSwitcher } from "@/components/ThemeSwitcher";
 import { useI18n } from "@/i18n";
@@ -403,15 +405,17 @@ export default function App() {
   const builtinRoutes = useMemo(
     () => ({
       ...BUILTIN_ROUTES_CORE,
-      ...(embeddedChat ? { "/chat": ChatRouteSink } : {}),
+      // --tui (POSIX): terminal host paints over a route sink. Otherwise
+      // (e.g. native Windows, no PTY): serve the Supabase web chat.
+      "/chat": embeddedChat ? ChatRouteSink : SupabaseChatPage,
     }),
     [embeddedChat],
   );
 
   const builtinNav = useMemo(() => {
-    const base = embeddedChat
-      ? [CHAT_NAV_ITEM, ...BUILTIN_NAV_REST]
-      : BUILTIN_NAV_REST;
+    // Chat is always available now (terminal when --tui, Supabase web chat
+    // otherwise), so the nav item shows regardless of embedded-chat mode.
+    const base = [CHAT_NAV_ITEM, ...BUILTIN_NAV_REST];
     return showTokenAnalytics ? base : base.filter((n) => n.path !== "/analytics");
   }, [embeddedChat, showTokenAnalytics]);
 
@@ -650,6 +654,7 @@ export default function App() {
       )}
 
       <PluginSlot name="header-banner" />
+      <TenantChangeToast />
 
       <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden pt-14 lg:pt-0">
         <div className="flex min-h-0 min-w-0 flex-1">

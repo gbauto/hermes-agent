@@ -1,0 +1,70 @@
+/* ------------------------------------------------------------------ */
+/* Active-client indicator (sidebar) + change toast (global).          */
+/* Kept in its own file to avoid edit contention on gbauto-theme.css.  */
+/* ------------------------------------------------------------------ */
+
+.gb-tenant-active {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-family: var(--gb-font-sans);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  color: var(--midground, #ffe6cb);
+}
+.gb-tenant-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  flex-shrink: 0;
+  box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.08);
+}
+.gb-tenant-name {
+  font-weight: 600;
+}
+.gb-tenant-role {
+  margin-left: auto;
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  opacity: 0.55;
+}
+
+.tenant-toast {
+  position: fixed;
+  top: 16px;
+  left: 50%;
+  z-index: 100;
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  padding: 9px 16px;
+  border-radius: 999px;
+  background: rgba(25, 25, 25, 0.92);
+  color: var(--gb-cream, #f3f1e7);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow: 0 12px 32px -12px rgba(0, 0, 0, 0.55);
+  font-family: var(--gb-font-sans);
+  font-size: 12.5px;
+  letter-spacing: 0.02em;
+  animation: tenant-toast-in 0.22s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.tenant-toast-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 999px;
+  flex-shrink: 0;
+}
+@keyframes tenant-toast-in {
+  from {
+    opacity: 0;
+    transform: translateX(-50%) translateY(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+  }
+}
+.tenant-toast {
+  transform: translateX(-50%);
+}
