@@ -53,6 +53,7 @@ import { Spinner } from "@nous-research/ui/ui/components/spinner";
 import { Typography } from "@/components/NouiTypography";
 import { cn } from "@/lib/utils";
 import { Backdrop } from "@/components/Backdrop";
+import { TenantSwitcher } from "@/components/TenantSwitcher";
 import {
   CommandLayerOverlay,
   type CommandLayerAction,
@@ -132,7 +133,10 @@ const BUILTIN_ROUTES_CORE: Record<string, ComponentType> = {
   "/repos": GbAutomationReposPage,
   "/supabase": SupabasePage,
   "/langfuse": LangfusePage,
-  "/kanban": KanbanPage,
+  // Data-plane table view lives at /kanban-data so the Kanban *plugin board*
+  // can own /kanban (a builtin route here would shadow the plugin — see
+  // buildRoutes: a plugin tab.path colliding with a builtin is skipped).
+  "/kanban-data": KanbanPage,
   "/artifacts": DocumentsPage,
   "/documents": DocumentsPage,
   "/config": ConfigPage,
@@ -187,11 +191,12 @@ const GB_AUTOMATION_NAV: NavItem[] = [
   { path: "/repos", label: "Repos", icon: GitBranch },
   { path: "/supabase", label: "Supabase", icon: Database },
   { path: "/langfuse", label: "Langfuse", icon: RadioTower },
-  { path: "/kanban", label: "Kanban", icon: Workflow },
+  { path: "/kanban-data", label: "Kanban Data", icon: Workflow },
   { path: "/cron", label: "Cron", icon: Clock },
   { path: "/skills", label: "Skills", icon: Package },
   { path: "/plugins", label: "Plugins", icon: Puzzle },
-  { path: "/artifacts", label: "Artifacts", icon: FileText },
+  // Artifacts/Documents nav intentionally hidden — no client artifacts yet.
+  // Routes (/artifacts, /documents) remain reachable by URL.
   { path: "/profiles", label: "Profiles", icon: Users },
 ];
 
@@ -767,6 +772,8 @@ export default function App() {
                 >
                   GBAutomation
                 </span>
+
+                <TenantSwitcher />
 
                 <ul className="flex flex-col">
                   {GB_AUTOMATION_NAV.map((item) => (

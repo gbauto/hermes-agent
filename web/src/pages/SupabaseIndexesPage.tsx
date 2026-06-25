@@ -17,6 +17,7 @@ import {
   useContractMap,
   useSupabaseContractsIndex,
 } from "@/lib/gbautoSupabaseContracts";
+import { useTenant } from "@/lib/tenant";
 import type {
   SupabaseContractRow,
   SupabaseContractsIndex,
@@ -64,7 +65,7 @@ interface KanbanTeamIndex {
 const DASHBOARD_ROUTES = [
   { icon: Database, label: "Supabase", to: "/supabase" },
   { icon: RadioTower, label: "Langfuse", to: "/langfuse" },
-  { icon: Workflow, label: "Kanban", to: "/kanban" },
+  { icon: Workflow, label: "Kanban", to: "/kanban-data" },
 ];
 
 const DASHBOARD_ORDER = ["ops", "kanban", "observability", "tac", "ecom"];
@@ -142,6 +143,56 @@ function rowsFor(table: SupabaseTable, query: string) {
 
 function getTable(snapshot: SupabaseSnapshot | null, name: string) {
   return snapshot?.tables.find((table) => table.name === name) ?? null;
+}
+
+// --- Tenant scoping -------------------------------------------------------
+// Tables whose rows carry a `client_slug` column are client-scoped and get
+// filtered to the active tenant. Tables without it (cron, langfuse_traces,
+// skill_runs, tac_*) are global infra data and pass through unchanged
+// ("filter what's filterable").
+function isClientScoped(rows: Record<string, unknown>[]) {
+  return rows.length > 0 && Object.prototype.hasOwnProperty.call(rows[0], "client_slug");
+}
+
+function countBy(rows: Record<string, unknown>[], col: string) {
+  const counts: Record<string, number> = {};
+  for (const row of rows) {
+    const key = String(row[col] ?? "unknown");
+    counts[key] = (counts[key] ?? 0) + 1;
+  }
+  return counts;
+}
+
+function recomputeSummary(
+  table: SupabaseTable,
+  rows: Record<string, unknown>[],
+): SupabaseTable["summary"] {
+  const summary: SupabaseTable["summary"] = { ...table.summary, row_count: rows.length };
+  if (table.time_col) {
+    summary.latest =
+      rows
+        .map((row) => row[table.time_col as string])
+        .filter(Boolean)
+        .map((value) => String(value))
+        .sort((a, b) => new Date(b).getTime() - new Date(a).getTime())[0] ?? null;
+  }
+  if (table.status_col) summary.status_counts = countBy(rows, table.status_col);
+  if (table.group_col) summary.top_groups = countBy(rows, table.group_col);
+  return summary;
+}
+
+function scopeTableToTenant(table: SupabaseTable, tenant: string): SupabaseTable {
+  if (!isClientScoped(table.rows)) return table;
+  const rows = table.rows.filter((row) => String(row.client_slug ?? "") === tenant);
+  return { ...table, rows, summary: recomputeSummary(table, rows) };
+}
+
+function scopeSnapshotToTenant(
+  snapshot: SupabaseSnapshot | null,
+  tenant: string,
+): SupabaseSnapshot | null {
+  if (!snapshot) return snapshot;
+  return { ...snapshot, tables: snapshot.tables.map((table) => scopeTableToTenant(table, tenant)) };
 }
 
 function sumRows(tables: SupabaseTable[]) {
@@ -339,6 +390,7 @@ function PageShell({
   eyebrow,
   icon: Icon,
   snapshot,
+  tenant,
   title,
 }: {
   children: React.ReactNode;
@@ -346,6 +398,7 @@ function PageShell({
   eyebrow: string;
   icon: typeof Database;
   snapshot: SupabaseSnapshot | null;
+  tenant: string;
   title: string;
 }) {
   return (
@@ -359,6 +412,7 @@ function PageShell({
           {snapshot?.live ? <CheckCircle2 className="h-3 w-3" /> : <AlertTriangle className="h-3 w-3" />}
           {snapshot?.live ? "live snapshot" : "loading"}
         </Badge>
+        <Badge tone="outline" className="gbhub-badge">scope: {tenant}</Badge>
         <h2>{title}</h2>
         <p>{description}</p>
         <nav className="supabase-route-tabs" aria-label="Supabase dashboard routes">
@@ -556,7 +610,12 @@ function KanbanFocused({
 }
 
 function SupabaseIndexesPage({ view }: { view: DashboardKey }) {
-  const snapshot = useSupabaseSnapshot();
+  const rawSnapshot = useSupabaseSnapshot();
+  const tenant = useTenant();
+  const snapshot = useMemo(
+    () => scopeSnapshotToTenant(rawSnapshot, tenant),
+    [rawSnapshot, tenant],
+  );
   const contractsIndex = useSupabaseContractsIndex();
 
   useEffect(() => {
@@ -571,6 +630,7 @@ function SupabaseIndexesPage({ view }: { view: DashboardKey }) {
         eyebrow="GBAutomation Observability"
         icon={RadioTower}
         snapshot={snapshot}
+        tenant={tenant}
         title="Langfuse Trace Index"
       >
         <LangfuseFocused contractsIndex={contractsIndex} snapshot={snapshot} />
@@ -585,6 +645,7 @@ function SupabaseIndexesPage({ view }: { view: DashboardKey }) {
         eyebrow="GBAutomation Control Plane"
         icon={Workflow}
         snapshot={snapshot}
+        tenant={tenant}
         title="Kanban Data Plane"
       >
         <KanbanFocused contractsIndex={contractsIndex} snapshot={snapshot} />
@@ -598,6 +659,7 @@ function SupabaseIndexesPage({ view }: { view: DashboardKey }) {
       eyebrow="GBAutomation Data"
       icon={Database}
       snapshot={snapshot}
+      tenant={tenant}
       title="Supabase Indexes"
     >
       <SupabaseAllTables contractsIndex={contractsIndex} snapshot={snapshot} />
