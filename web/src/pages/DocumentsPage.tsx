@@ -472,10 +472,6 @@ export default function DocumentsPage() {
             >
               <div className="documents-artifact-preview-shell">
                 <ArtifactPreview className="documents-preview-frame" document={document} mode="card" />
-                <div className="documents-card-score-overlay" aria-hidden="true">
-                  <span>C {feedback.contentScore}</span>
-                  <span>F {feedback.formattingScore}</span>
-                </div>
                 <button
                   aria-label={`Open report preview for ${document.title}`}
                   className="documents-artifact-preview-button"
@@ -502,30 +498,6 @@ export default function DocumentsPage() {
                   <span>{document.extension.toUpperCase()}</span>
                   <span>{formatSize(document.sizeBytes)}</span>
                   <span>{formatDate(document.modifiedAt)}</span>
-                </div>
-                <div className="documents-card-feedback">
-                  <label>
-                    <span>Content</span>
-                    <output>{feedback.contentScore}/10</output>
-                    <input
-                      max="10"
-                      min="1"
-                      onChange={(event) => updateFeedback(document, { contentScore: Number(event.target.value) })}
-                      type="range"
-                      value={feedback.contentScore}
-                    />
-                  </label>
-                  <label>
-                    <span>Format</span>
-                    <output>{feedback.formattingScore}/10</output>
-                    <input
-                      max="10"
-                      min="1"
-                      onChange={(event) => updateFeedback(document, { formattingScore: Number(event.target.value) })}
-                      type="range"
-                      value={feedback.formattingScore}
-                    />
-                  </label>
                 </div>
               </div>
             </article>

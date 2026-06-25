@@ -1181,7 +1181,9 @@ code { font-size: 0.875rem; }
   width: 1440px;
   height: 1080px;
   max-width: none;
-  transform: scale(calc(100cqw / 1440));
+  /* length / length = unitless ratio (valid for scale()); a bare `/ 1440`
+     yields a length and is silently ignored, leaving the iframe unscaled. */
+  transform: scale(calc(100cqw / 1440px));
   transform-origin: top left;
 }
 
