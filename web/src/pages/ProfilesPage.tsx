@@ -460,6 +460,22 @@ export default function ProfilesPage() {
                     {p.has_env && (
                       <Badge tone="outline">{t.profiles.hasEnv}</Badge>
                     )}
+                    {p.canopy && (
+                      <span
+                        title={
+                          p.canopy_inherits && p.canopy_inherits.length
+                            ? `Canopy-composed · inherits: ${p.canopy_inherits.join(", ")}`
+                            : "Canopy-composed profile"
+                        }
+                      >
+                        <Badge tone="outline">
+                          🌿 Canopy
+                          {p.canopy_inherits && p.canopy_inherits.length
+                            ? ` · ${p.canopy_inherits.length}`
+                            : ""}
+                        </Badge>
+                      </span>
+                    )}
                   </div>
                   {isRenaming &&
                     (() => {
