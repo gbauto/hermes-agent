@@ -644,6 +644,10 @@ export interface ProfileInfo {
   provider: string | null;
   has_env: boolean;
   skill_count: number;
+  /** True when this profile composes its prompt from the Canopy system. */
+  canopy?: boolean;
+  /** Canopy mixins the profile inherits (e.g. tac-contract-shared, gbauto-style). */
+  canopy_inherits?: string[];
 }
 
 export interface ModelsAnalyticsModelEntry {
@@ -710,6 +714,8 @@ export interface SkillInfo {
   description: string;
   category: string;
   enabled: boolean;
+  /** True when this skill is part of the Canopy prompt system (owns/authors snippets). */
+  canopy?: boolean;
 }
 
 export interface ToolsetInfo {

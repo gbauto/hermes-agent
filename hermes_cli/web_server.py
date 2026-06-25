@@ -3490,8 +3490,22 @@ def _profile_attr(info, name: str, default: Any = None) -> Any:
         return default
 
 
+def _annotate_canopy_profile(d: Dict[str, Any]) -> Dict[str, Any]:
+    """Earmark a profile dict with its Canopy composition (best-effort, never raises)."""
+    inherits = None
+    try:
+        from hermes_cli import canopy_xref
+
+        inherits = canopy_xref.profile_canopy(d.get("name", ""))
+    except Exception:
+        inherits = None
+    d["canopy"] = bool(inherits)
+    d["canopy_inherits"] = inherits or []
+    return d
+
+
 def _profile_to_dict(info) -> Dict[str, Any]:
-    return {
+    return _annotate_canopy_profile({
         "name": _profile_attr(info, "name", ""),
         "path": str(_profile_attr(info, "path", "")),
         "is_default": bool(_profile_attr(info, "is_default", False)),
@@ -3499,7 +3513,7 @@ def _profile_to_dict(info) -> Dict[str, Any]:
         "provider": _profile_attr(info, "provider"),
         "has_env": bool(_profile_attr(info, "has_env", False)),
         "skill_count": int(_profile_attr(info, "skill_count", 0) or 0),
-    }
+    })
 
 
 def _fallback_profile_dicts(profiles_mod) -> List[Dict[str, Any]]:
@@ -3539,7 +3553,7 @@ def _fallback_profile_dicts(profiles_mod) -> List[Dict[str, Any]]:
                 "skill_count": _safe(lambda entry=entry: profiles_mod._count_skills(entry), 0),
             })
 
-    return profiles
+    return [_annotate_canopy_profile(p) for p in profiles]
 
 
 def _resolve_profile_dir(name: str) -> Path:
@@ -3732,8 +3746,13 @@ async def get_skills():
     config = load_config()
     disabled = get_disabled_skills(config)
     skills = _find_all_skills(skip_disabled=True)
+    try:
+        from hermes_cli import canopy_xref
+    except Exception:
+        canopy_xref = None
     for s in skills:
         s["enabled"] = s["name"] not in disabled
+        s["canopy"] = bool(canopy_xref and canopy_xref.skill_is_canopy(s.get("name", "")))
     return skills
 
 

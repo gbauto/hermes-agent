@@ -705,6 +705,13 @@ function SkillRow({
           <Badge tone="secondary" className="text-[9px]">
             {prettyCategory(skill.category, "General")}
           </Badge>
+          {skill.canopy && (
+            <span title="Part of the Canopy prompt system">
+              <Badge tone="outline" className="text-[9px]">
+                🌿 Canopy
+              </Badge>
+            </span>
+          )}
         </div>
         <p className="text-xs text-muted-foreground leading-relaxed line-clamp-2">
           {skill.description || noDescriptionLabel}
