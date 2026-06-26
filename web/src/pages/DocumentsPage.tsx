@@ -285,6 +285,13 @@ export default function DocumentsPage() {
   const [activeDocType, setActiveDocType] = useState("All");
   const [activeTaxonomy, setActiveTaxonomy] = useState("All");
   const [activeGroup, setActiveGroup] = useState("All");
+  const [query, setQuery] = useState("");
+  const [showNewOnly, setShowNewOnly] = useState(false);
+  // Seed from the bundled static index, then refresh at runtime from
+  // /gbauto-documents/index.json so artifacts added by the nightly diff job
+  // appear on a browser refresh without rebuilding the SPA.
+  const [docs, setDocs] = useState<DocumentArtifact[]>(documents);
+  const [recentlyAdded, setRecentlyAdded] = useState<Set<string>>(new Set());
   const [selectedDocumentId, setSelectedDocumentId] = useState<string | null>(documents[0]?.id ?? null);
   const [modalDocumentId, setModalDocumentId] = useState<string | null>(null);
   const [feedbackByDocument, setFeedbackByDocument] = useState<Record<string, DocumentFeedback>>(() => {
@@ -294,26 +301,80 @@ export default function DocumentsPage() {
     }, {});
   });
 
-  const docTypes = useMemo(() => ["All", ...Array.from(new Set(documents.map((document) => document.docType)))], [documents]);
-  const taxonomies = useMemo(() => ["All", ...Array.from(new Set(documents.map((document) => document.taxonomy)))], [documents]);
+  // Pull the freshly-generated index at runtime. The nightly diff job rewrites
+  // index.json (and stamps `recentlyAdded`), so this surfaces new artifacts
+  // without an SPA rebuild. Falls back silently to the bundled static index.
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/gbauto-documents/index.json", { cache: "no-store" })
+      .then((response) => (response.ok ? response.json() : null))
+      .then((data) => {
+        if (cancelled || !data || !Array.isArray(data.artifacts)) return;
+        setDocs((data.artifacts as DocumentArtifact[]).map((document) => ({ ...document })));
+        if (Array.isArray(data.recentlyAdded)) {
+          setRecentlyAdded(new Set(data.recentlyAdded as string[]));
+        }
+      })
+      .catch(() => {
+        // Offline / file:// / first build before index.json exists — keep static.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const docTypes = useMemo(() => ["All", ...Array.from(new Set(docs.map((document) => document.docType)))], [docs]);
+  const taxonomies = useMemo(() => ["All", ...Array.from(new Set(docs.map((document) => document.taxonomy)))], [docs]);
   const groups = useMemo(
-    () => ["All", ...Array.from(new Set(documents.map((document) => document.group))).slice(0, 16)],
-    [documents],
+    () => ["All", ...Array.from(new Set(docs.map((document) => document.group))).slice(0, 16)],
+    [docs],
   );
 
+  const hasActiveFilters =
+    query.trim() !== "" ||
+    showNewOnly ||
+    activeDocType !== "All" ||
+    activeTaxonomy !== "All" ||
+    activeGroup !== "All";
+
+  const resetFilters = () => {
+    setQuery("");
+    setShowNewOnly(false);
+    setActiveDocType("All");
+    setActiveTaxonomy("All");
+    setActiveGroup("All");
+  };
+
   const filteredDocuments = useMemo(() => {
-    return documents.filter((document) => {
-      const matchesDocType = activeDocType === "All" || document.docType === activeDocType;
-      const matchesTaxonomy = activeTaxonomy === "All" || document.taxonomy === activeTaxonomy;
-      const matchesGroup = activeGroup === "All" || document.group === activeGroup;
-      return matchesDocType && matchesTaxonomy && matchesGroup;
+    const needle = query.trim().toLowerCase();
+    return docs.filter((document) => {
+      if (activeDocType !== "All" && document.docType !== activeDocType) return false;
+      if (activeTaxonomy !== "All" && document.taxonomy !== activeTaxonomy) return false;
+      if (activeGroup !== "All" && document.group !== activeGroup) return false;
+      if (showNewOnly && !recentlyAdded.has(document.id)) return false;
+      if (needle) {
+        const haystack = [
+          document.title,
+          document.description,
+          document.sourcePath,
+          document.group,
+          document.taxonomy,
+          document.docType,
+          document.extension,
+        ]
+          .filter(Boolean)
+          .join(" ")
+          .toLowerCase();
+        if (!haystack.includes(needle)) return false;
+      }
+      return true;
     });
-  }, [activeDocType, activeGroup, activeTaxonomy, documents]);
+  }, [activeDocType, activeGroup, activeTaxonomy, query, showNewOnly, recentlyAdded, docs]);
 
   const selectedDocument =
-    documents.find((document) => document.id === selectedDocumentId) ?? filteredDocuments[0] ?? documents[0] ?? null;
+    docs.find((document) => document.id === selectedDocumentId) ?? filteredDocuments[0] ?? docs[0] ?? null;
   const selectedFeedback = selectedDocument ? feedbackByDocument[selectedDocument.id] ?? defaultFeedback(selectedDocument) : null;
-  const modalDocument = documents.find((document) => document.id === modalDocumentId) ?? null;
+  const modalDocument = docs.find((document) => document.id === modalDocumentId) ?? null;
   const modalFeedback = modalDocument ? feedbackByDocument[modalDocument.id] ?? defaultFeedback(modalDocument) : null;
 
   const updateFeedback = (document: DocumentArtifact, partial: Partial<DocumentFeedback>) => {
@@ -362,52 +423,73 @@ export default function DocumentsPage() {
         </Badge>
       </section>
 
-      <section className="documents-filter-panel" aria-label="Document filters">
-        <div className="documents-filter-row">
-          <span className="documents-filter-label">Doc type</span>
-          <div className="documents-filter-pills">
-            {docTypes.map((type) => (
-              <button
-                className={type === activeDocType ? "documents-filter-pill is-active" : "documents-filter-pill"}
-                key={type}
-                onClick={() => setActiveDocType(type)}
-                type="button"
-              >
-                {type}
-              </button>
-            ))}
-          </div>
-        </div>
-        <div className="documents-filter-row">
-          <span className="documents-filter-label">Taxonomy</span>
-          <div className="documents-filter-pills">
-            {taxonomies.map((taxonomy) => (
-              <button
-                className={taxonomy === activeTaxonomy ? "documents-filter-pill is-active" : "documents-filter-pill"}
-                key={taxonomy}
-                onClick={() => setActiveTaxonomy(taxonomy)}
-                type="button"
-              >
-                {taxonomy}
-              </button>
-            ))}
-          </div>
-        </div>
-        <div className="documents-filter-row">
-          <span className="documents-filter-label">Set</span>
-          <div className="documents-filter-pills">
-            {groups.map((group) => (
-              <button
-                className={group === activeGroup ? "documents-filter-pill is-active" : "documents-filter-pill"}
-                key={group}
-                onClick={() => setActiveGroup(group)}
-                type="button"
-              >
-                {group}
-              </button>
-            ))}
-          </div>
-        </div>
+      <section className="documents-filter-bar" aria-label="Document filters">
+        <label className="documents-search">
+          <Search className="h-3.5 w-3.5" />
+          <input
+            aria-label="Search artifacts"
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder="Search artifacts by title, path, group…"
+            type="search"
+            value={query}
+          />
+        </label>
+        <select
+          aria-label="Filter by doc type"
+          className="documents-filter-select"
+          onChange={(event) => setActiveDocType(event.target.value)}
+          value={activeDocType}
+        >
+          {docTypes.map((type) => (
+            <option key={type} value={type}>
+              {type === "All" ? "All types" : type}
+            </option>
+          ))}
+        </select>
+        <select
+          aria-label="Filter by taxonomy"
+          className="documents-filter-select"
+          onChange={(event) => setActiveTaxonomy(event.target.value)}
+          value={activeTaxonomy}
+        >
+          {taxonomies.map((taxonomy) => (
+            <option key={taxonomy} value={taxonomy}>
+              {taxonomy === "All" ? "All taxonomies" : taxonomy}
+            </option>
+          ))}
+        </select>
+        <select
+          aria-label="Filter by set"
+          className="documents-filter-select"
+          onChange={(event) => setActiveGroup(event.target.value)}
+          value={activeGroup}
+        >
+          {groups.map((group) => (
+            <option key={group} value={group}>
+              {group === "All" ? "All sets" : group}
+            </option>
+          ))}
+        </select>
+        <button
+          aria-pressed={showNewOnly}
+          className={showNewOnly ? "documents-new-toggle is-active" : "documents-new-toggle"}
+          disabled={recentlyAdded.size === 0}
+          onClick={() => setShowNewOnly((value) => !value)}
+          title={
+            recentlyAdded.size === 0
+              ? "No new artifacts since the last nightly index"
+              : "Show only artifacts added by the latest nightly diff"
+          }
+          type="button"
+        >
+          <Sparkles className="h-3.5 w-3.5" />
+          New{recentlyAdded.size ? ` ${recentlyAdded.size}` : ""}
+        </button>
+        {hasActiveFilters ? (
+          <button className="documents-filter-clear" onClick={resetFilters} type="button">
+            Clear
+          </button>
+        ) : null}
       </section>
 
       <div className="documents-artifact-grid">
@@ -444,7 +526,12 @@ export default function DocumentsPage() {
 
               <div className="documents-card-body">
                 <div className="flex items-center justify-between gap-3">
-                  <span className="documents-card-eyebrow">{document.docType}</span>
+                  <span className="documents-card-eyebrow inline-flex items-center gap-1.5">
+                    {document.docType}
+                    {recentlyAdded.has(document.id) ? (
+                      <span className="documents-card-new-badge">New</span>
+                    ) : null}
+                  </span>
                   <DocumentActionButtons document={document} feedback={feedback} onUpdate={updateFeedback} />
                 </div>
                 <h3>{document.title}</h3>
