@@ -2617,6 +2617,24 @@ async def get_supabase_logs_cron(
     return get_cron(days=days, limit=limit, search=search, repo=repo, workdir=workdir)
 
 
+@app.get("/api/gbauto/agent-profiles")
+async def gbauto_agent_profiles(tenant: str = "gbautomation"):
+    from hermes_cli.gbauto_agent_profiles import load_profile_catalog
+
+    try:
+        return load_profile_catalog(tenant)
+    except Exception as exc:
+        return {
+            "ok": False,
+            "error": str(exc),
+            "source": "supabase:agent_profile_catalog",
+            "tenant": tenant,
+            "teams": [],
+            "profiles": [],
+            "routes": [],
+        }
+
+
 def _gbauto_repo_root() -> Path:
     candidates = []
     if os.environ.get("GBAUTO_REPO_ROOT"):

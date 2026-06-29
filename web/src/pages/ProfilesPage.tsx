@@ -9,10 +9,12 @@ import {
 import type { CSSProperties } from "react";
 import {
   ArrowLeft,
+  ArrowRight,
   BookOpen,
   ChevronDown,
   ExternalLink,
   FileText,
+  GitBranch,
   LayoutGrid,
   Pencil,
   Plus,
@@ -26,7 +28,7 @@ import { Link, Navigate, useParams } from "react-router-dom";
 import spinners from "unicode-animations";
 import { H2 } from "@/components/NouiTypography";
 import { api } from "@/lib/api";
-import type { ProfileInfo } from "@/lib/api";
+import type { AgentProfileCatalogResponse, AgentProfileRouteRow, AgentProfileTeamRow, ProfileInfo } from "@/lib/api";
 import { DeleteConfirmDialog } from "@/components/DeleteConfirmDialog";
 import { useToast } from "@/hooks/useToast";
 import { useConfirmDelete } from "@/hooks/useConfirmDelete";
@@ -95,6 +97,8 @@ export default function ProfilesPage() {
   const { t } = useI18n();
   const { setEnd } = usePageHeader();
   const contractsIndex = useSupabaseContractsIndex();
+  const tenant = readDashboardTenant();
+  const liveProfileCatalog = useLiveAgentProfileCatalog(tenant);
 
   // Create modal
   const [createModalOpen, setCreateModalOpen] = useState(false);
@@ -397,7 +401,12 @@ export default function ProfilesPage() {
       <ProfileLibraryTabs active={libraryView} onChange={setLibraryView} />
 
       {libraryView === "teams" && (
-        <ProfileTeamsShowcase contractsIndex={contractsIndex} tacProfiles={tacProfiles} />
+        <ProfileTeamsShowcase
+          contractsIndex={contractsIndex}
+          liveProfileCatalog={liveProfileCatalog}
+          tacProfiles={tacProfiles}
+          tenant={tenant}
+        />
       )}
 
       {libraryView === "profiles" && (
@@ -623,6 +632,137 @@ export default function ProfilesPage() {
 type ProfileLibraryView = "teams" | "profiles" | "tac" | "admin";
 type HermesProfile = (typeof gbautoLibrary.profiles)[number];
 
+function readDashboardTenant() {
+  if (typeof window === "undefined") return "jid5274";
+  return localStorage.getItem("hermes.dashboard.tenant") || "jid5274";
+}
+
+function useLiveAgentProfileCatalog(tenant: string) {
+  const [catalog, setCatalog] = useState<AgentProfileCatalogResponse | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    void api
+      .getAgentProfileCatalog(tenant)
+      .then((data) => {
+        if (!cancelled) setCatalog(data.ok ? data : null);
+      })
+      .catch(() => {
+        if (!cancelled) setCatalog(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [tenant]);
+
+  return catalog;
+}
+
+function routeMetadataValue(route: AgentProfileRouteRow, key: string) {
+  const value = route.metadata?.[key];
+  return typeof value === "string" ? value : undefined;
+}
+
+function routesForTeam(
+  team: AgentProfileTeamRow,
+  routes: readonly AgentProfileRouteRow[],
+) {
+  return routes.filter(
+    (route) =>
+      route.source_path === team.source_path ||
+      routeMetadataValue(route, "team_id") === team.team_id,
+  );
+}
+
+function formatRouteLabel(value: string) {
+  return value.replace(/_/g, " ");
+}
+
+function routeTargetLabel(route: AgentProfileRouteRow) {
+  const target =
+    route.target_profile_id ||
+    route.target_team_id ||
+    route.target_profile_key ||
+    "unassigned";
+  const policy = routeMetadataValue(route, "route_policy") ?? "";
+  const routeName = route.route_name.toLowerCase();
+  const routesToTac =
+    target === "carlos" &&
+    (policy.toLowerCase().includes("tac") ||
+      routeName.includes("coding") ||
+      routeName.includes("build") ||
+      routeName.includes("repo") ||
+      routeName.includes("deploy"));
+  return routesToTac ? "carlos -> TAC" : target;
+}
+
+function uniqueRoutes(routes: readonly AgentProfileRouteRow[]) {
+  const seen = new Set<string>();
+  return routes.filter((route) => {
+    const key = `${route.route_name}:${route.target_type}:${route.target_profile_id}:${route.target_team_id}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function ProfileRouteMap({
+  max,
+  routes,
+  title = "Live profile routes",
+}: {
+  max?: number;
+  routes: readonly AgentProfileRouteRow[];
+  title?: string;
+}) {
+  const visibleRoutes = uniqueRoutes(routes);
+  const displayedRoutes = max ? visibleRoutes.slice(0, max) : visibleRoutes;
+  const remaining = Math.max(visibleRoutes.length - displayedRoutes.length, 0);
+
+  if (!visibleRoutes.length) return null;
+
+  return (
+    <article className="profile-route-map">
+      <div className="profile-route-map-header">
+        <div>
+          <span className="library-eyebrow">Route Map</span>
+          <h3>{title}</h3>
+        </div>
+        <div className="library-tag-row">
+          <span>{visibleRoutes.length} routes</span>
+          <span>Supabase</span>
+        </div>
+      </div>
+      <div className="profile-route-flow" aria-label="Profile request routes">
+        {displayedRoutes.map((route) => {
+          const target = routeTargetLabel(route);
+          const isTacRoute = target.includes("TAC");
+          return (
+            <div
+              className={isTacRoute ? "profile-route-row routes-to-tac" : "profile-route-row"}
+              key={`${route.route_name}-${route.target_type}-${route.target_profile_id}-${route.target_team_id}`}
+            >
+              <span className="profile-route-intent">
+                <GitBranch className="h-3.5 w-3.5" />
+                {formatRouteLabel(route.route_name)}
+              </span>
+              <span className="profile-route-arrow" aria-hidden>
+                <ArrowRight className="h-3.5 w-3.5" />
+              </span>
+              <span className="profile-route-target">{target}</span>
+            </div>
+          );
+        })}
+        {remaining ? (
+          <div className="profile-route-row profile-route-more">
+            <span>{remaining} more routes indexed in Supabase</span>
+          </div>
+        ) : null}
+      </div>
+    </article>
+  );
+}
+
 const profileReports: Record<
   string,
   {
@@ -815,11 +955,23 @@ function ProfileLibraryTabs({
 
 function ProfileTeamsShowcase({
   contractsIndex,
+  liveProfileCatalog,
   tacProfiles,
+  tenant,
 }: {
   contractsIndex: SupabaseContractsIndex | null;
+  liveProfileCatalog: AgentProfileCatalogResponse | null;
   tacProfiles: readonly HermesProfile[];
+  tenant: string;
 }) {
+  const teamRouteGroups = (liveProfileCatalog?.teams ?? [])
+    .map((team) => ({
+      team,
+      routes: routesForTeam(team, liveProfileCatalog?.routes ?? []),
+    }))
+    .filter((group) => group.routes.length > 0);
+  const allRoutes = liveProfileCatalog?.routes ?? [];
+
   return (
     <section className="library-page">
       <div className="library-hero">
@@ -834,10 +986,31 @@ function ProfileTeamsShowcase({
         <div className="library-hero-stats">
           <strong>{tacProfiles.length}</strong>
           <span>profiles</span>
-          <strong>{gbautoLibrary.profileTeams.length}</strong>
-          <span>team spec</span>
+          <strong>{liveProfileCatalog?.teams.length ?? gbautoLibrary.profileTeams.length}</strong>
+          <span>teams</span>
+          <strong>{allRoutes.length}</strong>
+          <span>routes</span>
         </div>
       </div>
+
+      {teamRouteGroups.length ? (
+        <div className="profile-route-team-grid">
+          {teamRouteGroups.map(({ team, routes }) => (
+            <ProfileRouteMap
+              key={team.team_key}
+              max={8}
+              routes={routes}
+              title={`${team.display_name} routes`}
+            />
+          ))}
+        </div>
+      ) : (
+        <ProfileRouteMap
+          max={12}
+          routes={allRoutes}
+          title={`${tenant} profile routes`}
+        />
+      )}
 
       <ProfileContractPanel
         contracts={relatedContractsForProfile(contractsIndex, "tac-lead", "tac-hermes")}

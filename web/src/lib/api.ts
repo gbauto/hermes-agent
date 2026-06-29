@@ -198,6 +198,10 @@ export const api = {
     fetchJSON<{ ok: boolean }>(`/api/cron/jobs/${encodeURIComponent(id)}?profile=${encodeURIComponent(profile)}`, { method: "DELETE" }),
 
   // Profiles (minimal)
+  getAgentProfileCatalog: (tenant: string) =>
+    fetchJSON<AgentProfileCatalogResponse>(
+      `/api/gbauto/agent-profiles?tenant=${encodeURIComponent(tenant)}`,
+    ),
   getProfiles: () =>
     fetchJSON<{ profiles: ProfileInfo[] }>("/api/profiles"),
   createProfile: (body: { name: string; clone_from_default: boolean }) =>
@@ -648,6 +652,64 @@ export interface ProfileInfo {
   canopy?: boolean;
   /** Canopy mixins the profile inherits (e.g. tac-contract-shared, gbauto-style). */
   canopy_inherits?: string[];
+}
+
+export interface AgentProfileTeamRow {
+  display_name: string;
+  existing_specialist_profiles: string[];
+  indexed_at?: string | null;
+  metadata?: Record<string, unknown>;
+  orchestrator_profile?: string | null;
+  lead_profile?: string | null;
+  purpose?: string | null;
+  runtime: string;
+  source_path: string;
+  specialist_profiles: string[];
+  team_id: string;
+  team_key: string;
+  tenant: string;
+}
+
+export interface AgentProfileCatalogRow {
+  display_name: string;
+  profile_id: string;
+  profile_key: string;
+  profile_type: string;
+  route_count?: number | null;
+  route_keys?: string[];
+  runtime: string;
+  skill_count?: number | null;
+  source_kind: string;
+  source_path: string;
+  status: string;
+  team_display_name?: string | null;
+  team_id?: string | null;
+  tenant: string;
+}
+
+export interface AgentProfileRouteRow {
+  indexed_at?: string | null;
+  metadata?: Record<string, unknown>;
+  profile_route_key: string;
+  route_kind?: string | null;
+  route_name: string;
+  source_path?: string | null;
+  source_profile_key?: string | null;
+  target_profile_id?: string | null;
+  target_profile_key?: string | null;
+  target_team_id?: string | null;
+  target_type?: string | null;
+  tenant: string;
+}
+
+export interface AgentProfileCatalogResponse {
+  error?: string;
+  ok: boolean;
+  profiles: AgentProfileCatalogRow[];
+  routes: AgentProfileRouteRow[];
+  source: string;
+  teams: AgentProfileTeamRow[];
+  tenant: string;
 }
 
 export interface ModelsAnalyticsModelEntry {
