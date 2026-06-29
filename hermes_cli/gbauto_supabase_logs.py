@@ -16,6 +16,7 @@ from typing import Any, Callable, Dict, Optional
 
 MAX_DAYS = 30
 MAX_LIMIT = 500
+ALLOWED_CLIENTS = {"smoke-client", "gbautomation", "jid5274", "ecom"}
 
 _CACHE: Dict[str, tuple[float, dict[str, Any]]] = {}
 
@@ -76,6 +77,40 @@ def _enum_clause(column: str, value: Optional[str], allowed: set[str]) -> str:
     return f" and lower(coalesce({column}::text, '')) = {_sql_literal(normalized)}"
 
 
+def _client(value: Optional[str]) -> Optional[str]:
+    if not value:
+        return None
+    normalized = value.strip().lower()
+    return normalized if normalized in ALLOWED_CLIENTS else None
+
+
+def _client_clause(column: str, value: Optional[str]) -> str:
+    normalized = _client(value)
+    if not normalized:
+        return ""
+    return f" and lower(coalesce({column}::text, '')) = {_sql_literal(normalized)}"
+
+
+def _tenant_invoked_by_clause(value: Optional[str]) -> str:
+    normalized = _client(value)
+    if not normalized:
+        return ""
+    return f" and lower(coalesce(invoked_by::text, '')) = {_sql_literal(f'tenant:{normalized}')}"
+
+
+def _trace_client_clause(trace_column: str, value: Optional[str]) -> str:
+    normalized = _client(value)
+    if not normalized:
+        return ""
+    return (
+        " and exists ("
+        "select 1 from ops_run_timeline ort "
+        f"where ort.trace_id = {trace_column} "
+        f"and lower(coalesce(ort.client_slug::text, '')) = {_sql_literal(normalized)}"
+        ")"
+    )
+
+
 def _source_clause(column: str, value: Optional[str], allowed: set[str]) -> str:
     if not value or value == "all":
         return ""
@@ -125,10 +160,33 @@ def _cached(key: str, ttl_s: int, loader: Callable[[], dict[str, Any]]) -> dict[
     return payload
 
 
-def get_summary() -> dict[str, Any]:
+def get_summary(*, client: Optional[str] = None) -> dict[str, Any]:
+    normalized_client = _client(client)
+
     def load() -> dict[str, Any]:
-        rows = _run_cli(
-            """
+        if normalized_client:
+            client_sql = _sql_literal(normalized_client)
+            rows = _run_cli(
+                f"""
+                select
+                  now() as generated_at,
+                  (select count(*) from ops_run_timeline where started_at >= now() - interval '3 days' and lower(coalesce(client_slug::text, '')) = {client_sql})::int as timeline_rows,
+                  (select count(*) from ops_recent_failures where started_at >= now() - interval '14 days' and lower(coalesce(client_slug::text, '')) = {client_sql})::int as recent_failures,
+                  (select count(*) from ops_run_timeline where started_at >= now() - interval '14 days' and source_table = 'cron_runs' and lower(coalesce(client_slug::text, '')) = {client_sql})::int as cron_runs,
+                  (select count(*) from ops_run_timeline where started_at >= now() - interval '14 days' and source_table = 'cron_runs' and lower(coalesce(client_slug::text, '')) = {client_sql})::int as cron_outputs,
+                  (select count(*) from ops_run_timeline where started_at >= now() - interval '14 days' and source_table = 'host_job_runs' and lower(coalesce(client_slug::text, '')) = {client_sql})::int as host_receipts,
+                  (select count(*) from agent_log_artifacts where modified_at >= now() - interval '14 days' and lower(coalesce(client_slug::text, '')) = {client_sql})::int as log_artifacts,
+                  (select count(*) from langfuse_traces lt where trace_timestamp >= now() - interval '7 days' {_trace_client_clause("lt.trace_id", normalized_client)})::int as traces,
+                  (select coalesce(round(sum(total_cost)::numeric, 4), 0) from langfuse_traces lt where trace_timestamp >= now() - interval '7 days' {_trace_client_clause("lt.trace_id", normalized_client)}) as trace_cost,
+                  (select coalesce(sum(total_tokens), 0) from langfuse_traces lt where trace_timestamp >= now() - interval '7 days' {_trace_client_clause("lt.trace_id", normalized_client)})::int as trace_tokens,
+                  (select coalesce(sum(run_count), 0) from v_agent_trace_coverage where run_day >= current_date - interval '7 days' and lower(coalesce(client_slug::text, '')) = {client_sql})::int as obs_join_candidates,
+                  (select coalesce(sum(runs_with_trace_id), 0) from v_agent_trace_coverage where run_day >= current_date - interval '7 days' and lower(coalesce(client_slug::text, '')) = {client_sql})::int as obs_with_trace,
+                  (select coalesce(sum(runs_with_trace_mirror), 0) from v_agent_trace_coverage where run_day >= current_date - interval '7 days' and lower(coalesce(client_slug::text, '')) = {client_sql})::int as obs_langfuse_matches
+                """
+            )
+        else:
+            rows = _run_cli(
+                """
             select
               now() as generated_at,
               (select count(*) from ops_run_timeline where started_at >= now() - interval '3 days')::int as timeline_rows,
@@ -144,10 +202,11 @@ def get_summary() -> dict[str, Any]:
               (select obs_with_trace from ops_trace_coverage order by measured_at desc nulls last limit 1)::int as obs_with_trace,
               (select obs_langfuse_matches from ops_trace_coverage order by measured_at desc nulls last limit 1)::int as obs_langfuse_matches
             """
-        )
+            )
         row = rows[0] if rows else {}
         return {
             "ok": True,
+            "client": normalized_client,
             "generated_at": row.get("generated_at"),
             "windows": {"timeline_days": 3, "failure_days": 14, "trace_days": 7},
             "counts": {
@@ -170,22 +229,57 @@ def get_summary() -> dict[str, Any]:
             },
         }
 
-    return _cached("summary", 30, load)
+    return _cached(f"summary:{normalized_client or 'all'}", 30, load)
 
 
 def get_timeline(*, days: Any = 3, limit: Any = 100, status: Optional[str] = None,
                  source: Optional[str] = None, search: Optional[str] = None,
-                 repo: Optional[str] = None, workdir: Optional[str] = None) -> dict[str, Any]:
+                 repo: Optional[str] = None, workdir: Optional[str] = None,
+                 client: Optional[str] = None) -> dict[str, Any]:
     bounds = _bounds(days, limit, default_days=3)
-    key = f"timeline:{bounds.days}:{bounds.limit}:{status}:{source}:{search}:{repo}:{workdir}"
+    key = f"timeline:{bounds.days}:{bounds.limit}:{status}:{source}:{search}:{repo}:{workdir}:{_client(client)}"
 
     def load() -> dict[str, Any]:
+        if source == "skill_runs":
+            sql = f"""
+                select run_id as run_key,
+                       'skill_run' as run_type,
+                       'skill_runs' as source_table,
+                       run_id as source_id,
+                       parent_run_id as parent_run_key,
+                       'skills' as domain,
+                       skill_name as profile,
+                       replace(lower(coalesce(invoked_by::text, '')), 'tenant:', '') as client_slug,
+                       null::text as repo_slug,
+                       status as raw_status,
+                       case
+                         when lower(coalesce(status::text, '')) in ('ok', 'success', 'succeeded', 'done') then 'succeeded'
+                         when lower(coalesce(status::text, '')) in ('failed', 'error', 'blocked') then 'failed'
+                         else 'unknown'
+                       end as status_family,
+                       skill_name as title,
+                       started_at,
+                       ended_at,
+                       elapsed_ms as duration_ms,
+                       trace_id
+                from skill_runs
+                where started_at >= now() - interval '{bounds.days} days'
+                {_tenant_invoked_by_clause(client)}
+                {_contains_clause(["skill_name", "skill_path", "skill_category"], repo)}
+                {_contains_clause(["skill_path"], workdir)}
+                {_search_clause(["run_id", "skill_name", "status", "invoked_by", "skill_path", "skill_category", "trace_id"], search)}
+                order by started_at desc nulls last
+                limit {bounds.limit}
+            """
+            return {"ok": True, "rows": _run_cli(sql), "days": bounds.days, "limit": bounds.limit}
+
         sql = f"""
             select run_key, run_type, source_table, source_id, parent_run_key,
                    domain, profile, client_slug, repo_slug, raw_status, status_family,
                    title, started_at, ended_at, duration_ms, trace_id
             from ops_run_timeline
             where started_at >= now() - interval '{bounds.days} days'
+            {_client_clause("client_slug", client)}
             {_enum_clause("status_family", status, {"failed", "succeeded", "unknown"})}
             {_source_clause("source_table", source, {"agent_runs", "browser_control_runs", "cron_runs", "skill_runs", "host_job_runs"})}
             {_contains_clause(["repo_slug"], repo)}
@@ -200,9 +294,10 @@ def get_timeline(*, days: Any = 3, limit: Any = 100, status: Optional[str] = Non
 
 
 def get_failures(*, days: Any = 14, limit: Any = 100, search: Optional[str] = None,
-                 repo: Optional[str] = None, workdir: Optional[str] = None) -> dict[str, Any]:
+                 repo: Optional[str] = None, workdir: Optional[str] = None,
+                 client: Optional[str] = None) -> dict[str, Any]:
     bounds = _bounds(days, limit, default_days=14)
-    key = f"failures:{bounds.days}:{bounds.limit}:{search}:{repo}:{workdir}"
+    key = f"failures:{bounds.days}:{bounds.limit}:{search}:{repo}:{workdir}:{_client(client)}"
 
     def load() -> dict[str, Any]:
         sql = f"""
@@ -211,6 +306,7 @@ def get_failures(*, days: Any = 14, limit: Any = 100, search: Optional[str] = No
                    title, started_at, ended_at, duration_ms, trace_id
             from ops_recent_failures
             where started_at >= now() - interval '{bounds.days} days'
+            {_client_clause("client_slug", client)}
             {_contains_clause(["repo_slug"], repo)}
             {_contains_clause(["title"], workdir)}
             {_search_clause(["run_key", "source_id", "profile", "client_slug", "repo_slug", "title", "trace_id"], search)}
@@ -223,9 +319,10 @@ def get_failures(*, days: Any = 14, limit: Any = 100, search: Optional[str] = No
 
 
 def get_artifacts(*, days: Any = 14, limit: Any = 100, search: Optional[str] = None,
-                  repo: Optional[str] = None, workdir: Optional[str] = None) -> dict[str, Any]:
+                  repo: Optional[str] = None, workdir: Optional[str] = None,
+                  client: Optional[str] = None) -> dict[str, Any]:
     bounds = _bounds(days, limit, default_days=14)
-    key = f"artifacts:{bounds.days}:{bounds.limit}:{search}:{repo}:{workdir}"
+    key = f"artifacts:{bounds.days}:{bounds.limit}:{search}:{repo}:{workdir}:{_client(client)}"
 
     def load() -> dict[str, Any]:
         sql = f"""
@@ -234,6 +331,7 @@ def get_artifacts(*, days: Any = 14, limit: Any = 100, search: Optional[str] = N
                    captured_bytes, metadata, first_seen_at, last_synced_at
             from agent_log_artifacts
             where modified_at >= now() - interval '{bounds.days} days'
+            {_client_clause("client_slug", client)}
             {_contains_clause(["repo_slug"], repo)}
             {_contains_clause(["path"], workdir)}
             {_search_clause(["source_id", "client_slug", "repo_slug", "agent", "category", "source_host", "path", "basename"], search)}
@@ -246,9 +344,10 @@ def get_artifacts(*, days: Any = 14, limit: Any = 100, search: Optional[str] = N
 
 
 def get_cron(*, days: Any = 14, limit: Any = 100, search: Optional[str] = None,
-             repo: Optional[str] = None, workdir: Optional[str] = None) -> dict[str, Any]:
+             repo: Optional[str] = None, workdir: Optional[str] = None,
+             client: Optional[str] = None) -> dict[str, Any]:
     bounds = _bounds(days, limit, default_days=14)
-    key = f"cron:{bounds.days}:{bounds.limit}:{search}:{repo}:{workdir}"
+    key = f"cron:{bounds.days}:{bounds.limit}:{search}:{repo}:{workdir}:{_client(client)}"
 
     def load() -> dict[str, Any]:
         rollup_sql = f"""
@@ -258,6 +357,7 @@ def get_cron(*, days: Any = 14, limit: Any = 100, search: Optional[str] = None,
                    max(started_at) as latest_started_at
             from cron_runs
             where started_at >= now() - interval '{bounds.days} days'
+            {_contains_clause(["cron_name", "host"], _client(client))}
             {_contains_clause(["cron_name", "host"], repo)}
             {_contains_clause(["cron_name", "host"], workdir)}
             {_search_clause(["cron_name", "host"], search)}
@@ -273,6 +373,7 @@ def get_cron(*, days: Any = 14, limit: Any = 100, search: Optional[str] = None,
             from cron_run_outputs o
             left join cron_runs c on c.tick_id = o.tick_id
             where (c.started_at >= now() - interval '{bounds.days} days' or c.started_at is null)
+            {_contains_clause(["c.cron_name", "o.branch", "o.pr_url", "o.agent_summary"], _client(client))}
             {_contains_clause(["c.cron_name", "o.branch", "o.pr_url"], repo)}
             {_contains_clause(["c.cron_name", "o.branch", "o.pr_url", "o.agent_summary"], workdir)}
             {_search_clause(["c.cron_name", "o.issue_id", "o.status", "o.branch", "o.pr_url", "o.agent_summary", "o.stderr_tail"], search)}
@@ -292,9 +393,9 @@ def get_cron(*, days: Any = 14, limit: Any = 100, search: Optional[str] = None,
 
 def get_host_jobs(*, days: Any = 14, limit: Any = 100, status: Optional[str] = None,
                   search: Optional[str] = None, repo: Optional[str] = None,
-                  workdir: Optional[str] = None) -> dict[str, Any]:
+                  workdir: Optional[str] = None, client: Optional[str] = None) -> dict[str, Any]:
     bounds = _bounds(days, limit, default_days=14)
-    key = f"host:{bounds.days}:{bounds.limit}:{status}:{search}:{repo}:{workdir}"
+    key = f"host:{bounds.days}:{bounds.limit}:{status}:{search}:{repo}:{workdir}:{_client(client)}"
 
     def load() -> dict[str, Any]:
         sql = f"""
@@ -303,6 +404,7 @@ def get_host_jobs(*, days: Any = 14, limit: Any = 100, status: Optional[str] = N
                    stdout_bytes, stderr_bytes, receipt_path, inserted_at
             from host_job_runs
             where created_at >= now() - interval '{bounds.days} days'
+            {_contains_clause(["working_directory", "receipt_path", "task_name"], _client(client))}
             {_enum_clause("status", status, {"ok", "failed", "error"})}
             {_contains_clause(["working_directory", "receipt_path"], repo)}
             {_contains_clause(["working_directory"], workdir)}
@@ -316,17 +418,19 @@ def get_host_jobs(*, days: Any = 14, limit: Any = 100, status: Optional[str] = N
 
 
 def get_traces(*, days: Any = 7, limit: Any = 100, search: Optional[str] = None,
-               repo: Optional[str] = None, workdir: Optional[str] = None) -> dict[str, Any]:
+               repo: Optional[str] = None, workdir: Optional[str] = None,
+               client: Optional[str] = None) -> dict[str, Any]:
     bounds = _bounds(days, limit, default_days=7)
-    key = f"traces:{bounds.days}:{bounds.limit}:{search}:{repo}:{workdir}"
+    key = f"traces:{bounds.days}:{bounds.limit}:{search}:{repo}:{workdir}:{_client(client)}"
 
     def load() -> dict[str, Any]:
         traces_sql = f"""
             select trace_id, trace_name, trace_timestamp, tags, runtime, agent,
                    profile, latency_sec, total_cost, input_tokens, output_tokens,
                    total_tokens, observation_count, langfuse_url, last_synced_at
-            from langfuse_traces
+            from langfuse_traces lt
             where trace_timestamp >= now() - interval '{bounds.days} days'
+            {_trace_client_clause("lt.trace_id", client)}
             {_contains_clause(["tags::text", "trace_name"], repo)}
             {_contains_clause(["tags::text", "trace_name"], workdir)}
             {_search_clause(["trace_id", "trace_name", "runtime", "agent", "profile", "langfuse_url"], search)}
@@ -340,6 +444,7 @@ def get_traces(*, days: Any = 7, limit: Any = 100, search: Optional[str] = None,
                    trace_name, trace_timestamp, has_langfuse_trace, match_key
             from obs_langfuse_trace_join
             where coalesce(has_langfuse_trace, false) = false
+            {_client_clause("tenant", client)}
             {_contains_clause(["repo"], repo)}
             {_contains_clause(["repo", "branch"], workdir)}
             {_search_clause(["session_id", "task_id", "run_id", "trace_id", "board", "tenant", "profile", "repo", "branch"], search)}
@@ -352,6 +457,7 @@ def get_traces(*, days: Any = 7, limit: Any = 100, search: Optional[str] = None,
                    trace_id_coverage_pct, trace_mirror_coverage_pct
             from v_agent_trace_coverage
             where true
+            {_client_clause("client_slug", client)}
             {_contains_clause(["repo_slug"], repo)}
             order by run_day desc nulls last, run_count desc nulls last
             limit 100

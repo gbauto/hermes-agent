@@ -32,6 +32,10 @@
   --gb-green: #4f9d69;
   --gb-amber: #c08a3e;
   --gb-blue: #3d6ea8;
+  --gb-rgb-cyan: #77dcea;
+  --gb-rgb-violet: #9a7ad8;
+  --gb-rgb-magenta: #d86cb8;
+  --gb-silver-depth: rgba(184, 187, 184, 0.7);
 
   /* Type pairing. */
   --gb-font-sans: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
@@ -44,6 +48,12 @@
   --gb-radius: 14px;
   --gb-radius-lg: 18px;
   --gb-pill: 999px;
+}
+
+@property --gb-gradient-angle {
+  syntax: "<angle>";
+  initial-value: 0deg;
+  inherits: false;
 }
 
 /* ------------------------------------------------------------------ */
@@ -84,6 +94,200 @@
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
   border: 1px solid rgba(214, 212, 200, 0.6);
+}
+
+.gb-silver-card,
+.gb-icon-card,
+.gb-glass-card,
+.gbhub-stat-card,
+.gbhub-spoke-card,
+.gbhub-repo-card,
+.gbauto-ops-card,
+.supabase-stat-card,
+.supabase-contract-card,
+.supabase-table-card,
+.library-team-card,
+.library-prompt-card,
+.aura-skill-card,
+.profile-feature-card,
+.profile-index-card,
+.tac-variant-card {
+  --gb-edge-width: 2px;
+  --gb-shine-alpha: 0.24;
+  --gb-card-glow: rgba(217, 119, 87, 0.14);
+  --gb-hover-fill:
+    radial-gradient(circle at 18% 10%, rgba(119, 220, 234, 0.28), transparent 44%) padding-box,
+    radial-gradient(circle at 82% 18%, rgba(154, 122, 216, 0.24), transparent 46%) padding-box,
+    radial-gradient(circle at 42% 92%, rgba(216, 108, 184, 0.16), transparent 48%) padding-box,
+    linear-gradient(145deg, rgba(239, 247, 246, 0.82), rgba(232, 226, 239, 0.72) 58%, rgba(230, 228, 217, 0.64)) padding-box;
+  --gb-edge-gradient:
+    conic-gradient(
+      from var(--gb-gradient-angle),
+      rgba(214, 212, 200, 0.74) 0 16%,
+      rgba(119, 220, 234, 0.24) 26%,
+      rgba(217, 119, 87, 0.34) 42%,
+      rgba(232, 235, 232, 0.76) 56%,
+      rgba(154, 122, 216, 0.22) 70%,
+      rgba(214, 212, 200, 0.68) 86% 100%
+    );
+  position: relative;
+  isolation: isolate;
+  border-width: var(--gb-edge-width);
+  border-style: solid;
+  border-color: rgba(214, 212, 200, 0.72);
+  border-radius: var(--gb-radius, 14px);
+  background:
+    linear-gradient(145deg, rgba(255, 255, 255, 0.72), rgba(230, 228, 217, 0.48)) padding-box,
+    linear-gradient(145deg, rgba(255, 255, 255, 0.8), rgba(214, 212, 200, 0.62)) border-box;
+  backdrop-filter: blur(16px) saturate(1.18);
+  -webkit-backdrop-filter: blur(16px) saturate(1.18);
+  box-shadow:
+    0 22px 60px -34px rgba(25, 25, 25, 0.38),
+    0 12px 30px -24px rgba(217, 119, 87, 0.26),
+    inset 0 1px 0 rgba(255, 255, 255, 0.72),
+    inset 0 -18px 38px rgba(214, 212, 200, 0.2);
+  overflow: hidden;
+  transform: translateZ(0);
+  transition:
+    transform 240ms ease,
+    box-shadow 240ms ease,
+    border-color 240ms ease,
+    background 240ms ease;
+}
+
+.gb-silver-card::before,
+.gb-icon-card::before,
+.gb-glass-card::before,
+.gbhub-stat-card::before,
+.gbhub-spoke-card::before,
+.gbhub-repo-card::before,
+.gbauto-ops-card::before,
+.supabase-stat-card::before,
+.supabase-contract-card::before,
+.supabase-table-card::before,
+.library-team-card::before,
+.library-prompt-card::before,
+.aura-skill-card::before,
+.profile-feature-card::before,
+.profile-index-card::before,
+.tac-variant-card::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: inherit;
+  opacity: 0;
+  background:
+    radial-gradient(circle at 82% 12%, rgba(119, 220, 234, var(--gb-shine-alpha)), transparent 34%),
+    radial-gradient(circle at 16% 88%, rgba(216, 108, 184, calc(var(--gb-shine-alpha) * 0.72)), transparent 38%);
+  filter: blur(0.2px);
+  transition: opacity 220ms ease;
+}
+
+.gb-silver-card::after,
+.gb-icon-card::after,
+.gb-glass-card::after,
+.gbhub-stat-card::after,
+.gbhub-spoke-card::after,
+.gbhub-repo-card::after,
+.gbauto-ops-card::after,
+.supabase-stat-card::after,
+.supabase-contract-card::after,
+.supabase-table-card::after,
+.library-team-card::after,
+.library-prompt-card::after,
+.aura-skill-card::after,
+.profile-feature-card::after,
+.profile-index-card::after,
+.tac-variant-card::after {
+  content: "";
+  position: absolute;
+  inset: var(--gb-edge-width);
+  z-index: -1;
+  border-radius: calc(var(--gb-radius, 14px) - var(--gb-edge-width));
+  background:
+    radial-gradient(circle at 20% 0%, rgba(255, 255, 255, 0.75), transparent 34%),
+    radial-gradient(circle at 85% 18%, rgba(119, 220, 234, 0.14), transparent 26%),
+    radial-gradient(circle at 18% 88%, rgba(216, 108, 184, 0.1), transparent 30%),
+    linear-gradient(145deg, rgba(255, 255, 255, 0.52), rgba(230, 228, 217, 0.62));
+}
+
+.gb-silver-card:hover,
+.gb-silver-card.is-active,
+.gb-icon-card:hover,
+.gb-icon-card.is-active,
+.gb-glass-card:hover,
+.gb-glass-card.is-active,
+.gbhub-stat-card:hover,
+.gbhub-spoke-card:hover,
+.gbhub-repo-card:hover,
+.gbauto-ops-card:hover,
+.supabase-stat-card:hover,
+.supabase-contract-card:hover,
+.supabase-table-card:hover,
+.library-team-card:hover,
+.library-prompt-card:hover,
+.aura-skill-card:hover,
+.profile-feature-card:hover,
+.profile-index-card:hover,
+.tac-variant-card:hover {
+  border-color: transparent;
+  background:
+    var(--gb-hover-fill),
+    var(--gb-edge-gradient) border-box;
+  transform: translateY(-4px);
+  box-shadow:
+    0 2px 0 var(--gb-silver-depth),
+    0 30px 80px -38px rgba(25, 25, 25, 0.44),
+    0 16px 42px -28px var(--gb-card-glow),
+    0 0 0 1px rgba(255, 255, 255, 0.45) inset,
+    inset 0 1px 0 rgba(255, 255, 255, 0.78);
+  animation: gb-border-spin 3s linear infinite;
+}
+
+.gb-silver-card:hover::before,
+.gb-silver-card.is-active::before,
+.gb-icon-card:hover::before,
+.gb-icon-card.is-active::before,
+.gb-glass-card:hover::before,
+.gb-glass-card.is-active::before,
+.gbhub-stat-card:hover::before,
+.gbhub-spoke-card:hover::before,
+.gbhub-repo-card:hover::before,
+.gbauto-ops-card:hover::before,
+.supabase-stat-card:hover::before,
+.supabase-contract-card:hover::before,
+.supabase-table-card:hover::before,
+.library-team-card:hover::before,
+.library-prompt-card:hover::before,
+.aura-skill-card:hover::before,
+.profile-feature-card:hover::before,
+.profile-index-card:hover::before,
+.tac-variant-card:hover::before {
+  opacity: 1;
+}
+
+@keyframes gb-border-spin {
+  from { --gb-gradient-angle: 0deg; }
+  to { --gb-gradient-angle: 360deg; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .gb-silver-card,
+  .gb-icon-card,
+  .gb-glass-card {
+    animation: none !important;
+    transition-duration: 0.01ms !important;
+  }
+
+  .gb-silver-card:hover,
+  .gb-silver-card.is-active,
+  .gb-icon-card:hover,
+  .gb-icon-card.is-active,
+  .gb-glass-card:hover,
+  .gb-glass-card.is-active {
+    transform: none;
+  }
 }
 
 .gb-pill {

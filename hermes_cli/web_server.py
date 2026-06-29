@@ -2545,10 +2545,10 @@ async def get_logs(
 
 
 @app.get("/api/logs/supabase/summary")
-async def get_supabase_logs_summary():
+async def get_supabase_logs_summary(client: Optional[str] = None):
     from hermes_cli.gbauto_supabase_logs import get_summary
 
-    return get_summary()
+    return get_summary(client=client)
 
 
 @app.get("/api/gbauto/chat")
@@ -2578,6 +2578,101 @@ async def gbauto_chat_send(request: Request):
         return {"ok": False, "error": str(exc)}
 
 
+class GbautoFeedbackBody(BaseModel):
+    message: str
+    route: Optional[str] = None
+    page_url: Optional[str] = None
+    client_slug: str = "gbautomation"
+    board_slug: str = "gbautomation"
+    feedback_type: str = "website_feedback"
+    reporter_email: Optional[str] = None
+    reporter_name: Optional[str] = None
+    metadata: Optional[dict[str, Any]] = None
+
+
+class GbautoFeedbackPromoteBody(BaseModel):
+    board_slug: Optional[str] = None
+    status: str = "new"
+    limit: int = 25
+    assignee: Optional[str] = "tac-director"
+    priority: int = 60
+
+
+@app.get("/api/gbauto/feedback")
+async def gbauto_feedback_read(
+    status: str = "new",
+    limit: int = 50,
+    board_slug: Optional[str] = None,
+    client_slug: Optional[str] = None,
+):
+    from hermes_cli.gbauto_feedback import load_feedback
+
+    try:
+        return load_feedback(
+            status=status,
+            limit=limit,
+            board_slug=board_slug,
+            client_slug=client_slug,
+        )
+    except Exception as exc:
+        return {"ok": False, "error": str(exc), "rows": []}
+
+
+@app.post("/api/gbauto/feedback")
+async def gbauto_feedback_submit(payload: GbautoFeedbackBody, request: Request):
+    from hermes_cli.gbauto_feedback import submit_feedback
+
+    try:
+        return submit_feedback(
+            message=payload.message,
+            route=payload.route,
+            page_url=payload.page_url,
+            client_slug=payload.client_slug,
+            board_slug=payload.board_slug,
+            feedback_type=payload.feedback_type,
+            reporter_email=payload.reporter_email,
+            reporter_name=payload.reporter_name,
+            user_agent=request.headers.get("user-agent"),
+            metadata=payload.metadata,
+        )
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)}
+
+
+@app.post("/api/gbauto/feedback/promote")
+async def gbauto_feedback_promote(payload: GbautoFeedbackPromoteBody):
+    from hermes_cli.gbauto_feedback import promote_feedback_to_kanban
+
+    try:
+        return promote_feedback_to_kanban(
+            board_slug=payload.board_slug,
+            status=payload.status,
+            limit=payload.limit,
+            assignee=payload.assignee,
+            priority=payload.priority,
+        )
+    except Exception as exc:
+        return {"ok": False, "error": str(exc), "results": []}
+
+
+@app.get("/api/gbauto/agent-profiles")
+async def gbauto_agent_profiles(tenant: str = "gbautomation"):
+    from hermes_cli.gbauto_agent_profiles import load_profile_catalog
+
+    try:
+        return load_profile_catalog(tenant)
+    except Exception as exc:
+        return {
+            "ok": False,
+            "error": str(exc),
+            "source": "supabase:agent_profile_catalog",
+            "tenant": tenant,
+            "teams": [],
+            "profiles": [],
+            "routes": [],
+        }
+
+
 @app.get("/api/logs/supabase/timeline")
 async def get_supabase_logs_timeline(
     days: int = 3,
@@ -2587,6 +2682,7 @@ async def get_supabase_logs_timeline(
     search: Optional[str] = None,
     repo: Optional[str] = None,
     workdir: Optional[str] = None,
+    client: Optional[str] = None,
 ):
     from hermes_cli.gbauto_supabase_logs import get_timeline
 
@@ -2598,6 +2694,7 @@ async def get_supabase_logs_timeline(
         search=search,
         repo=repo,
         workdir=workdir,
+        client=client,
     )
 
 
@@ -2608,10 +2705,11 @@ async def get_supabase_logs_failures(
     search: Optional[str] = None,
     repo: Optional[str] = None,
     workdir: Optional[str] = None,
+    client: Optional[str] = None,
 ):
     from hermes_cli.gbauto_supabase_logs import get_failures
 
-    return get_failures(days=days, limit=limit, search=search, repo=repo, workdir=workdir)
+    return get_failures(days=days, limit=limit, search=search, repo=repo, workdir=workdir, client=client)
 
 
 @app.get("/api/logs/supabase/artifacts")
@@ -2621,10 +2719,11 @@ async def get_supabase_logs_artifacts(
     search: Optional[str] = None,
     repo: Optional[str] = None,
     workdir: Optional[str] = None,
+    client: Optional[str] = None,
 ):
     from hermes_cli.gbauto_supabase_logs import get_artifacts
 
-    return get_artifacts(days=days, limit=limit, search=search, repo=repo, workdir=workdir)
+    return get_artifacts(days=days, limit=limit, search=search, repo=repo, workdir=workdir, client=client)
 
 
 @app.get("/api/logs/supabase/cron")
@@ -2634,10 +2733,11 @@ async def get_supabase_logs_cron(
     search: Optional[str] = None,
     repo: Optional[str] = None,
     workdir: Optional[str] = None,
+    client: Optional[str] = None,
 ):
     from hermes_cli.gbauto_supabase_logs import get_cron
 
-    return get_cron(days=days, limit=limit, search=search, repo=repo, workdir=workdir)
+    return get_cron(days=days, limit=limit, search=search, repo=repo, workdir=workdir, client=client)
 
 
 @app.get("/api/logs/supabase/host-jobs")
@@ -2648,6 +2748,7 @@ async def get_supabase_logs_host_jobs(
     search: Optional[str] = None,
     repo: Optional[str] = None,
     workdir: Optional[str] = None,
+    client: Optional[str] = None,
 ):
     from hermes_cli.gbauto_supabase_logs import get_host_jobs
 
@@ -2658,6 +2759,7 @@ async def get_supabase_logs_host_jobs(
         search=search,
         repo=repo,
         workdir=workdir,
+        client=client,
     )
 
 
@@ -2668,10 +2770,11 @@ async def get_supabase_logs_traces(
     search: Optional[str] = None,
     repo: Optional[str] = None,
     workdir: Optional[str] = None,
+    client: Optional[str] = None,
 ):
     from hermes_cli.gbauto_supabase_logs import get_traces
 
-    return get_traces(days=days, limit=limit, search=search, repo=repo, workdir=workdir)
+    return get_traces(days=days, limit=limit, search=search, repo=repo, workdir=workdir, client=client)
 
 
 # ---------------------------------------------------------------------------
@@ -2895,8 +2998,22 @@ def _profile_attr(info, name: str, default: Any = None) -> Any:
         return default
 
 
+def _annotate_canopy_profile(d: Dict[str, Any]) -> Dict[str, Any]:
+    """Earmark a profile dict with its Canopy composition (best-effort, never raises)."""
+    inherits = None
+    try:
+        from hermes_cli import canopy_xref
+
+        inherits = canopy_xref.profile_canopy(d.get("name", ""))
+    except Exception:
+        inherits = None
+    d["canopy"] = bool(inherits)
+    d["canopy_inherits"] = inherits or []
+    return d
+
+
 def _profile_to_dict(info) -> Dict[str, Any]:
-    return {
+    return _annotate_canopy_profile({
         "name": _profile_attr(info, "name", ""),
         "path": str(_profile_attr(info, "path", "")),
         "is_default": bool(_profile_attr(info, "is_default", False)),
@@ -2904,7 +3021,7 @@ def _profile_to_dict(info) -> Dict[str, Any]:
         "provider": _profile_attr(info, "provider"),
         "has_env": bool(_profile_attr(info, "has_env", False)),
         "skill_count": int(_profile_attr(info, "skill_count", 0) or 0),
-    }
+    })
 
 
 def _fallback_profile_dicts(profiles_mod) -> List[Dict[str, Any]]:
@@ -2944,7 +3061,7 @@ def _fallback_profile_dicts(profiles_mod) -> List[Dict[str, Any]]:
                 "skill_count": _safe(lambda entry=entry: profiles_mod._count_skills(entry), 0),
             })
 
-    return profiles
+    return [_annotate_canopy_profile(p) for p in profiles]
 
 
 def _resolve_profile_dir(name: str) -> Path:
@@ -3137,8 +3254,13 @@ async def get_skills():
     config = load_config()
     disabled = get_disabled_skills(config)
     skills = _find_all_skills(skip_disabled=True)
+    try:
+        from hermes_cli import canopy_xref
+    except Exception:
+        canopy_xref = None
     for s in skills:
         s["enabled"] = s["name"] not in disabled
+        s["canopy"] = bool(canopy_xref and canopy_xref.skill_is_canopy(s.get("name", "")))
     return skills
 
 

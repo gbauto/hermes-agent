@@ -4,6 +4,7 @@ import { ListItem } from "@nous-research/ui/ui/components/list-item";
 import { Spinner } from "@nous-research/ui/ui/components/spinner";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
+import { useModalBehavior } from "@/hooks/useModalBehavior";
 import type { GatewayClient } from "@/lib/gatewayClient";
 import { Check, Search, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -127,18 +128,6 @@ export function ModelPickerDialog(props: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Esc closes.
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        e.preventDefault();
-        onClose();
-      }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
-
   const selectedProvider = useMemo(
     () => providers.find((p) => p.slug === selectedSlug) ?? null,
     [providers, selectedSlug],
@@ -197,6 +186,16 @@ export function ModelPickerDialog(props: Props) {
     }
   };
 
+  const dialogRef = useModalBehavior({
+    open: true,
+    onClose,
+    onSubmit: () => {
+      void confirm();
+    },
+    canSubmit: canConfirm,
+    focusSelector: "input",
+  });
+
   // Portal to document.body: the main dashboard column in App.tsx is
   // `relative z-2`, which creates a stacking context that traps fixed
   // descendants below the app sidebar (z-50). Without the portal this
@@ -206,6 +205,7 @@ export function ModelPickerDialog(props: Props) {
   // Toast.tsx for the same pattern.
   return createPortal(
     <div
+      ref={dialogRef}
       className="fixed inset-0 z-[100] flex items-center justify-center bg-background/85 backdrop-blur-sm p-4"
       onClick={(e) => e.target === e.currentTarget && onClose()}
       role="dialog"

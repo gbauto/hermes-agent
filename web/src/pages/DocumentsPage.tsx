@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import {
   Archive,
+  CalendarDays,
   Check,
   ExternalLink,
   FileText,
@@ -19,6 +20,7 @@ import { Badge } from "@nous-research/ui/ui/components/badge";
 import { FloatingReviewPanel } from "@/components/FloatingReviewPanel";
 import { useModalBehavior } from "@/hooks/useModalBehavior";
 import { gbautoDocuments, gbautoDocumentsGeneratedAt } from "@/generated/gbautoDocuments";
+import { tenantOption, useTenant } from "@/lib/tenant";
 import { PluginSlot } from "@/plugins";
 
 interface DocumentArtifact {
@@ -60,6 +62,74 @@ function formatDate(value: string) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "Unknown date";
   return new Intl.DateTimeFormat(undefined, { dateStyle: "medium" }).format(date);
+}
+
+function formatDateKey(dateKey: string) {
+  if (dateKey === "unknown") return "Unknown";
+  const date = new Date(`${dateKey}T12:00:00`);
+  if (Number.isNaN(date.getTime())) return dateKey;
+  return new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric" }).format(date);
+}
+
+function documentTime(document: DocumentArtifact) {
+  const ms = new Date(document.modifiedAt || document.generatedAt || "").getTime();
+  return Number.isNaN(ms) ? 0 : ms;
+}
+
+function documentDateKey(document: DocumentArtifact) {
+  const ms = documentTime(document);
+  if (!ms) return "unknown";
+  return new Date(ms).toISOString().slice(0, 10);
+}
+
+const TENANT_ALIASES: Record<string, string[]> = {
+  ecom: ["ecom", "the-mall", "the mall", "mall-client", "vans"],
+  jid5274: ["jid5274", "jason-diaz", "jason diaz", "carlos", "pmc"],
+  "smoke-client": ["smoke-client", "smoke client", "smoke_client"],
+};
+
+const SHARED_ALIASES = ["gbautomation", "gb-automation", "gb automation", "gbauto"];
+
+function tenantSearchBlob(document: DocumentArtifact) {
+  return [
+    document.id,
+    document.title,
+    document.description,
+    document.group,
+    document.sourcePath,
+    document.publicPath,
+    document.taxonomy,
+    document.docType,
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .replace(/\\/g, "/")
+    .toLowerCase();
+}
+
+function matchesAnyAlias(blob: string, aliases: string[]) {
+  return aliases.some((alias) => blob.includes(alias));
+}
+
+function documentMatchesTenant(document: DocumentArtifact, tenant: string) {
+  const blob = tenantSearchBlob(document);
+  if (tenant === "gbautomation") {
+    const matchesClientTenant = Object.values(TENANT_ALIASES).some((aliases) => matchesAnyAlias(blob, aliases));
+    return matchesAnyAlias(blob, SHARED_ALIASES) || !matchesClientTenant;
+  }
+  return matchesAnyAlias(blob, TENANT_ALIASES[tenant] ?? [tenant]);
+}
+
+function dedupeDocuments(source: DocumentArtifact[]) {
+  const byArtifact = new Map<string, DocumentArtifact>();
+  for (const document of source) {
+    const key = document.sourcePath || document.publicPath || document.id;
+    const existing = byArtifact.get(key);
+    if (!existing || documentTime(document) >= documentTime(existing)) {
+      byArtifact.set(key, document);
+    }
+  }
+  return Array.from(byArtifact.values());
 }
 
 function formatSize(bytes: number) {
@@ -213,14 +283,13 @@ function ReportReviewModal({
   onSubmit: (document: DocumentArtifact) => void;
   onUpdate: (document: DocumentArtifact, partial: Partial<DocumentFeedback>) => void;
 }) {
-  const modalRef = useModalBehavior({ open: true, onClose });
-  const commentRef = useRef<HTMLTextAreaElement>(null);
+  const modalRef = useModalBehavior({
+    open: true,
+    onClose,
+    onSubmit: () => onSubmit(document),
+    focusSelector: "textarea",
+  });
   const titleId = `documents-report-modal-title-${document.id}`;
-
-  useEffect(() => {
-    const timer = window.setTimeout(() => commentRef.current?.focus(), 120);
-    return () => window.clearTimeout(timer);
-  }, [document.id]);
 
   return createPortal(
     <div
@@ -274,7 +343,6 @@ function ReportReviewModal({
           <label className="documents-comment-control">
             <span><MessageSquare className="h-3.5 w-3.5" /> Comments</span>
             <textarea
-              ref={commentRef}
               onChange={(event) => onUpdate(document, { comment: event.target.value })}
               placeholder="Add review notes. This is staged locally until the Supabase CRUD endpoint is wired."
               value={feedback.comment}
@@ -298,9 +366,19 @@ function ReportReviewModal({
 }
 
 export default function DocumentsPage() {
+  const activeTenant = useTenant();
+  const activeTenantOption = tenantOption(activeTenant);
   const [activeDocType, setActiveDocType] = useState("All");
   const [activeTaxonomy, setActiveTaxonomy] = useState("All");
   const [activeGroup, setActiveGroup] = useState("All");
+  const [activeDate, setActiveDate] = useState("All");
+  const [query, setQuery] = useState("");
+  const [showNewOnly, setShowNewOnly] = useState(false);
+  // Seed from the bundled static index, then refresh at runtime from
+  // /gbauto-documents/index.json so artifacts added by the nightly diff job
+  // appear on a browser refresh without rebuilding the SPA.
+  const [docs, setDocs] = useState<DocumentArtifact[]>(documents);
+  const [recentlyAdded, setRecentlyAdded] = useState<Set<string>>(new Set());
   const [selectedDocumentId, setSelectedDocumentId] = useState<string | null>(documents[0]?.id ?? null);
   const [modalDocumentId, setModalDocumentId] = useState<string | null>(null);
   const [feedbackByDocument, setFeedbackByDocument] = useState<Record<string, DocumentFeedback>>(() => {
@@ -332,36 +410,120 @@ export default function DocumentsPage() {
     }
   }, [feedbackByDocument]);
 
-  const docTypes = useMemo(() => ["All", ...Array.from(new Set(documents.map((document) => document.docType)))], [documents]);
-  const taxonomies = useMemo(() => ["All", ...Array.from(new Set(documents.map((document) => document.taxonomy)))], [documents]);
-  const groups = useMemo(
-    () => ["All", ...Array.from(new Set(documents.map((document) => document.group))).slice(0, 16)],
-    [documents],
+  // Pull the freshly-generated index at runtime. The nightly diff job rewrites
+  // index.json (and stamps `recentlyAdded`), so this surfaces new artifacts
+  // without an SPA rebuild. Falls back silently to the bundled static index.
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/gbauto-documents/index.json", { cache: "no-store" })
+      .then((response) => (response.ok ? response.json() : null))
+      .then((data) => {
+        if (cancelled || !data || !Array.isArray(data.artifacts)) return;
+        setDocs((data.artifacts as DocumentArtifact[]).map((document) => ({ ...document })));
+        if (Array.isArray(data.recentlyAdded)) {
+          setRecentlyAdded(new Set(data.recentlyAdded as string[]));
+        }
+      })
+      .catch(() => {
+        // Offline / file:// / first build before index.json exists — keep static.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    setActiveDocType("All");
+    setActiveTaxonomy("All");
+    setActiveGroup("All");
+    setActiveDate("All");
+  }, [activeTenant]);
+
+  const dedupedDocs = useMemo(() => dedupeDocuments(docs), [docs]);
+  const duplicateCount = Math.max(0, docs.length - dedupedDocs.length);
+  const tenantScopedDocs = useMemo(
+    () => dedupedDocs.filter((document) => documentMatchesTenant(document, activeTenant)),
+    [activeTenant, dedupedDocs],
   );
+  const docTypes = useMemo(() => ["All", ...Array.from(new Set(tenantScopedDocs.map((document) => document.docType)))], [tenantScopedDocs]);
+  const taxonomies = useMemo(() => ["All", ...Array.from(new Set(tenantScopedDocs.map((document) => document.taxonomy)))], [tenantScopedDocs]);
+  const groups = useMemo(
+    () => ["All", ...Array.from(new Set(tenantScopedDocs.map((document) => document.group))).slice(0, 16)],
+    [tenantScopedDocs],
+  );
+  const dateOptions = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const document of tenantScopedDocs) {
+      const dateKey = documentDateKey(document);
+      counts.set(dateKey, (counts.get(dateKey) ?? 0) + 1);
+    }
+    return Array.from(counts.entries())
+      .map(([dateKey, count]) => ({ count, dateKey }))
+      .sort((a, b) => {
+        if (a.dateKey === "unknown") return 1;
+        if (b.dateKey === "unknown") return -1;
+        return b.dateKey.localeCompare(a.dateKey);
+      });
+  }, [tenantScopedDocs]);
+
+  const hasActiveFilters =
+    query.trim() !== "" ||
+    showNewOnly ||
+    activeDocType !== "All" ||
+    activeTaxonomy !== "All" ||
+    activeGroup !== "All" ||
+    activeDate !== "All";
+
+  const resetFilters = () => {
+    setQuery("");
+    setShowNewOnly(false);
+    setActiveDocType("All");
+    setActiveTaxonomy("All");
+    setActiveGroup("All");
+    setActiveDate("All");
+  };
 
   const filteredDocuments = useMemo(() => {
-    const toTime = (value: string) => {
-      const ms = new Date(value).getTime();
-      return Number.isNaN(ms) ? 0 : ms;
-    };
-    return documents
+    const needle = query.trim().toLowerCase();
+    return tenantScopedDocs
       .filter((document) => {
         // Drop artifacts the reviewer downvoted, deleted, or archived.
         const fb = feedbackByDocument[document.id];
         if (fb && (fb.archived || fb.deleted || fb.downvoted)) return false;
-        const matchesDocType = activeDocType === "All" || document.docType === activeDocType;
-        const matchesTaxonomy = activeTaxonomy === "All" || document.taxonomy === activeTaxonomy;
-        const matchesGroup = activeGroup === "All" || document.group === activeGroup;
-        return matchesDocType && matchesTaxonomy && matchesGroup;
+        if (activeDocType !== "All" && document.docType !== activeDocType) return false;
+        if (activeTaxonomy !== "All" && document.taxonomy !== activeTaxonomy) return false;
+        if (activeGroup !== "All" && document.group !== activeGroup) return false;
+        if (activeDate !== "All" && documentDateKey(document) !== activeDate) return false;
+        if (showNewOnly && !recentlyAdded.has(document.id)) return false;
+        if (needle) {
+          const haystack = [
+            document.title,
+            document.description,
+            document.id,
+            document.sourcePath,
+            document.publicPath,
+            document.group,
+            document.taxonomy,
+            document.docType,
+            document.extension,
+            document.modifiedAt,
+            document.generatedAt,
+          ]
+            .filter(Boolean)
+            .join(" ")
+            .toLowerCase();
+          if (!haystack.includes(needle)) return false;
+        }
+        return true;
       })
       // Newest first.
-      .sort((a, b) => toTime(b.modifiedAt) - toTime(a.modifiedAt));
-  }, [activeDocType, activeGroup, activeTaxonomy, feedbackByDocument]);
+      .sort((a, b) => documentTime(b) - documentTime(a));
+  }, [activeDate, activeDocType, activeGroup, activeTaxonomy, query, showNewOnly, recentlyAdded, feedbackByDocument, tenantScopedDocs]);
 
   const selectedDocument =
     filteredDocuments.find((document) => document.id === selectedDocumentId) ?? filteredDocuments[0] ?? null;
   const selectedFeedback = selectedDocument ? feedbackByDocument[selectedDocument.id] ?? defaultFeedback(selectedDocument) : null;
-  const modalDocument = documents.find((document) => document.id === modalDocumentId) ?? null;
+  const modalDocument = docs.find((document) => document.id === modalDocumentId) ?? null;
   const modalFeedback = modalDocument ? feedbackByDocument[modalDocument.id] ?? defaultFeedback(modalDocument) : null;
 
   const updateFeedback = (document: DocumentArtifact, partial: Partial<DocumentFeedback>) => {
@@ -406,55 +568,114 @@ export default function DocumentsPage() {
         </div>
         <Badge tone="outline" className="documents-hero-badge">
           <LayoutGrid className="h-3 w-3" />
-          {filteredDocuments.length} shown
+          {activeTenantOption.label}: {filteredDocuments.length} shown{duplicateCount ? `, ${duplicateCount} deduped` : ""}
         </Badge>
       </section>
 
-      <section className="documents-filter-panel" aria-label="Document filters">
-        <div className="documents-filter-row">
-          <span className="documents-filter-label">Doc type</span>
-          <div className="documents-filter-pills">
-            {docTypes.map((type) => (
-              <button
-                className={type === activeDocType ? "documents-filter-pill is-active" : "documents-filter-pill"}
-                key={type}
-                onClick={() => setActiveDocType(type)}
-                type="button"
-              >
-                {type}
-              </button>
-            ))}
-          </div>
+      <section className="documents-filter-bar" aria-label="Document filters">
+        <label className="documents-search">
+          <Search className="h-3.5 w-3.5" />
+          <input
+            aria-label="Search artifacts"
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder="Search artifacts by title, path, group…"
+            type="search"
+            value={query}
+          />
+        </label>
+        <select
+          aria-label="Filter by doc type"
+          className="documents-filter-select"
+          onChange={(event) => setActiveDocType(event.target.value)}
+          value={activeDocType}
+        >
+          {docTypes.map((type) => (
+            <option key={type} value={type}>
+              {type === "All" ? "All types" : type}
+            </option>
+          ))}
+        </select>
+        <select
+          aria-label="Filter by taxonomy"
+          className="documents-filter-select"
+          onChange={(event) => setActiveTaxonomy(event.target.value)}
+          value={activeTaxonomy}
+        >
+          {taxonomies.map((taxonomy) => (
+            <option key={taxonomy} value={taxonomy}>
+              {taxonomy === "All" ? "All taxonomies" : taxonomy}
+            </option>
+          ))}
+        </select>
+        <select
+          aria-label="Filter by set"
+          className="documents-filter-select"
+          onChange={(event) => setActiveGroup(event.target.value)}
+          value={activeGroup}
+        >
+          {groups.map((group) => (
+            <option key={group} value={group}>
+              {group === "All" ? "All sets" : group}
+            </option>
+          ))}
+        </select>
+        <button
+          aria-pressed={showNewOnly}
+          className={showNewOnly ? "documents-new-toggle is-active" : "documents-new-toggle"}
+          disabled={recentlyAdded.size === 0}
+          onClick={() => setShowNewOnly((value) => !value)}
+          title={
+            recentlyAdded.size === 0
+              ? "No new artifacts since the last nightly index"
+              : "Show only artifacts added by the latest nightly diff"
+          }
+          type="button"
+        >
+          <Sparkles className="h-3.5 w-3.5" />
+          New{recentlyAdded.size ? ` ${recentlyAdded.size}` : ""}
+        </button>
+        {hasActiveFilters ? (
+          <button className="documents-filter-clear" onClick={resetFilters} type="button">
+            Clear
+          </button>
+        ) : null}
+      </section>
+
+      <section className="documents-date-filter" aria-label="Artifact date filter">
+        <div className="documents-date-filter-heading">
+          <CalendarDays className="h-3.5 w-3.5" />
+          <span>Date filter</span>
+          <small>{activeDate === "All" ? "All dates" : formatDateKey(activeDate)}</small>
         </div>
-        <div className="documents-filter-row">
-          <span className="documents-filter-label">Taxonomy</span>
-          <div className="documents-filter-pills">
-            {taxonomies.map((taxonomy) => (
-              <button
-                className={taxonomy === activeTaxonomy ? "documents-filter-pill is-active" : "documents-filter-pill"}
-                key={taxonomy}
-                onClick={() => setActiveTaxonomy(taxonomy)}
-                type="button"
-              >
-                {taxonomy}
-              </button>
-            ))}
-          </div>
-        </div>
-        <div className="documents-filter-row">
-          <span className="documents-filter-label">Set</span>
-          <div className="documents-filter-pills">
-            {groups.map((group) => (
-              <button
-                className={group === activeGroup ? "documents-filter-pill is-active" : "documents-filter-pill"}
-                key={group}
-                onClick={() => setActiveGroup(group)}
-                type="button"
-              >
-                {group}
-              </button>
-            ))}
-          </div>
+        <input
+          aria-label="Select artifact date"
+          className="documents-date-input"
+          onChange={(event) => setActiveDate(event.target.value || "All")}
+          type="date"
+          value={activeDate === "All" || activeDate === "unknown" ? "" : activeDate}
+        />
+        <div className="documents-date-calendar" role="list" aria-label="Available artifact dates">
+          <button
+            aria-pressed={activeDate === "All"}
+            className={activeDate === "All" ? "documents-date-chip is-active" : "documents-date-chip"}
+            onClick={() => setActiveDate("All")}
+            type="button"
+          >
+            <span>All</span>
+            <small>{tenantScopedDocs.length}</small>
+          </button>
+          {dateOptions.map(({ count, dateKey }) => (
+            <button
+              aria-pressed={activeDate === dateKey}
+              className={activeDate === dateKey ? "documents-date-chip is-active" : "documents-date-chip"}
+              key={dateKey}
+              onClick={() => setActiveDate(dateKey)}
+              type="button"
+            >
+              <span>{formatDateKey(dateKey)}</span>
+              <small>{count}</small>
+            </button>
+          ))}
         </div>
       </section>
 
@@ -488,7 +709,12 @@ export default function DocumentsPage() {
 
               <div className="documents-card-body">
                 <div className="flex items-center justify-between gap-3">
-                  <span className="documents-card-eyebrow">{document.docType}</span>
+                  <span className="documents-card-eyebrow inline-flex items-center gap-1.5">
+                    {document.docType}
+                    {recentlyAdded.has(document.id) ? (
+                      <span className="documents-card-new-badge">New</span>
+                    ) : null}
+                  </span>
                   <DocumentActionButtons document={document} feedback={feedback} onUpdate={updateFeedback} />
                 </div>
                 <h3>{document.title}</h3>

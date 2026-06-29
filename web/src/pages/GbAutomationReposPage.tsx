@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { GitBranch, GitCommit, LayoutGrid, Search } from "lucide-react";
 import { Badge } from "@nous-research/ui/ui/components/badge";
+import { tenantOption, useTenant } from "@/lib/tenant";
 
 interface RepoCommit {
   client: string;
@@ -43,8 +44,24 @@ const CLIENT_COLORS: Record<string, string> = {
   "the-mall": "#ec4899",
 };
 
+const TENANT_CLIENT_ALIASES: Record<string, string[]> = {
+  ecom: ["ecom", "the-mall", "mall-client"],
+  gbautomation: ["gbautomation", "gbauto", "gb-automation"],
+  jid5274: ["jid5274", "jason-diaz"],
+  "smoke-client": ["smoke-client"],
+};
+
 function clientColor(client: string) {
   return CLIENT_COLORS[client] ?? "#6b6b6b";
+}
+
+function matchesTenantClient(client: string, tenant: string) {
+  const normalized = client.trim().toLowerCase();
+  return (TENANT_CLIENT_ALIASES[tenant] ?? [tenant]).includes(normalized);
+}
+
+function sumCommits(repos: readonly RepoSlice[]) {
+  return repos.reduce((total, repo) => total + repo.commit_count, 0);
 }
 
 function relativeTime(value?: string) {
@@ -87,20 +104,31 @@ function RepoCard({ repo }: { repo: RepoSlice }) {
 export default function GbAutomationReposPage() {
   const [data, setData] = useState<ReposManifest | null>(null);
   const [query, setQuery] = useState("");
+  const tenant = useTenant();
+  const activeTenant = tenantOption(tenant);
 
   useEffect(() => {
     globalThis.document.title = "Repos & Commits | GBAutomation";
     void fetch("/repos/repos-manifest.json").then((response) => response.json()).then(setData).catch(() => setData(null));
   }, []);
 
+  const tenantRepos = useMemo(() => {
+    if (!data) return [];
+    return data.repos.filter((repo) => matchesTenantClient(repo.client, tenant));
+  }, [data, tenant]);
+
+  const tenantActivity = useMemo(() => {
+    if (!data) return [];
+    return data.recent_activity.filter((commit) => matchesTenantClient(commit.client, tenant));
+  }, [data, tenant]);
+
   const filteredRepos = useMemo(() => {
     const normalized = query.trim().toLowerCase();
-    if (!data) return [];
-    if (!normalized) return data.repos;
-    return data.repos.filter((repo) =>
+    if (!normalized) return tenantRepos;
+    return tenantRepos.filter((repo) =>
       `${repo.repo} ${repo.client} ${repo.role} ${repo.recent_commits.map((commit) => commit.message).join(" ")}`.toLowerCase().includes(normalized),
     );
-  }, [data, query]);
+  }, [query, tenantRepos]);
 
   return (
     <div className="gbhub-page normal-case">
@@ -116,8 +144,8 @@ export default function GbAutomationReposPage() {
         <h2>Repos & Commits</h2>
         {data ? (
           <p>
-            <strong>{data.commit_count}</strong> commits across <strong>{data.repo_count}</strong> repos
-            and <strong>{data.client_count}</strong> clients, last {data.window_days} days.
+            <strong>{sumCommits(tenantRepos)}</strong> commits across <strong>{tenantRepos.length}</strong> repos
+            for <strong>{activeTenant.label}</strong>, last {data.window_days} days.
           </p>
         ) : (
           <p>Loading the deployed GB Automation repo manifest.</p>
@@ -141,7 +169,7 @@ export default function GbAutomationReposPage() {
           <aside className="gbhub-activity-panel">
             <p className="gbhub-eyebrow">Recent Activity</p>
             <ul>
-              {data.recent_activity.slice(0, 16).map((commit) => (
+              {tenantActivity.slice(0, 16).map((commit) => (
                 <li key={commit.sha}>
                   <div>
                     <span className="gbhub-client-dot" style={{ background: clientColor(commit.client) }} />

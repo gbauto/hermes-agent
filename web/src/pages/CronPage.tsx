@@ -110,10 +110,6 @@ export default function CronPage() {
   const [schedule, setSchedule] = useState("");
   const [name, setName] = useState("");
   const closeCreateModal = useCallback(() => setCreateModalOpen(false), []);
-  const createModalRef = useModalBehavior({
-    open: createModalOpen,
-    onClose: closeCreateModal,
-  });
   const [deliver, setDeliver] = useState("local");
   const [creating, setCreating] = useState(false);
   const createProfile = selectedProfile === "all" ? "default" : selectedProfile;
@@ -166,6 +162,16 @@ export default function CronPage() {
       setCreating(false);
     }
   };
+
+  const createModalRef = useModalBehavior({
+    open: createModalOpen,
+    onClose: closeCreateModal,
+    onSubmit: () => {
+      void handleCreate();
+    },
+    canSubmit: !creating && !!prompt.trim() && !!schedule.trim(),
+    focusSelector: "#cron-name",
+  });
 
   const handlePauseResume = async (job: CronJob) => {
     try {

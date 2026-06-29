@@ -20,7 +20,12 @@ import {
   Sparkles,
 } from "lucide-react";
 import { api } from "@/lib/api";
-import type { SkillInfo, ToolsetInfo } from "@/lib/api";
+import type {
+  SkillInfo,
+  SupabaseLogRow,
+  SupabaseLogsSummaryResponse,
+  ToolsetInfo,
+} from "@/lib/api";
 import { auraSkills } from "@/generated/auraSkills";
 import { gbautoLibrary } from "@/generated/gbautoLibrary";
 import { skillIndividualArt } from "@/generated/skillIndividualArt";
@@ -37,6 +42,7 @@ import { Input } from "@/components/ui/input";
 import { useI18n } from "@/i18n";
 import { usePageHeader } from "@/contexts/usePageHeader";
 import { PluginSlot } from "@/plugins";
+import { useTenant } from "@/lib/tenant";
 import {
   contractsForObjects,
   findSkillRegistryRow,
@@ -175,6 +181,20 @@ type IndividualArtEntry = {
   sourceGroup: string;
 };
 
+type SkillsDisplayMode = "current" | "image-gallery" | "detail-gallery";
+
+type SkillsGalleryItem = {
+  id: string;
+  title: string;
+  description: string;
+  category?: string;
+  href?: string;
+  imageUrl?: string;
+  meta?: string;
+  metrics?: { label: string; value: string }[];
+  tags?: string[];
+};
+
 /* ------------------------------------------------------------------ */
 /*  Component                                                          */
 /* ------------------------------------------------------------------ */
@@ -187,12 +207,23 @@ export default function SkillsPage() {
   const [view, setView] = useState<
     "skills" | "toolsets" | "library" | "prompt-cards" | "aura-skills"
   >("skills");
+  const [displayMode, setDisplayMode] =
+    useState<SkillsDisplayMode>("current");
   const [activeCategory, setActiveCategory] = useState<string | null>(null);
   const [togglingSkills, setTogglingSkills] = useState<Set<string>>(new Set());
+  const [supabaseSummary, setSupabaseSummary] =
+    useState<SupabaseLogsSummaryResponse | null>(null);
+  const [skillRunRows, setSkillRunRows] = useState<SupabaseLogRow[]>([]);
+  const [skillFailureRows, setSkillFailureRows] = useState<SupabaseLogRow[]>(
+    [],
+  );
+  const [analyticsLoading, setAnalyticsLoading] = useState(true);
+  const [analyticsError, setAnalyticsError] = useState<string | null>(null);
   const { toast, showToast } = useToast();
   const { t } = useI18n();
   const { setAfterTitle, setEnd } = usePageHeader();
   const contractsIndex = useSupabaseContractsIndex();
+  const tenant = useTenant();
 
   useEffect(() => {
     Promise.all([api.getSkills(), api.getToolsets()])
@@ -203,6 +234,42 @@ export default function SkillsPage() {
       .catch(() => showToast(t.common.loading, "error"))
       .finally(() => setLoading(false));
   }, [showToast, t.common.loading]);
+
+  useEffect(() => {
+    let cancelled = false;
+    setAnalyticsLoading(true);
+    setAnalyticsError(null);
+    Promise.all([
+      api.getSupabaseLogsSummary({ client: tenant }),
+      api.getSupabaseLogsTimeline({
+        client: tenant,
+        days: 14,
+        limit: 250,
+        source: "skill_runs",
+      }),
+      api.getSupabaseLogsFailures({
+        client: tenant,
+        days: 14,
+        limit: 100,
+        search: "skill",
+      }),
+    ])
+      .then(([summary, runs, failures]) => {
+        if (cancelled) return;
+        setSupabaseSummary(summary);
+        setSkillRunRows(runs.rows ?? []);
+        setSkillFailureRows(failures.rows ?? []);
+      })
+      .catch((err) => {
+        if (!cancelled) setAnalyticsError(String(err));
+      })
+      .finally(() => {
+        if (!cancelled) setAnalyticsLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [tenant]);
 
   /* ---- Toggle skill ---- */
   const handleToggleSkill = async (skill: SkillInfo) => {
@@ -377,6 +444,149 @@ export default function SkillsPage() {
     );
   }, [toolsets, search, lowerSearch]);
 
+  const galleryItems = useMemo<SkillsGalleryItem[]>(() => {
+    if (view === "skills") {
+      const source = isSearching ? searchMatchedSkills : activeSkills;
+      return source.map((skill) => {
+        const registryRow = findSkillRegistryRow(contractsIndex, skill.name);
+        const relatedContracts = relatedContractsForSkill(
+          contractsIndex,
+          skill.name,
+        );
+        return {
+          id: skill.name,
+          title: skill.name,
+          description: skill.description || t.skills.noDescription,
+          category: prettyCategory(skill.category, t.common.general),
+          imageUrl: skillGroupArtUrl(skill.category),
+          meta: skill.enabled ? t.common.active : t.common.inactive,
+          metrics: [
+            { label: "Enabled", value: skill.enabled ? "Yes" : "No" },
+            ...(skill.canopy ? [{ label: "Canopy", value: "Yes" }] : []),
+            ...(registryRow?.status
+              ? [{ label: "Registry", value: registryRow.status }]
+              : []),
+          ],
+          tags: [
+            skill.canopy ? "Canopy" : null,
+            registryRow?.source_path,
+            ...relatedContracts
+              .slice(0, 2)
+              .map((contract) => contract.object_name),
+          ].filter(Boolean) as string[],
+        };
+      });
+    }
+
+    if (view === "toolsets") {
+      return filteredToolsets.map((toolset) => ({
+        id: toolset.name,
+        title: toolset.label.replace(/^[\p{Emoji}\s]+/u, "").trim() || toolset.name,
+        description: toolset.description,
+        category: "Toolset",
+        imageUrl: skillGroupArtUrl(toolset.name),
+        meta: toolset.enabled ? t.common.active : t.common.inactive,
+        metrics: [
+          { label: "Configured", value: toolset.configured ? "Yes" : "No" },
+          { label: "Tools", value: String(toolset.tools.length) },
+        ],
+        tags: toolset.tools.slice(0, 5),
+      }));
+    }
+
+    if (view === "library") {
+      return libraryTeams.map((team) => ({
+        id: team.id,
+        title: team.displayName,
+        description: team.description,
+        category: team.kind,
+        imageUrl: libraryTeamArtUrl(team),
+        meta: `Lead: ${team.leader}`,
+        metrics: [
+          { label: "Agents", value: String(team.agentCount) },
+          { label: "Seniors", value: String(team.roleCounts.seniors) },
+          { label: "Juniors", value: String(team.roleCounts.juniors) },
+        ],
+        tags: [team.sourcePath],
+      }));
+    }
+
+    if (view === "prompt-cards") {
+      return libraryAgents.map((agent) => {
+        const art = individualAgentArt(agent);
+        return {
+          id: agent.id,
+          title: agent.displayName,
+          description: agent.description,
+          category: agent.teamDisplayName,
+          imageUrl: versionedArtPath(art.publicPath),
+          meta: agent.model || "model tbd",
+          metrics: [
+            { label: "Role", value: agent.rosterRole.replace(/s$/, "") },
+            { label: "Provider", value: agent.provider || "tbd" },
+          ],
+          tags: [agent.expertise, agent.sourcePath, `Art: ${art.artId}`].filter(
+            Boolean,
+          ) as string[],
+        };
+      });
+    }
+
+    if (view === "aura-skills") {
+      const auraSource: readonly AuraSkill[] = filteredAuraSkills;
+      return auraSource.map((skill) => ({
+        id: skill.id,
+        title: skill.title,
+        description: skill.description,
+        category: prettyCategory(skill.category, "UI"),
+        href: skill.sourceUrl || "https://www.aura.build/skills",
+        imageUrl: skill.avatarUrl,
+        meta: skill.authorName,
+        metrics: [
+          { label: "Views", value: formatCompact(skill.views) },
+          { label: "Uses", value: formatCompact(skill.uses) },
+        ],
+        tags: [
+          skill.repoOwner && skill.repoName
+            ? `${skill.repoOwner}/${skill.repoName}`
+            : "Aura source",
+          skill.featured ? "Featured" : null,
+        ].filter(Boolean) as string[],
+      }));
+    }
+
+    return [];
+  }, [
+    activeSkills,
+    contractsIndex,
+    filteredAuraSkills,
+    filteredToolsets,
+    isSearching,
+    libraryAgents,
+    libraryTeams,
+    searchMatchedSkills,
+    t.common.active,
+    t.common.general,
+    t.common.inactive,
+    t.skills.noDescription,
+    view,
+  ]);
+
+  const galleryEmptyLabel = useMemo(() => {
+    if (view === "toolsets") return t.skills.noToolsetsMatch;
+    if (view === "aura-skills") return "No Aura skills match the current filter.";
+    if (view === "skills") {
+      return skills.length === 0 ? t.skills.noSkills : t.skills.noSkillsMatch;
+    }
+    return "No records match the current filter.";
+  }, [
+    skills.length,
+    t.skills.noSkills,
+    t.skills.noSkillsMatch,
+    t.skills.noToolsetsMatch,
+    view,
+  ]);
+
   /* ---- Loading ---- */
   if (loading) {
     return (
@@ -492,9 +702,26 @@ export default function SkillsPage() {
         </aside>
 
         <div className="flex-1 min-w-0">
-          <SkillsContractPanel index={contractsIndex} view={view} />
-
-          {isSearching ? (
+          <SkillsAnalyticsPane
+            analyticsError={analyticsError}
+            analyticsLoading={analyticsLoading}
+            displayMode={displayMode}
+            index={contractsIndex}
+            onDisplayModeChange={setDisplayMode}
+            skillFailureRows={skillFailureRows}
+            skillRunRows={skillRunRows}
+            skills={skills}
+            summary={supabaseSummary}
+            tenant={tenant}
+            view={view}
+          />
+          {displayMode !== "current" ? (
+            <SkillsTemplateGallery
+              emptyLabel={galleryEmptyLabel}
+              items={galleryItems}
+              mode={displayMode}
+            />
+          ) : isSearching ? (
             <Card className="rounded-none">
               <CardHeader className="py-3 px-4">
                 <div className="flex items-center justify-between">
@@ -667,6 +894,347 @@ export default function SkillsPage() {
   );
 }
 
+function SkillsAnalyticsPane({
+  analyticsError,
+  analyticsLoading,
+  displayMode,
+  index,
+  onDisplayModeChange,
+  skillFailureRows,
+  skillRunRows,
+  skills,
+  summary,
+  tenant,
+  view,
+}: {
+  analyticsError: string | null;
+  analyticsLoading: boolean;
+  displayMode: SkillsDisplayMode;
+  index: SupabaseContractsIndex | null;
+  onDisplayModeChange: (mode: SkillsDisplayMode) => void;
+  skillFailureRows: readonly SupabaseLogRow[];
+  skillRunRows: readonly SupabaseLogRow[];
+  skills: readonly SkillInfo[];
+  summary: SupabaseLogsSummaryResponse | null;
+  tenant: string;
+  view: "skills" | "toolsets" | "library" | "prompt-cards" | "aura-skills";
+}) {
+  const registryRows = index?.skills_registry ?? [];
+  const activeRegistryRows = registryRows.filter(
+    (row) => row.status === "active",
+  ).length;
+  const enabledSkills = skills.filter((skill) => skill.enabled).length;
+  const counts = summary?.counts ?? {};
+  const traceTotals = summary?.trace_totals ?? {};
+  const coverage = summary?.trace_coverage ?? {};
+  const joinCandidates = numberFromUnknown(coverage.obs_join_candidates);
+  const withTrace = numberFromUnknown(coverage.obs_with_trace);
+  const traceCoverage =
+    joinCandidates > 0 ? Math.round((withTrace / joinCandidates) * 100) : null;
+  const latestSkillRun = latestDateFromRows(skillRunRows, "started_at");
+  const skillRunFailures = skillRunRows.filter(
+    (row) => String(row.status_family ?? "").toLowerCase() === "failed",
+  ).length;
+  const skillFailureTotal = skillRunFailures || skillFailureRows.length;
+  const skillSuccessTotal = Math.max(skillRunRows.length - skillFailureTotal, 0);
+  const registryRatio =
+    registryRows.length > 0
+      ? Math.round((activeRegistryRows / registryRows.length) * 100)
+      : null;
+  const enabledRatio =
+    skills.length > 0 ? Math.round((enabledSkills / skills.length) * 100) : null;
+  const successRatio =
+    skillRunRows.length > 0
+      ? Math.round((skillSuccessTotal / skillRunRows.length) * 100)
+      : null;
+  const liveState = analyticsLoading
+    ? "Loading Supabase"
+    : analyticsError
+      ? "Supabase unavailable"
+      : "Live Supabase";
+
+  return (
+    <section className="skills-analytics-pane">
+      <div className="skills-analytics-main">
+        <div className="skills-analytics-title">
+          <span className="library-eyebrow">{liveState}</span>
+          <h2>Skills Analytics</h2>
+          <p>
+            Client scope: {tenant}. Recent skill runs, trace coverage, registry state, and operational
+            contracts from the Supabase-backed Hermes observability tables.
+          </p>
+        </div>
+
+        <div className="skills-analytics-rows">
+          <AnalyticsRow
+            detail={`${formatCompact(skillRunRows.length)} runs in 14d; ${formatCompact(skillFailureTotal)} failed`}
+            label="Run health"
+            progress={successRatio}
+            value={`${formatCompact(skillSuccessTotal)} succeeded`}
+          />
+          <AnalyticsRow
+            detail={`${formatCompact(activeRegistryRows)} active registry rows; ${formatCompact(registryRows.length)} total`}
+            label="Registry state"
+            progress={registryRatio}
+            value={
+              registryRatio === null
+                ? "No registry rows"
+                : `${registryRatio}% active`
+            }
+          />
+          <AnalyticsRow
+            detail={`${formatCompact(enabledSkills)} enabled locally; ${formatCompact(skills.length)} installed`}
+            label="Local enablement"
+            progress={enabledRatio}
+            value={
+              enabledRatio === null ? "No local skills" : `${enabledRatio}% enabled`
+            }
+          />
+          <AnalyticsRow
+            detail={`${formatCompact(numberFromUnknown(counts.traces))} traces; ${formatCompact(numberFromUnknown(traceTotals.tokens))} tokens; $${numberFromUnknown(traceTotals.cost).toFixed(2)} cost`}
+            label="Langfuse telemetry"
+            progress={traceCoverage}
+            value={
+              traceCoverage === null
+                ? "Coverage pending"
+                : `${withTrace}/${joinCandidates} joined`
+            }
+          />
+          <AnalyticsRow
+            detail={summary?.generated_at ? `Supabase summary ${formatShortDate(summary.generated_at)}` : "Waiting on Supabase summary"}
+            label="Freshness"
+            value={
+              latestSkillRun
+                ? `Latest skill run ${formatShortDate(latestSkillRun)}`
+                : "No recent skill run"
+            }
+          />
+        </div>
+
+        {analyticsError ? (
+          <div className="skills-analytics-error">
+            {analyticsError.replace(/^Error:\s*/, "")}
+          </div>
+        ) : null}
+      </div>
+
+      <div className="skills-analytics-side">
+        <SkillsDisplayModeSwitcher
+          mode={displayMode}
+          onChange={onDisplayModeChange}
+        />
+        <ContractObjectStrip
+          contracts={contractsForObjects(index, [
+            "ops_skills_registry",
+            "skill_runs",
+            "skill_outputs",
+            "ops_skill_activity",
+            "obs_smoke_skill_runs",
+            "obs_smoke_skill_metrics_daily",
+          ])}
+        />
+        <div className="skills-analytics-footnote">
+          <span>{view.replace("-", " ")}</span>
+          <span>{summary?.generated_at ? formatShortDate(summary.generated_at) : "pending"}</span>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function AnalyticsRow({
+  detail,
+  label,
+  progress,
+  value,
+}: {
+  detail: string;
+  label: string;
+  progress?: number | null;
+  value: string;
+}) {
+  const boundedProgress =
+    typeof progress === "number" && Number.isFinite(progress)
+      ? Math.max(0, Math.min(100, progress))
+      : null;
+
+  return (
+    <article className="skills-analytics-row">
+      <div className="skills-analytics-row-copy">
+        <span>{label}</span>
+        <strong>{value}</strong>
+        <small>{detail}</small>
+      </div>
+      {boundedProgress !== null ? (
+        <div
+          aria-label={`${label}: ${boundedProgress}%`}
+          className="skills-analytics-bar"
+          role="meter"
+          aria-valuemax={100}
+          aria-valuemin={0}
+          aria-valuenow={boundedProgress}
+        >
+          <i style={{ width: `${boundedProgress}%` }} />
+        </div>
+      ) : null}
+    </article>
+  );
+}
+
+function SkillsDisplayModeSwitcher({
+  mode,
+  onChange,
+}: {
+  mode: SkillsDisplayMode;
+  onChange: (mode: SkillsDisplayMode) => void;
+}) {
+  const options: { label: string; mode: SkillsDisplayMode }[] = [
+    { label: "Current", mode: "current" },
+    { label: "Image gallery", mode: "image-gallery" },
+    { label: "Detail gallery", mode: "detail-gallery" },
+  ];
+
+  return (
+    <div className="skills-template-toolbar" aria-label="Skills view type">
+      <div>
+        <span className="library-eyebrow">View Type</span>
+        <p>Approved GBauto catalog templates</p>
+      </div>
+      <div className="skills-template-switcher" role="group">
+        {options.map((option) => (
+          <button
+            aria-pressed={mode === option.mode}
+            className={cn(
+              "skills-template-switch",
+              mode === option.mode && "is-active",
+            )}
+            key={option.mode}
+            onClick={() => onChange(option.mode)}
+            type="button"
+          >
+            {option.label}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function SkillsTemplateGallery({
+  emptyLabel,
+  items,
+  mode,
+}: {
+  emptyLabel: string;
+  items: readonly SkillsGalleryItem[];
+  mode: Exclude<SkillsDisplayMode, "current">;
+}) {
+  if (!items.length) {
+    return (
+      <Card className="rounded-none">
+        <CardContent className="py-8 text-center text-sm text-muted-foreground">
+          {emptyLabel}
+        </CardContent>
+      </Card>
+    );
+  }
+
+  if (mode === "image-gallery") {
+    return (
+      <div className="skills-template-grid skills-template-grid--image">
+        {items.map((item) => (
+          <article className="skills-template-image-card" key={item.id}>
+            <div className="skills-template-image-wrap">
+              {item.imageUrl ? (
+                <img alt="" decoding="async" loading="lazy" src={item.imageUrl} />
+              ) : (
+                <LayoutGrid className="h-7 w-7" />
+              )}
+            </div>
+            <div className="skills-template-card-body">
+              <div className="library-card-topline">
+                <span>{item.category || "Catalog"}</span>
+                <span>{item.meta || "record"}</span>
+              </div>
+              <h3>{item.title}</h3>
+              <p>{item.description}</p>
+              <GalleryMetricRow metrics={item.metrics} />
+              <GalleryTagRow tags={item.tags} />
+              {item.href ? (
+                <a
+                  className="skills-template-card-link"
+                  href={item.href}
+                  rel="noreferrer"
+                  target="_blank"
+                >
+                  Open source
+                </a>
+              ) : null}
+            </div>
+          </article>
+        ))}
+      </div>
+    );
+  }
+
+  return (
+    <div className="skills-template-grid skills-template-grid--detail">
+      {items.map((item) => (
+        <article className="skills-template-detail-card" key={item.id}>
+          <div className="library-card-topline">
+            <span>{item.category || "Catalog"}</span>
+            <span>{item.meta || "record"}</span>
+          </div>
+          <h3>{item.title}</h3>
+          <p>{item.description}</p>
+          <GalleryMetricRow metrics={item.metrics} />
+          <GalleryTagRow tags={item.tags} />
+          {item.href ? (
+            <a
+              className="skills-template-card-link"
+              href={item.href}
+              rel="noreferrer"
+              target="_blank"
+            >
+              Open source
+            </a>
+          ) : null}
+        </article>
+      ))}
+    </div>
+  );
+}
+
+function GalleryMetricRow({
+  metrics,
+}: {
+  metrics?: SkillsGalleryItem["metrics"];
+}) {
+  if (!metrics?.length) return null;
+  return (
+    <div className="skills-template-metric-row">
+      {metrics.slice(0, 3).map((metric) => (
+        <span key={`${metric.label}:${metric.value}`}>
+          <b>{metric.value}</b>
+          {metric.label}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+function GalleryTagRow({ tags }: { tags?: SkillsGalleryItem["tags"] }) {
+  const visibleTags = tags?.filter(Boolean).slice(0, 4) ?? [];
+  if (!visibleTags.length) return null;
+  return (
+    <div className="skills-template-tag-row">
+      {visibleTags.map((tag) => (
+        <span key={tag}>{tag}</span>
+      ))}
+    </div>
+  );
+}
+
 function SkillRow({
   contractsIndex,
   skill,
@@ -705,6 +1273,13 @@ function SkillRow({
           <Badge tone="secondary" className="text-[9px]">
             {prettyCategory(skill.category, "General")}
           </Badge>
+          {skill.canopy && (
+            <span title="Part of the Canopy prompt system">
+              <Badge tone="outline" className="text-[9px]">
+                🌿 Canopy
+              </Badge>
+            </span>
+          )}
         </div>
         <p className="text-xs text-muted-foreground leading-relaxed line-clamp-2">
           {skill.description || noDescriptionLabel}
@@ -778,37 +1353,6 @@ function individualAgentArt(agent: LibraryAgent): IndividualArtEntry {
     sourceFile: `${key}.jpg`,
     sourceGroup: "group",
   };
-}
-
-function SkillsContractPanel({
-  index,
-  view,
-}: {
-  index: SupabaseContractsIndex | null;
-  view: "skills" | "toolsets" | "library" | "prompt-cards" | "aura-skills";
-}) {
-  const registryRows = index?.skills_registry ?? [];
-  const contracts = relatedContractsForSkill(index, view === "aura-skills" ? "skill" : "agent");
-  const activeRegistryRows = registryRows.filter((row) => row.status === "active").length;
-
-  return (
-    <section className="skill-contract-panel">
-      <div>
-        <span className="library-eyebrow">Supabase Contract Index</span>
-        <h2>Skills data spine</h2>
-        <p>
-          Joins this page to <code>ops_skills_registry</code>, <code>skill_runs</code>,
-          skill output records, smoke skill views, and agent/profile trace tables.
-        </p>
-      </div>
-      <div className="skill-contract-metrics">
-        <span><b>{registryRows.length || "-"}</b> registry rows</span>
-        <span><b>{activeRegistryRows || "-"}</b> active</span>
-        <span><b>{contracts.length || "-"}</b> related contracts</span>
-      </div>
-      <ContractObjectStrip contracts={contracts} />
-    </section>
-  );
 }
 
 function ContractObjectStrip({
@@ -1171,4 +1715,41 @@ function formatCompact(value: number) {
     maximumFractionDigits: 1,
     notation: "compact",
   }).format(value);
+}
+
+function numberFromUnknown(value: unknown): number {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string") {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
+  return 0;
+}
+
+function latestDateFromRows(
+  rows: readonly SupabaseLogRow[],
+  key: string,
+): string | null {
+  let latest = 0;
+  let latestRaw: string | null = null;
+  for (const row of rows) {
+    const value = row[key];
+    if (typeof value !== "string") continue;
+    const time = Date.parse(value);
+    if (!Number.isFinite(time) || time <= latest) continue;
+    latest = time;
+    latestRaw = value;
+  }
+  return latestRaw;
+}
+
+function formatShortDate(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return new Intl.DateTimeFormat("en", {
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    month: "short",
+  }).format(date);
 }

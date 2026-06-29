@@ -26,7 +26,7 @@ export function Card({ className, style, ...props }: React.HTMLAttributes<HTMLDi
   return (
     <div
       className={cn(
-        "border border-border bg-card/80 text-card-foreground w-full",
+        "gb-silver-card border border-border bg-card/80 text-card-foreground w-full",
         className,
       )}
       style={{ ...CARD_STYLE, ...style }}

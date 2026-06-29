@@ -21,8 +21,81 @@ const profileTemplatesRoot = path.join(
   "hermes-profile-templates",
 );
 const outputPath = path.join(webRoot, "src", "generated", "gbautoLibrary.ts");
+const publicProfileArtRoot = path.join(webRoot, "public", "profile-art");
+const approvedAvatarGalleryRoot = path.join(
+  repoRoot,
+  "second-brain",
+  "intelligence",
+  "artifact-registry",
+  "gbautomation",
+  "tac-lead-profile-artifacts-2026-06-13",
+);
+const approvedAvatarVotePath = path.join(
+  approvedAvatarGalleryRoot,
+  "avatar-votes",
+  "tac-lead-avatar-votes-2026-06-23T174831Z.json",
+);
+
+const PROFILE_APPROVED_ART_PATHS = {
+  "aura-web-designer": "avatar-sets/mtg-worker-cards/images/arcbound-stinger.jpg",
+  "tac-architect": "avatar-sets/mtg-creature-types/angel/01-lgn-1-akroma-angel-of-wrath.jpg",
+  "tac-artifact-generator": "avatar-sets/mtg-creature-types/angel/02-8ed-2-angelic-page.jpg",
+  "tac-builder": "avatar-sets/mtg-creature-types/angel/08-9ed-1-angel-of-mercy.jpg",
+  "tac-director": "avatar-sets/mtg-creature-types/angel/13-9ed-7-blinding-angel.jpg",
+  "tac-lead": "avatar-sets/mtg-creature-types/angel/16-ons-28-exalted-angel.jpg",
+  "tac-ops": "avatar-sets/mtg-creature-types/angel/17-8ed-133-fallen-angel.jpg",
+  "tac-researcher": "avatar-sets/mtg-creature-types/angel/21-ody-288-iridescent-angel.jpg",
+  "tac-self-improve": "avatar-sets/mtg-creature-types/angel/22-mrd-15-luminous-angel.jpg",
+  "tac-validator": "avatar-sets/mtg-worker-cards/images/platinum-angel.jpg",
+  "artifact-manager": "avatar-sets/mtg-worker-cards/images/arcbound-worker.jpg",
+  "aws-admin-security": "avatar-sets/mtg-worker-cards/images/bosh-iron-golem.jpg",
+  "aws-data-observability": "avatar-sets/mtg-worker-cards/images/bronze-bombshell.jpg",
+  "aws-manager": "avatar-sets/mtg-worker-cards/images/copper-myr.jpg",
+  "aws-platform-release": "avatar-sets/mtg-worker-cards/images/darksteel-colossus.jpg",
+  "billing-admin-manager": "avatar-sets/mtg-worker-cards/images/duplicant.jpg",
+  "board-dispatcher": "avatar-sets/mtg-worker-cards/images/gold-myr.jpg",
+  "browser-manager": "avatar-sets/mtg-worker-cards/images/iron-myr.jpg",
+  "chief-of-staff": "avatar-sets/mtg-worker-cards/images/leaden-myr.jpg",
+  "client-delivery-manager": "avatar-sets/mtg-worker-cards/images/lodestone-myr.jpg",
+  "client-orchestrator": "avatar-sets/mtg-worker-cards/images/memnarch.jpg",
+  "content-creator": "avatar-sets/mtg-worker-cards/images/myr-enforcer.jpg",
+  "database-manager": "avatar-sets/mtg-worker-cards/images/silver-myr.jpg",
+  "design-manager": "avatar-sets/mtg-worker-cards/images/steel-wall.jpg",
+  "ecom-supabase-datafeed-manager": "avatar-sets/legacy-mtg-cards/goblin-bowling-team.jpg",
+  ecom: "avatar-sets/legacy-mtg-cards/goblin-fireslinger.jpg",
+  "fisch-group": "avatar-sets/mtg-creature-types/angel/26-dst-9-pristine-angel.jpg",
+  "gbauto-ceo": "avatar-sets/mtg-creature-types/angel/27-10e-35-reya-dawnbringer.jpg",
+  "gbautomation-marketing-client": "avatar-sets/mtg-creature-types/angel/29-7ed-41-serra-advocate.jpg",
+  gbautomation: "avatar-sets/mtg-creature-types/angel/32-10e-39-serra-angel.jpg",
+  "git-manager": "avatar-sets/mtg-creature-types/angel/39-7ed-52-sustainer-of-the-realm.jpg",
+  "gmail-manager": "avatar-sets/mtg-creature-types/angel/43-ody-57-wayward-angel.jpg",
+  "google-workspace-manager": "avatar-sets/mtg-creature-types/cleric/01-leonin-elder.jpg",
+  "ids-facilitator": "avatar-sets/mtg-creature-types/cleric/02-master-healer.jpg",
+  "jason-diaz": "avatar-sets/mtg-creature-types/cleric/03-exiled-doomsayer.jpg",
+  "knowledge-manager": "avatar-sets/mtg-creature-types/cleric/04-defender-of-the-order.jpg",
+  "observability-manager": "avatar-sets/mtg-creature-types/cleric/08-ancestor-s-chosen.jpg",
+  "report-manager": "avatar-sets/mtg-creature-types/cleric/09-samite-healer.jpg",
+  "research-analyst": "avatar-sets/mtg-creature-types/dragon/01-scg-136-bladewing-the-risen.jpg",
+  "rocks-steward": "avatar-sets/mtg-creature-types/dragon/02-mrd-155-clockwork-dragon.jpg",
+  "sales-agent": "avatar-sets/mtg-creature-types/dragon/03-7ed-178-crimson-hellkite.jpg",
+  "scorecard-analyst": "avatar-sets/mtg-creature-types/dragon/05-scg-87-dragon-mage.jpg",
+  "smoke-client": "avatar-sets/mtg-creature-types/dragon/06-scg-88-dragon-tyrant.jpg",
+  "sprint-manager": "avatar-sets/mtg-creature-types/dragon/08-dst-62-furnace-dragon.jpg",
+  "supabase-manager": "avatar-sets/mtg-creature-types/dragon/13-chk-217-jugan-the-rising-star.jpg",
+  "telegram-discord-manager": "avatar-sets/mtg-creature-types/dragon/14-chk-72-keiga-the-tide-star.jpg",
+  "trading-bot": "avatar-sets/mtg-creature-types/dragon/15-lgn-104-kilnmouth-dragon.jpg",
+};
 
 const PROFILE_MTG_CARD_NAMES = {
+  "aura-web-designer": "Alela, Artful Provocateur",
+  "artifact-manager": "Karn, Scion of Urza",
+  "aws-admin-security": "Aegis of the Gods",
+  "aws-data-observability": "Trail of Evidence",
+  "aws-manager": "Cloud Key",
+  "aws-platform-release": "Release to the Wind",
+  "billing-admin-manager": "Smothering Tithe",
+  "board-dispatcher": "Dispatch",
+  "browser-manager": "Explorer's Scope",
   "tac-architect": "Arcum Dagsson",
   "tac-artifact-generator": "Saheeli, Sublime Artificer",
   "tac-builder": "Pia and Kiran Nalaar",
@@ -33,18 +106,38 @@ const PROFILE_MTG_CARD_NAMES = {
   "tac-self-improve": "Evolution Sage",
   "tac-validator": "Eight-and-a-Half-Tails",
   "chief-of-staff": "Captain Sisay",
+  "client-delivery-manager": "Courier's Briefcase",
   "client-orchestrator": "Teysa, Orzhov Scion",
   "content-creator": "Jhoira of the Ghitu",
   "database-manager": "Darksteel Forge",
   dbforge: "Gilded Lotus",
+  "design-manager": "Masterwork of Ingenuity",
   ecom: "Merchant Raiders",
+  "ecom-supabase-datafeed-manager": "Tamiyo's Journal",
+  "fisch-group": "Kiora, Master of the Depths",
+  "gbauto-ceo": "Kenrith, the Returned King",
   "gbauto-intel": "Tamiyo, Field Researcher",
   gbauto: "Weatherlight",
   gbautomation: "Foundry Inspector",
+  "gbautomation-marketing-client": "Grand Crescendo",
+  "git-manager": "Eternal Witness",
+  "gmail-manager": "Messenger Drake",
+  "google-workspace-manager": "Collective Effort",
+  "ids-facilitator": "Council's Judgment",
+  "jason-diaz": "Jace, Vryn's Prodigy",
+  "knowledge-manager": "Rhystic Study",
+  "observability-manager": "Search for Azcanta",
   "ops-director": "Odric, Master Tactician",
+  "report-manager": "Fact or Fiction",
   "research-analyst": "Azami, Lady of Scrolls",
+  "rocks-steward": "Stonespeaker Crystal",
+  "sales-agent": "Dockside Extortionist",
   "scorecard-analyst": "Mentor of the Meek",
+  "smoke-client": "Smoke Shroud",
   "sprint-manager": "Aurelia, Exemplar of Justice",
+  "supabase-manager": "Chromatic Orrery",
+  "telegram-discord-manager": "Signal the Clans",
+  "trading-bot": "Trade Routes",
 };
 
 const COLOR_NAMES = {
@@ -61,6 +154,10 @@ function sleep(ms) {
 
 function readText(filePath) {
   return fs.readFileSync(filePath, "utf8");
+}
+
+function readJson(filePath) {
+  return JSON.parse(readText(filePath).replace(/^\uFEFF/, ""));
 }
 
 function repoRelative(filePath) {
@@ -223,11 +320,143 @@ function colorName(colors) {
   return colors.map((color) => COLOR_NAMES[color] || color).join("/");
 }
 
+function voteColorName(item) {
+  if (item.color_label) return item.color_label;
+  if (Array.isArray(item.colors) && item.colors.length > 0) return colorName(item.colors);
+  return "";
+}
+
 function imageUris(card) {
   return card.image_uris || card.card_faces?.[0]?.image_uris || {};
 }
 
-async function fetchScryfallCard(cardName) {
+function isScryfallArtCropUrl(value) {
+  return typeof value === "string" && value.includes("cards.scryfall.io/art_crop/");
+}
+
+async function downloadApprovedProfileArt(url, localArtPath) {
+  const response = await fetch(url, {
+    headers: {
+      Accept: "image/*",
+      "User-Agent": "gbautomation-hermes-agent/0.1",
+    },
+  });
+  if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
+  const body = Buffer.from(await response.arrayBuffer());
+  fs.writeFileSync(localArtPath, body);
+}
+
+async function resolveApprovedArtCrop(item) {
+  if (isScryfallArtCropUrl(item.image_source)) {
+    return {
+      card: item.title || "",
+      color: voteColorName(item),
+      edition: item.edition || item.source_set || item.set || "",
+      setCode: String(item.edition_code || "").toLowerCase(),
+      artCropUrl: item.image_source,
+      scryfallUri: item.scryfall || "",
+      fetchedFromScryfall: false,
+    };
+  }
+
+  const scryfallCard = await fetchScryfallCard(item.title);
+  if (!isScryfallArtCropUrl(scryfallCard.artUrl)) {
+    throw new Error(`Scryfall did not return an art_crop URL for "${item.title}"`);
+  }
+  return {
+    ...scryfallCard,
+    artCropUrl: scryfallCard.artUrl,
+    fetchedFromScryfall: true,
+  };
+}
+
+async function buildApprovedMtgAssignments() {
+  if (!fs.existsSync(approvedAvatarVotePath)) {
+    console.warn(`Approved avatar vote export not found: ${approvedAvatarVotePath}`);
+    return {};
+  }
+
+  const voteExport = readJson(approvedAvatarVotePath);
+  const approvedByPath = new Map();
+  for (const item of voteExport.votes || []) {
+    if (item?.vote !== 1 || !item.path) continue;
+    approvedByPath.set(item.path, item);
+  }
+
+  const assignments = {};
+  const usedArtKeys = new Set();
+  fs.mkdirSync(publicProfileArtRoot, { recursive: true });
+
+  for (const [profileId, approvedPath] of Object.entries(PROFILE_APPROVED_ART_PATHS)) {
+    const item = approvedByPath.get(approvedPath);
+    if (!item) {
+      console.warn(`Approved MTG art path is missing from vote export for ${profileId}: ${approvedPath}`);
+      continue;
+    }
+
+    const localArtPath = path.join(publicProfileArtRoot, `${profileId}.jpg`);
+    let artCrop;
+    try {
+      artCrop = await resolveApprovedArtCrop(item);
+      await downloadApprovedProfileArt(artCrop.artCropUrl, localArtPath);
+      if (artCrop.fetchedFromScryfall) await sleep(1000);
+    } catch (error) {
+      console.warn(`Could not resolve approved MTG art crop for ${profileId}: ${error.message}`);
+      if (fs.existsSync(localArtPath)) fs.rmSync(localArtPath);
+      continue;
+    }
+
+    const artKey = `${item.title || ""}|${item.edition_code || item.source_set || item.set || ""}|${item.path}`;
+    if (usedArtKeys.has(artKey)) {
+      console.warn(`Duplicate approved MTG art assignment skipped for ${profileId}: ${artKey}`);
+      continue;
+    }
+    usedArtKeys.add(artKey);
+
+    assignments[profileId] = {
+      card: artCrop.card || item.title || "",
+      color: artCrop.color || voteColorName(item),
+      edition: artCrop.edition || item.edition || item.source_set || item.set || "",
+      setCode: artCrop.setCode || String(item.edition_code || "").toLowerCase(),
+      artUrl: artCrop.artCropUrl,
+      imageUrl: artCrop.artCropUrl,
+      scryfallUri: artCrop.scryfallUri || item.scryfall || "",
+      approvedVote: 1,
+      approvedSourcePath: item.path,
+      approvedArtOnly: true,
+      approvedLocalArtPath: `/profile-art/${profileId}.jpg`,
+      approvedImageDownloaded: fs.existsSync(localArtPath),
+      approvedArtCropSource: artCrop.fetchedFromScryfall ? "scryfall-named-art-crop" : "vote-export-image-source",
+      approvedVoteExport: repoRelative(approvedAvatarVotePath),
+      approvedVoteExportedAt: voteExport.exported_at || "",
+    };
+  }
+
+  return assignments;
+}
+
+function readExistingProfileMtgAssignments() {
+  if (!fs.existsSync(outputPath)) return {};
+  const text = readText(outputPath);
+  const assignments = {};
+  const profileSection = text.split('"profiles": [')[1]?.split('"profileTeams": [')[0] || "";
+  const profileMatches = profileSection.matchAll(
+    /"id": "([^"]+)"[\s\S]*?"mtg": (\{[\s\S]*?\n      \}|null)/g,
+  );
+  for (const match of profileMatches) {
+    const [, profileId, rawMtg] = match;
+    if (rawMtg === "null") continue;
+    const mtg = {};
+    for (const key of ["card", "color", "edition", "setCode", "artUrl", "imageUrl", "scryfallUri"]) {
+      const value = rawMtg.match(new RegExp(`"${key}": "([^"]*)"`));
+      if (value) mtg[key] = value[1];
+    }
+    if (mtg.card || mtg.artUrl || mtg.imageUrl) assignments[profileId] = mtg;
+  }
+  return assignments;
+}
+
+async function fetchScryfallCard(cardName, attempt = 1) {
   const url = `https://api.scryfall.com/cards/named?fuzzy=${encodeURIComponent(cardName)}`;
   const response = await fetch(url, {
     headers: {
@@ -236,33 +465,47 @@ async function fetchScryfallCard(cardName) {
     },
   });
   if (!response.ok) {
+    if (response.status === 429 && attempt < 4) {
+      await sleep(2000 * attempt);
+      return fetchScryfallCard(cardName, attempt + 1);
+    }
     throw new Error(`${response.status} ${response.statusText}`);
   }
   const card = await response.json();
   const images = imageUris(card);
+  if (!images.art_crop) {
+    throw new Error(`No art_crop image available for "${card.name || cardName}"`);
+  }
   return {
     card: card.name || cardName,
     color: colorName(card.colors || card.color_identity),
     edition: card.set_name || "",
     setCode: card.set || "",
-    artUrl: images.art_crop || images.normal || "",
-    imageUrl: images.normal || images.large || images.png || "",
+    artUrl: images.art_crop,
+    imageUrl: images.art_crop,
     scryfallUri: card.scryfall_uri || "",
   };
 }
 
-async function buildManualMtgAssignments() {
+async function buildManualMtgAssignments(approvedMtgAssignments = {}) {
   const assignments = {};
+  const existingAssignments = readExistingProfileMtgAssignments();
   const seenCards = new Set();
   for (const [profileId, cardName] of Object.entries(PROFILE_MTG_CARD_NAMES)) {
+    if (approvedMtgAssignments[profileId]) continue;
     if (seenCards.has(cardName)) continue;
     seenCards.add(cardName);
     try {
       assignments[profileId] = await fetchScryfallCard(cardName);
     } catch (error) {
-      console.warn(`Could not fetch MTG card "${cardName}" for ${profileId}: ${error.message}`);
+      if (existingAssignments[profileId]) {
+        assignments[profileId] = existingAssignments[profileId];
+        console.warn(`Reused existing MTG art for ${profileId}; could not fetch "${cardName}": ${error.message}`);
+      } else {
+        console.warn(`Could not fetch MTG card "${cardName}" for ${profileId}: ${error.message}`);
+      }
     }
-    await sleep(110);
+    await sleep(1000);
   }
   return assignments;
 }
@@ -509,7 +752,11 @@ function buildProfileTeams(profiles) {
   return profileTeams;
 }
 
-const manualMtgAssignments = await buildManualMtgAssignments();
+const approvedMtgAssignments = await buildApprovedMtgAssignments();
+const manualMtgAssignments = {
+  ...(await buildManualMtgAssignments(approvedMtgAssignments)),
+  ...approvedMtgAssignments,
+};
 const { teams, agents } = buildAiLibrary();
 const profiles = buildProfiles(manualMtgAssignments);
 const profileTeams = buildProfileTeams(profiles);

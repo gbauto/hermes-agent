@@ -37,6 +37,7 @@ import { useI18n } from "@/i18n";
 import { usePageHeader } from "@/contexts/usePageHeader";
 import { PluginSlot } from "@/plugins";
 import { cn } from "@/lib/utils";
+import { useTenant } from "@/lib/tenant";
 
 const MODES = ["live", "evidence", "traces"] as const;
 const FILES = ["agent", "errors", "gateway"] as const;
@@ -184,6 +185,7 @@ export default function LogsPage() {
   const scrollRef = useRef<HTMLDivElement>(null);
   const { t } = useI18n();
   const { setAfterTitle, setEnd } = usePageHeader();
+  const tenant = useTenant();
 
   const fetchLiveLogs = useCallback(() => {
     setLoading(true);
@@ -204,20 +206,21 @@ export default function LogsPage() {
 
   const supabaseParams = useMemo(
     () => ({
+      client: tenant,
       days: supabaseDays,
       limit: supabaseLimit,
       repo: repoFilter.trim() || undefined,
       search: search.trim() || undefined,
       workdir: workdirFilter.trim() || undefined,
     }),
-    [repoFilter, search, supabaseDays, supabaseLimit, workdirFilter],
+    [repoFilter, search, supabaseDays, supabaseLimit, tenant, workdirFilter],
   );
 
   const fetchSupabaseLogs = useCallback(() => {
     setLoading(true);
     setError(null);
     void api
-      .getSupabaseLogsSummary()
+      .getSupabaseLogsSummary({ client: tenant })
       .then(setSummary)
       .catch((err) => setError(String(err)));
 
@@ -253,7 +256,7 @@ export default function LogsPage() {
       })
       .catch((err) => setError(String(err)))
       .finally(() => setLoading(false));
-  }, [evidenceTab, mode, supabaseDays, supabaseParams]);
+  }, [evidenceTab, mode, supabaseDays, supabaseParams, tenant]);
 
   const fetchCurrent = useCallback(() => {
     if (mode === "live") {
@@ -270,7 +273,7 @@ export default function LogsPage() {
         <Badge tone="secondary" className="text-[10px]">
           {mode === "live"
             ? `${file} · ${level} · ${component}`
-            : `${formatLabel(mode)} · ${supabaseDays}d · ${supabaseLimit}`}
+            : `${formatLabel(mode)} · ${tenant} · ${supabaseDays}d · ${supabaseLimit}`}
         </Badge>
       </span>,
     );
@@ -320,6 +323,7 @@ export default function LogsPage() {
     setEnd,
     supabaseDays,
     supabaseLimit,
+    tenant,
     t.common.live,
     t.common.refresh,
     t.logs.autoRefresh,

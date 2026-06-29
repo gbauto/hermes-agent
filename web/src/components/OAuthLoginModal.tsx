@@ -6,6 +6,7 @@ import { Spinner } from "@nous-research/ui/ui/components/spinner";
 import { H2 } from "@/components/NouiTypography";
 import { api, type OAuthProvider, type OAuthStartResponse } from "@/lib/api";
 import { Input } from "@/components/ui/input";
+import { useModalBehavior } from "@/hooks/useModalBehavior";
 import { useI18n } from "@/i18n";
 
 interface Props {
@@ -154,6 +155,18 @@ export function OAuthLoginModal({ provider, onClose, onSuccess }: Props) {
     if (e.target === e.currentTarget) handleClose();
   };
 
+  const modalRef = useModalBehavior({
+    open: true,
+    onClose: () => {
+      void handleClose();
+    },
+    onSubmit: () => {
+      void handleSubmitPkceCode();
+    },
+    canSubmit: start?.flow === "pkce" && phase === "awaiting_user" && !!pkceCode.trim(),
+    focusSelector: start?.flow === "pkce" && phase === "awaiting_user" ? "input" : "button",
+  });
+
   const fmtTime = (s: number | null) => {
     if (s === null) return "";
     const m = Math.floor(s / 60);
@@ -163,6 +176,7 @@ export function OAuthLoginModal({ provider, onClose, onSuccess }: Props) {
 
   return (
     <div
+      ref={modalRef}
       className="fixed inset-0 z-[100] flex items-center justify-center bg-background/85 backdrop-blur-sm p-4"
       onClick={handleBackdrop}
       role="dialog"

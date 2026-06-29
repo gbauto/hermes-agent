@@ -1,7 +1,7 @@
-import { useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import { AlertTriangle } from "lucide-react";
 import { Button } from "@nous-research/ui/ui/components/button";
+import { useModalBehavior } from "@/hooks/useModalBehavior";
 import { cn } from "@/lib/utils";
 
 export function ConfirmDialog({
@@ -15,34 +15,13 @@ export function ConfirmDialog({
   open,
   title,
 }: ConfirmDialogProps) {
-  const dialogRef = useRef<HTMLDivElement>(null);
-
-  // Focus the confirm button when opened; trap ESC to cancel.
-  useEffect(() => {
-    if (!open) return;
-
-    const prevActive = document.activeElement as HTMLElement | null;
-    dialogRef.current
-      ?.querySelector<HTMLButtonElement>("[data-confirm]")
-      ?.focus();
-
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        e.preventDefault();
-        onCancel();
-      }
-    };
-
-    document.addEventListener("keydown", onKey);
-    const prevOverflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-
-    return () => {
-      document.removeEventListener("keydown", onKey);
-      document.body.style.overflow = prevOverflow;
-      prevActive?.focus?.();
-    };
-  }, [open, onCancel]);
+  const dialogRef = useModalBehavior({
+    open,
+    onClose: onCancel,
+    onSubmit: onConfirm,
+    canSubmit: !loading,
+    focusSelector: "[data-confirm]",
+  });
 
   if (!open) return null;
 

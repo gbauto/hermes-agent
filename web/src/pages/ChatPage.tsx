@@ -109,6 +109,7 @@ export default function ChatPage({ isActive = true }: { isActive?: boolean }) {
   const termRef = useRef<Terminal | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
+  const handledPromptRef = useRef<string | null>(null);
   // Exposed to the main metrics-sync effect so it can refit the terminal
   // the moment `isActive` flips back to true (display:none → display:flex
   // collapses the host's box, so ResizeObserver never fires on return).
@@ -156,6 +157,8 @@ export default function ChatPage({ isActive = true }: { isActive?: boolean }) {
   // treat the current resume target as part of the PTY identity and rebuild the
   // terminal session when it changes.
   const resumeParam = searchParams.get("resume");
+  const promptParam = searchParams.get("prompt");
+  const autoSendPrompt = searchParams.get("send") === "1";
   const channel = useMemo(() => generateChannelId(), [resumeParam]);
 
   useEffect(() => {
@@ -651,6 +654,46 @@ export default function ChatPage({ isActive = true }: { isActive?: boolean }) {
       }
     };
   }, [channel, resumeParam]);
+
+  useEffect(() => {
+    if (!isActive || !promptParam || !autoSendPrompt) return;
+    if (handledPromptRef.current === promptParam) return;
+
+    let cancelled = false;
+    const sendPrompt = () => {
+      const ws = wsRef.current;
+      if (!ws || ws.readyState !== WebSocket.OPEN) return false;
+      handledPromptRef.current = promptParam;
+      ws.send(promptParam);
+      ws.send("\r");
+      const next = new URLSearchParams(searchParams);
+      next.delete("prompt");
+      next.delete("send");
+      setSearchParams(next, { replace: true });
+      return true;
+    };
+
+    if (sendPrompt()) return;
+
+    const interval = window.setInterval(() => {
+      if (cancelled || sendPrompt()) window.clearInterval(interval);
+    }, 150);
+    const timeout = window.setTimeout(() => {
+      window.clearInterval(interval);
+    }, 5000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+      window.clearTimeout(timeout);
+    };
+  }, [
+    autoSendPrompt,
+    isActive,
+    promptParam,
+    searchParams,
+    setSearchParams,
+  ]);
 
   // When the user returns to the chat tab (isActive: false → true), the
   // terminal host just transitioned from display:none to display:flex.

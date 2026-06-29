@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from "react";
+import { useSearchParams } from "react-router-dom";
 import { AlertTriangle, MessageSquare, Send } from "lucide-react";
 
 import { type ChatRow, loadMessages, sendMessage } from "@/lib/dashboardChat";
@@ -22,6 +23,7 @@ function roleClass(role: string): "user" | "assistant" | "system" {
 export default function SupabaseChatPage() {
   const tenant = useTenant();
   const option = tenantOption(tenant);
+  const [searchParams, setSearchParams] = useSearchParams();
   const [messages, setMessages] = useState<ChatRow[]>([]);
   const [draft, setDraft] = useState("");
   const [loading, setLoading] = useState(false);
@@ -29,6 +31,9 @@ export default function SupabaseChatPage() {
   const [error, setError] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const lastTs = useRef<string | null>(null);
+  const handledPromptRef = useRef<string | null>(null);
+  const promptParam = searchParams.get("prompt");
+  const autoSendPrompt = searchParams.get("send") === "1";
 
   const scrollToBottom = useCallback(() => {
     requestAnimationFrame(() => {
@@ -90,21 +95,47 @@ export default function SupabaseChatPage() {
     return () => window.clearInterval(id);
   }, [tenant, merge]);
 
-  const onSend = useCallback(async () => {
-    const text = draft.trim();
-    if (!text || sending) return;
+  const sendText = useCallback(async (text: string) => {
+    const trimmed = text.trim();
+    if (!trimmed || sending) return;
     setSending(true);
     setError(null);
     try {
-      await sendMessage(tenant, SESSION_ID, text);
-      setDraft("");
+      await sendMessage(tenant, SESSION_ID, trimmed);
       merge(await loadMessages(tenant, lastTs.current ?? undefined));
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to send");
     } finally {
       setSending(false);
     }
-  }, [draft, sending, tenant, merge]);
+  }, [sending, tenant, merge]);
+
+  const onSend = useCallback(async () => {
+    await sendText(draft);
+    setDraft("");
+  }, [draft, sendText]);
+
+  useEffect(() => {
+    if (!promptParam) return;
+    if (!autoSendPrompt) {
+      setDraft(promptParam);
+      return;
+    }
+    if (handledPromptRef.current === promptParam) return;
+    handledPromptRef.current = promptParam;
+    void sendText(promptParam).finally(() => {
+      const next = new URLSearchParams(searchParams);
+      next.delete("prompt");
+      next.delete("send");
+      setSearchParams(next, { replace: true });
+    });
+  }, [
+    autoSendPrompt,
+    promptParam,
+    searchParams,
+    sendText,
+    setSearchParams,
+  ]);
 
   const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && !e.shiftKey) {

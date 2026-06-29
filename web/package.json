@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
+    "gbauto:lineage": "node scripts/export_prd_lineage.mjs",
     "lint": "eslint .",
     "preview": "vite preview"
   },

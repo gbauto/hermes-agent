@@ -17,6 +17,8 @@ import {
   useContractMap,
   useSupabaseContractsIndex,
 } from "@/lib/gbautoSupabaseContracts";
+import { api } from "@/lib/api";
+import type { AgentProfileCatalogResponse } from "@/lib/api";
 import { useTenant } from "@/lib/tenant";
 import type {
   SupabaseContractRow,
@@ -50,16 +52,6 @@ interface SupabaseTable {
     top_groups?: Record<string, number>;
   };
   time_col?: string | null;
-}
-
-interface KanbanTeamIndex {
-  indexed_at?: string;
-  teams?: Array<{
-    display_name?: string;
-    orchestrator_profile?: string;
-    specialist_profiles?: string[];
-    team_id: string;
-  }>;
 }
 
 const DASHBOARD_ROUTES = [
@@ -146,12 +138,26 @@ function getTable(snapshot: SupabaseSnapshot | null, name: string) {
 }
 
 // --- Tenant scoping -------------------------------------------------------
-// Tables whose rows carry a `client_slug` column are client-scoped and get
-// filtered to the active tenant. Tables without it (cron, langfuse_traces,
-// skill_runs, tac_*) are global infra data and pass through unchanged
-// ("filter what's filterable").
-function isClientScoped(rows: Record<string, unknown>[]) {
-  return rows.length > 0 && Object.prototype.hasOwnProperty.call(rows[0], "client_slug");
+// Tables whose rows carry an explicit tenant/client marker are client-scoped
+// and get filtered to the active tenant. This includes durable skill rows
+// that use `invoked_by = tenant:<slug>` instead of `client_slug`.
+function rowMatchesTenant(row: Record<string, unknown>, tenant: string) {
+  const expected = tenant.toLowerCase();
+  if (Object.prototype.hasOwnProperty.call(row, "client_slug")) {
+    return String(row.client_slug ?? "").toLowerCase() === expected;
+  }
+  if (Object.prototype.hasOwnProperty.call(row, "tenant")) {
+    return String(row.tenant ?? "").toLowerCase() === expected;
+  }
+  if (Object.prototype.hasOwnProperty.call(row, "invoked_by")) {
+    return String(row.invoked_by ?? "").toLowerCase() === `tenant:${expected}`;
+  }
+  return true;
+}
+
+function isTenantScoped(rows: Record<string, unknown>[]) {
+  const row = rows[0];
+  return !!row && ["client_slug", "tenant", "invoked_by"].some((key) => Object.prototype.hasOwnProperty.call(row, key));
 }
 
 function countBy(rows: Record<string, unknown>[], col: string) {
@@ -182,8 +188,8 @@ function recomputeSummary(
 }
 
 function scopeTableToTenant(table: SupabaseTable, tenant: string): SupabaseTable {
-  if (!isClientScoped(table.rows)) return table;
-  const rows = table.rows.filter((row) => String(row.client_slug ?? "") === tenant);
+  if (!isTenantScoped(table.rows)) return table;
+  const rows = table.rows.filter((row) => rowMatchesTenant(row, tenant));
   return { ...table, rows, summary: recomputeSummary(table, rows) };
 }
 
@@ -445,17 +451,25 @@ function useSupabaseSnapshot() {
   return snapshot;
 }
 
-function useKanbanTeamIndex() {
-  const [index, setIndex] = useState<KanbanTeamIndex | null>(null);
+function useAgentProfileCatalog(tenant: string) {
+  const [catalog, setCatalog] = useState<AgentProfileCatalogResponse | null>(null);
 
   useEffect(() => {
-    void fetch("/gbauto-supabase/kanban-team-index.json")
-      .then((response) => response.json())
-      .then((data: KanbanTeamIndex) => setIndex(data))
-      .catch(() => setIndex(null));
-  }, []);
+    let cancelled = false;
+    void api
+      .getAgentProfileCatalog(tenant)
+      .then((data) => {
+        if (!cancelled) setCatalog(data.ok ? data : null);
+      })
+      .catch(() => {
+        if (!cancelled) setCatalog(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [tenant]);
 
-  return index;
+  return catalog;
 }
 
 function SupabaseAllTables({
@@ -561,12 +575,14 @@ function KanbanFocused({
   snapshot: SupabaseSnapshot | null;
 }) {
   const [query, setQuery] = useState("");
+  const tenant = useTenant();
   const contractMap = useContractMap(contractsIndex);
-  const teamIndex = useKanbanTeamIndex();
+  const agentProfileCatalog = useAgentProfileCatalog(tenant);
   const agentRuns = getTable(snapshot, "agent_runs");
   const dispatchLinks = getTable(snapshot, "prd_kanban_dispatch_links");
   const kanbanTasks = getTable(snapshot, "kanban_tasks");
-  const profileTeams = getTable(snapshot, "kanban_profile_teams");
+  const profileTeams = getTable(snapshot, "agent_profile_teams");
+  const agentProfiles = getTable(snapshot, "agent_profiles");
   const agentRows = agentRuns?.rows ?? [];
   const boards = new Set(agentRows.map((row) => row.board_slug).filter(Boolean)).size;
 
@@ -576,7 +592,7 @@ function KanbanFocused({
         <StatCard icon={Workflow} label="Agent Runs" sub="Hermes board mirror" value={agentRows.length} />
         <StatCard icon={GitBranch} label="Boards" sub="distinct board slugs" value={boards} />
         <StatCard icon={Table2} label="Dispatch Links" sub="PRD to task/run" value={dispatchLinks?.rows.length ?? 0} />
-        <StatCard icon={Database} label="Profile Teams" sub={profileTeams?.error ? "repo fallback" : "Supabase"} value={profileTeams?.rows.length || teamIndex?.teams?.length || "-"} />
+        <StatCard icon={Database} label="Profile Teams" sub="Supabase agent_profile_teams" value={profileTeams?.rows.length || agentProfileCatalog?.teams.length || "-"} />
       </section>
       <section className="supabase-toolbar">
         <div className="supabase-search">
@@ -584,15 +600,15 @@ function KanbanFocused({
           <input aria-label="Filter Kanban rows" onChange={(event) => setQuery(event.target.value)} placeholder="Filter cards, profiles, board, status" value={query} />
         </div>
       </section>
-      {profileTeams?.error ? (
+      {!profileTeams && agentProfileCatalog?.teams.length ? (
         <section className="supabase-note">
-          <AlertTriangle className="h-4 w-4" />
-          <span>Profile-team tables are not exposed in the live Supabase snapshot yet. Showing the repo-generated team index fallback from {formatDate(teamIndex?.indexed_at)}.</span>
+          <CheckCircle2 className="h-4 w-4" />
+          <span>Profile teams are loaded live from Supabase agent_profile_teams for {tenant}; the bundled snapshot is stale.</span>
         </section>
       ) : null}
-      {teamIndex?.teams?.length ? (
+      {agentProfileCatalog?.teams.length ? (
         <section className="supabase-team-strip">
-          {teamIndex.teams.slice(0, 6).map((team) => (
+          {agentProfileCatalog.teams.slice(0, 6).map((team) => (
             <article key={team.team_id}>
               <strong>{team.display_name ?? team.team_id}</strong>
               <span>{team.orchestrator_profile ?? "no orchestrator"} · {team.specialist_profiles?.length ?? 0} specialists</span>
@@ -604,6 +620,8 @@ function KanbanFocused({
         {agentRuns ? <TableCard contract={contractMap.get(agentRuns.name)} query={query} table={agentRuns} /> : null}
         {dispatchLinks ? <TableCard contract={contractMap.get(dispatchLinks.name)} query={query} table={dispatchLinks} /> : null}
         {kanbanTasks ? <TableCard contract={contractMap.get(kanbanTasks.name)} query={query} table={kanbanTasks} /> : null}
+        {agentProfiles ? <TableCard contract={contractMap.get(agentProfiles.name)} query={query} table={agentProfiles} /> : null}
+        {profileTeams ? <TableCard contract={contractMap.get(profileTeams.name)} query={query} table={profileTeams} /> : null}
       </section>
     </>
   );

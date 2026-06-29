@@ -28,9 +28,11 @@ import {
   GitBranch,
   Globe,
   Heart,
+  Home as HomeIcon,
   KeyRound,
   Menu,
   MessageSquare,
+  Milestone,
   Package,
   Puzzle,
   RadioTower,
@@ -69,6 +71,7 @@ import ConfigPage from "@/pages/ConfigPage";
 import DocsPage from "@/pages/DocsPage";
 import EnvPage from "@/pages/EnvPage";
 import SessionsPage from "@/pages/SessionsPage";
+import HomePage from "@/pages/HomePage";
 import LogsPage from "@/pages/LogsPage";
 import AnalyticsPage from "@/pages/AnalyticsPage";
 import ModelsPage from "@/pages/ModelsPage";
@@ -76,8 +79,9 @@ import CronPage from "@/pages/CronPage";
 import DocumentsPage from "@/pages/DocumentsPage";
 import GbAutomationOverviewPage from "@/pages/GbAutomationOverviewPage";
 import GbAutomationReposPage from "@/pages/GbAutomationReposPage";
+import PrdLineagePage from "@/pages/PrdLineagePage";
 import { KanbanPage, LangfusePage, SupabasePage } from "@/pages/SupabaseIndexesPage";
-import ProfilesPage, { ProfileDetailPage } from "@/pages/ProfilesPage";
+import ProfilesPage, { ProfileDetailPage, ProfileTeamDetailPage } from "@/pages/ProfilesPage";
 import SkillsPage from "@/pages/SkillsPage";
 import PluginsPage from "@/pages/PluginsPage";
 import ChatPage from "@/pages/ChatPage";
@@ -93,7 +97,7 @@ import { isDashboardEmbeddedChatEnabled } from "@/lib/dashboard-flags";
 import { api } from "@/lib/api";
 
 function RootRedirect() {
-  return <Navigate to="/sessions" replace />;
+  return <Navigate to="/home" replace />;
 }
 
 function UnknownRouteFallback({ pluginsLoading }: { pluginsLoading: boolean }) {
@@ -122,6 +126,7 @@ const CHAT_NAV_ITEM: NavItem = {
  */
 const BUILTIN_ROUTES_CORE: Record<string, ComponentType> = {
   "/": RootRedirect,
+  "/home": HomePage,
   "/sessions": SessionsPage,
   "/analytics": AnalyticsPage,
   "/models": ModelsPage,
@@ -130,9 +135,11 @@ const BUILTIN_ROUTES_CORE: Record<string, ComponentType> = {
   "/skills": SkillsPage,
   "/plugins": PluginsPage,
   "/profiles": ProfilesPage,
+  "/profiles/teams/:teamId": ProfileTeamDetailPage,
   "/profiles/:profileId": ProfileDetailPage,
   "/overview": GbAutomationOverviewPage,
   "/repos": GbAutomationReposPage,
+  "/lineage": PrdLineagePage,
   "/supabase": SupabasePage,
   "/langfuse": LangfusePage,
   // Data-plane table view lives at /kanban-data so the Kanban *plugin board*
@@ -155,6 +162,11 @@ function ChatRouteSink() {
 }
 
 const BUILTIN_NAV_REST: NavItem[] = [
+  {
+    path: "/home",
+    label: "Home",
+    icon: HomeIcon,
+  },
   {
     path: "/sessions",
     labelKey: "sessions",
@@ -191,6 +203,7 @@ const BUILTIN_NAV_REST: NavItem[] = [
 const GB_AUTOMATION_NAV: NavItem[] = [
   { path: "/overview", label: "Overview", icon: BarChart3 },
   { path: "/repos", label: "Repos", icon: GitBranch },
+  { path: "/lineage", label: "Lineage", icon: Milestone },
   { path: "/supabase", label: "Supabase", icon: Database },
   { path: "/langfuse", label: "Langfuse", icon: RadioTower },
   { path: "/kanban-data", label: "Kanban Data", icon: Workflow },
@@ -216,6 +229,7 @@ const ICON_MAP: Record<string, ComponentType<{ className?: string }>> = {
   Terminal,
   Globe,
   Database,
+  Milestone,
   Shield,
   Users,
   Wrench,
@@ -263,6 +277,32 @@ function buildNavItems(
   }
 
   return items;
+}
+
+function navJoinKey(item: NavItem): string {
+  return item.label.toLowerCase().replace(/[^a-z0-9]+/g, "");
+}
+
+function mergeGbAutomationNav(core: NavItem[]): NavItem[] {
+  const merged = [...core];
+  const usedGbPaths = new Set<string>();
+
+  for (const gbItem of GB_AUTOMATION_NAV) {
+    const gbKey = navJoinKey(gbItem);
+    const matchIndex = merged.findIndex(
+      (item) => item.path === gbItem.path || navJoinKey(item) === gbKey,
+    );
+    if (matchIndex >= 0) {
+      merged[matchIndex] = { ...merged[matchIndex], ...gbItem };
+      usedGbPaths.add(gbItem.path);
+    }
+  }
+
+  for (const gbItem of GB_AUTOMATION_NAV) {
+    if (!usedGbPaths.has(gbItem.path)) merged.push(gbItem);
+  }
+
+  return merged;
 }
 
 /** Split merged nav into built-in sidebar entries vs plugin tabs, preserving plugin order hints. */
@@ -344,6 +384,21 @@ function buildRoutes(
   return routes;
 }
 
+function isEditableShortcutTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false;
+  return (
+    target.tagName === "INPUT" ||
+    target.tagName === "TEXTAREA" ||
+    target.tagName === "SELECT" ||
+    target.isContentEditable ||
+    target.closest("[contenteditable='true'], [role='textbox']") !== null
+  );
+}
+
+function isInsideDialog(target: EventTarget | null): boolean {
+  return target instanceof HTMLElement && target.closest("[role='dialog']") !== null;
+}
+
 export default function App() {
   const { t } = useI18n();
   const { pathname } = useLocation();
@@ -416,8 +471,11 @@ export default function App() {
     // Chat is always available now (terminal when --tui, Supabase web chat
     // otherwise), so the nav item shows regardless of embedded-chat mode.
     const base = [CHAT_NAV_ITEM, ...BUILTIN_NAV_REST];
-    return showTokenAnalytics ? base : base.filter((n) => n.path !== "/analytics");
-  }, [embeddedChat, showTokenAnalytics]);
+    const visibleBase = showTokenAnalytics
+      ? base
+      : base.filter((n) => n.path !== "/analytics");
+    return mergeGbAutomationNav(visibleBase);
+  }, [showTokenAnalytics]);
 
   const sidebarNav = useMemo(
     () => partitionSidebarNav(builtinNav, manifests),
@@ -494,6 +552,15 @@ export default function App() {
         },
       },
       {
+        description: "Open the PRD to sprint, Kanban, commit, and PR lineage page.",
+        keys: "Ctrl+Y",
+        label: "PRD Lineage",
+        run: () => {
+          closeCommandLayer();
+          navigate("/lineage");
+        },
+      },
+      {
         description: "Open the Hermes Kanban plugin board.",
         keys: "Ctrl+M",
         label: "Hermes Board",
@@ -517,20 +584,48 @@ export default function App() {
         label: "Shortcuts reference",
         run: () => setCommandLayerMode("shortcuts"),
       },
+      {
+        description: "Return to the previous dashboard page.",
+        keys: "Backspace",
+        label: "Previous page",
+        run: () => {
+          closeCommandLayer();
+          navigate(-1);
+        },
+      },
     ],
     [closeCommandLayer, navigate],
   );
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
+      const target = event.target;
+      const isTypingTarget = isEditableShortcutTarget(target);
+
+      if (
+        event.key === "Backspace" &&
+        !event.ctrlKey &&
+        !event.metaKey &&
+        !event.altKey &&
+        !event.shiftKey
+      ) {
+        if (
+          event.defaultPrevented ||
+          commandLayerMode ||
+          mobileOpen ||
+          isTypingTarget ||
+          isInsideDialog(target)
+        ) {
+          return;
+        }
+        event.preventDefault();
+        navigate(-1);
+        return;
+      }
+
       const modifier = event.ctrlKey || event.metaKey || event.altKey;
       if (!modifier) return;
 
-      const target = event.target as HTMLElement | null;
-      const isTypingTarget =
-        target?.tagName === "INPUT" ||
-        target?.tagName === "TEXTAREA" ||
-        target?.isContentEditable === true;
       const key = event.key.toLowerCase();
       const isAltOnly = event.altKey && !event.ctrlKey && !event.metaKey;
 
@@ -562,6 +657,10 @@ export default function App() {
         event.preventDefault();
         navigate("/repos");
         closeCommandLayer();
+      } else if (key === "y" && !isAltOnly) {
+        event.preventDefault();
+        navigate("/lineage");
+        closeCommandLayer();
       } else if (event.key === ";" && !isAltOnly) {
         event.preventDefault();
         navigate("/skills");
@@ -574,7 +673,7 @@ export default function App() {
 
     document.addEventListener("keydown", onKey, true);
     return () => document.removeEventListener("keydown", onKey, true);
-  }, [closeCommandLayer, navigate]);
+  }, [closeCommandLayer, commandLayerMode, mobileOpen, navigate]);
 
   useEffect(() => {
     if (!mobileOpen) return;
@@ -634,8 +733,7 @@ export default function App() {
         </Button>
 
         <Typography
-          className="font-bold text-[0.95rem] leading-[0.95] tracking-[0.05em] text-midground"
-          style={{ mixBlendMode: "plus-lighter" }}
+          className="hermes-wordmark font-bold text-[0.95rem] leading-[0.95] tracking-[0.05em]"
         >
           {t.app.brand}
         </Typography>
@@ -685,8 +783,7 @@ export default function App() {
                 <PluginSlot name="header-left" />
 
                 <Typography
-                  className="font-bold text-[1.125rem] leading-[0.95] tracking-[0.0525rem] text-midground"
-                  style={{ mixBlendMode: "plus-lighter" }}
+                  className="hermes-wordmark font-bold text-[1.125rem] leading-[0.95] tracking-[0.0525rem]"
                 >
                   Hermes
                   <br />
@@ -723,6 +820,9 @@ export default function App() {
               aria-label={t.app.navigation}
             >
               <ul className="flex flex-col">
+                <li className="px-4 pb-2">
+                  <TenantSwitcher />
+                </li>
                 {sidebarNav.coreItems.map((item) => (
                   <SidebarNavLink
                     closeMobile={closeMobile}
@@ -761,35 +861,6 @@ export default function App() {
                   </ul>
                 </div>
               )}
-
-              <div
-                aria-labelledby="hermes-sidebar-gbauto-nav-heading"
-                className="gbauto-sidebar-section flex flex-col border-t border-current/10 pb-2"
-                role="group"
-              >
-                <span
-                  className={cn(
-                    "px-5 pt-2.5 pb-1",
-                    "font-mondwest text-[0.6rem] tracking-[0.15em] uppercase opacity-30",
-                  )}
-                  id="hermes-sidebar-gbauto-nav-heading"
-                >
-                  GBAutomation
-                </span>
-
-                <TenantSwitcher />
-
-                <ul className="flex flex-col">
-                  {GB_AUTOMATION_NAV.map((item) => (
-                    <SidebarNavLink
-                      closeMobile={closeMobile}
-                      item={item}
-                      key={`gbauto:${item.path}`}
-                      t={t}
-                    />
-                  ))}
-                </ul>
-              </div>
             </nav>
 
             <SidebarSystemActions onNavigate={closeMobile} />

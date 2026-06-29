@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import {
   BookOpen,
   Check,
@@ -11,6 +11,9 @@ import {
   TableProperties,
   X,
 } from "lucide-react";
+import { submitDashboardFeedback } from "@/lib/dashboardFeedback";
+import { useTenant } from "@/lib/tenant";
+import { useModalBehavior } from "@/hooks/useModalBehavior";
 
 export type CommandLayerMode = "commands" | "feedback" | "shortcuts";
 
@@ -34,28 +37,11 @@ export function CommandLayerOverlay({
 }) {
   const [query, setQuery] = useState("");
   const [feedback, setFeedback] = useState("");
+  const [error, setError] = useState("");
+  const [receipt, setReceipt] = useState("");
   const [submitted, setSubmitted] = useState(false);
-  const inputRef = useRef<HTMLInputElement>(null);
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
-
-  useEffect(() => {
-    const timer = window.setTimeout(() => {
-      if (mode === "feedback") textareaRef.current?.focus();
-      else inputRef.current?.focus();
-    }, 80);
-    return () => window.clearTimeout(timer);
-  }, [mode]);
-
-  useEffect(() => {
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        onClose();
-      }
-    };
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [onClose]);
+  const [submitting, setSubmitting] = useState(false);
+  const tenant = useTenant();
 
   const filteredActions = useMemo(() => {
     const normalized = query.trim().toLowerCase();
@@ -65,13 +51,51 @@ export function CommandLayerOverlay({
     );
   }, [actions, query]);
 
-  const submitFeedback = () => {
-    setSubmitted(true);
-    window.setTimeout(() => setSubmitted(false), 2000);
-  };
+  const submitFeedback = useCallback(async () => {
+    const message = feedback.trim();
+    if (!message || submitting) return;
+    setSubmitting(true);
+    setError("");
+    setReceipt("");
+    try {
+      const row = await submitDashboardFeedback({
+        message,
+        route,
+        pageUrl: window.location.href,
+        clientSlug: tenant,
+        metadata: {
+          page_title: document.title,
+          selected_text: window.getSelection()?.toString() || null,
+          viewport: {
+            width: window.innerWidth,
+            height: window.innerHeight,
+          },
+        },
+      });
+      setSubmitted(true);
+      setReceipt(row?.feedback_id ? `Saved ${row.feedback_id}` : "Feedback saved");
+      setFeedback("");
+      window.setTimeout(() => setSubmitted(false), 2400);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Feedback submit failed");
+    } finally {
+      setSubmitting(false);
+    }
+  }, [feedback, route, submitting, tenant]);
+
+  const modalRef = useModalBehavior({
+    open: true,
+    onClose,
+    onSubmit: () => {
+      if (mode === "feedback") void submitFeedback();
+    },
+    canSubmit: mode === "feedback" && !!feedback.trim() && !submitting,
+    focusSelector: mode === "feedback" ? "textarea" : "input",
+  });
 
   return (
     <div
+      ref={modalRef}
       aria-modal="true"
       className="command-layer-backdrop"
       onClick={(event) => {
@@ -103,23 +127,31 @@ export function CommandLayerOverlay({
             <label>
               <span>Notes</span>
               <textarea
-                ref={textareaRef}
                 onChange={(event) => setFeedback(event.target.value)}
-                placeholder="Describe what should change. This is staged locally until the Supabase feedback endpoint is wired."
+                placeholder="Describe what should change."
                 value={feedback}
               />
             </label>
-            <button className="command-layer-submit" onClick={submitFeedback} type="button">
+            <button
+              className="command-layer-submit"
+              disabled={!feedback.trim() || submitting}
+              onClick={submitFeedback}
+              type="button"
+            >
               {submitted ? <Check className="h-3.5 w-3.5" /> : <Send className="h-3.5 w-3.5" />}
-              {submitted ? "Feedback staged" : "Submit feedback"}
+              {submitting ? "Saving..." : submitted ? "Feedback saved" : "Submit feedback"}
             </button>
+            {(receipt || error) && (
+              <p className={error ? "command-feedback-status is-error" : "command-feedback-status"} role="status">
+                {error || receipt}
+              </p>
+            )}
           </div>
         ) : (
           <>
             <label className="command-layer-search">
               <Search className="h-4 w-4" />
               <input
-                ref={inputRef}
                 onChange={(event) => setQuery(event.target.value)}
                 onKeyDown={(event) => {
                   if (event.key === "Enter" && filteredActions[0]) {
