@@ -15,6 +15,7 @@ import os
 import tempfile
 import html as _html
 import re
+from collections import deque
 from datetime import datetime, timezone
 from typing import Dict, List, Optional, Any
 
@@ -34,6 +35,10 @@ try:
         ContextTypes,
         filters,
     )
+    try:
+        from telegram.ext import TypeHandler as TelegramTypeHandler
+    except ImportError:
+        TelegramTypeHandler = None
     from telegram.constants import ParseMode, ChatType
     from telegram.request import HTTPXRequest
     TELEGRAM_AVAILABLE = True
@@ -49,6 +54,7 @@ except ImportError:
     CommandHandler = Any
     CallbackQueryHandler = Any
     TelegramMessageHandler = Any
+    TelegramTypeHandler = None
     HTTPXRequest = Any
     filters = None
     ParseMode = None
@@ -80,6 +86,16 @@ from gateway.platforms.base import (
     SUPPORTED_DOCUMENT_TYPES,
     SUPPORTED_IMAGE_DOCUMENT_TYPES,
     utf16_len,
+)
+from gateway.platforms.telegram_agent_runtime import (
+    CLASSIC_UPDATE_KEYS,
+    TelegramAgentEventKind,
+    TelegramAgentFeatureFlags,
+    TelegramAgentRoute,
+    TelegramBotToBotGuard,
+    normalize_update as normalize_agent_update,
+    route_event as route_agent_event,
+    sanitize_update_excerpt,
 )
 from gateway.platforms.telegram_network import (
     TelegramFallbackTransport,
@@ -397,6 +413,26 @@ class TelegramAdapter(BasePlatformAdapter):
         self._mention_patterns = self._compile_mention_patterns()
         self._reply_to_mode: str = getattr(config, 'reply_to_mode', 'first') or 'first'
         self._disable_link_previews: bool = self._coerce_bool_extra("disable_link_previews", False)
+        # Bot API 10.x agent surfaces (event-router seam). All five flags
+        # default off (profile `telegram:` keys → env bridge in
+        # gateway/config.py). With every flag off the TypeHandler tap below
+        # is a cheap no-op and gateway behavior is identical to the classic
+        # pipeline. NOTE: these fully-qualified flags are unrelated to the
+        # legacy short `guest_mode` key (mention-gate bypass) — see
+        # telegram_agent_runtime.TelegramAgentFeatureFlags.from_mapping.
+        self._agent_runtime_flags = TelegramAgentFeatureFlags.from_extra_and_env(
+            getattr(config, "extra", None) or {}
+        )
+        # Loop-prevention primitives for bot-to-bot (plan 3.1, gateway part):
+        # max-depth + message-id dedupe enforced BEFORE routing. Bot-origin
+        # senders stay auth-denied by default at the runner gate regardless.
+        self._bot_to_bot_guard = TelegramBotToBotGuard()
+        # Routing seam: typed envelopes land here (bounded) until Phase 4/5
+        # wire real renderers / managed-bot ops. An injectable async callback
+        # (`_agent_runtime_router`) lets downstream phases subscribe without
+        # touching handler code.
+        self._agent_runtime_events: deque = deque(maxlen=64)
+        self._agent_runtime_router = None
         # Buffer rapid/album photo updates so Telegram image bursts are handled
         # as a single MessageEvent instead of self-interrupting multiple turns.
         self._media_batch_delay_seconds = float(os.getenv("HERMES_TELEGRAM_MEDIA_BATCH_DELAY_SECONDS", "0.8"))
@@ -800,6 +836,143 @@ class TelegramAdapter(BasePlatformAdapter):
             return default
         return bool(value)
 
+    # ── Bot API 10.x agent-runtime seam ──────────────────────────────────
+
+    def _agent_allowed_updates(self):
+        """Return the ``allowed_updates`` list for polling/webhook starts.
+
+        Default (option unset): returns ``Update.ALL_TYPES`` unchanged —
+        byte-identical to the previous hard-coded behavior. PTB 22.6 only
+        enumerates update types it knows about, so Bot API 10.x update
+        types (e.g. guest queries) are filtered server-side by Telegram.
+
+        Opt-in widening: profile key ``telegram.extra_allowed_updates``
+        (env ``TELEGRAM_EXTRA_ALLOWED_UPDATES``, comma-separated) appends
+        raw update-type strings to the union. Verified against the pinned
+        PTB v22.6 source: ``Updater.start_polling`` / ``Bot.get_updates`` /
+        ``Bot.set_webhook`` type ``allowed_updates`` as ``Sequence[str]``
+        and pass it verbatim into the request payload — there is NO
+        client-side validation of the names, so unknown 10.x type strings
+        reach the Bot API unmodified and no raw-API escape hatch is needed.
+        """
+        raw = self.config.extra.get("extra_allowed_updates") if getattr(self.config, "extra", None) else None
+        if raw is None:
+            raw = os.getenv("TELEGRAM_EXTRA_ALLOWED_UPDATES", "")
+        if isinstance(raw, str):
+            extras = [part.strip() for part in raw.split(",") if part.strip()]
+        elif isinstance(raw, (list, tuple, set)):
+            extras = [str(part).strip() for part in raw if str(part).strip()]
+        else:
+            extras = []
+        if not extras:
+            return Update.ALL_TYPES
+        base = list(Update.ALL_TYPES)
+        known = set(base)
+        merged = base + [extra for extra in extras if extra not in known]
+        logger.info(
+            "[%s] Widening Telegram allowed_updates with %d extra update type(s): %s",
+            self.name, len(merged) - len(base), ",".join(sorted(set(extras) - known)),
+        )
+        return merged
+
+    async def _handle_agent_runtime_update(self, update, context=None) -> None:
+        """Group-1 tap for Bot API 10.x agent surfaces (flag-gated).
+
+        No-ops unless at least one ``telegram_*_enabled`` profile flag is
+        on. Classic message/voice updates always stay with the group-0
+        handlers; unknown update shapes are logged (key names only — never
+        values) and ignored, matching PTB 22.6's api_kwargs tolerance.
+        """
+        flags = self._agent_runtime_flags
+        if not flags.any_agent_surface_enabled:
+            return
+        try:
+            raw = update.to_dict() if hasattr(update, "to_dict") else dict(update)
+        except Exception:
+            logger.debug("[%s] Agent-runtime tap could not serialize update", self.name, exc_info=True)
+            return
+        if not isinstance(raw, dict):
+            return
+
+        event = normalize_agent_update(raw)
+
+        if event.kind in (TelegramAgentEventKind.MESSAGE, TelegramAgentEventKind.VOICE_NOTE):
+            # Classic pipeline owns these. A human (non-bot) message also
+            # resets the bot-to-bot chain for its chat (loop guard).
+            if not event.from_is_bot:
+                self._bot_to_bot_guard.note_non_bot_activity(event.chat_id)
+            return
+
+        if event.kind == TelegramAgentEventKind.UNKNOWN:
+            if set(event.raw_keys) <= CLASSIC_UPDATE_KEYS:
+                return  # e.g. plain callback_query — classic handler owns it
+            # Log-and-ignore: key names only, never payload values.
+            logger.info(
+                "[%s] Ignoring Telegram update with unknown fields (update_id=%s keys=%s)",
+                self.name, event.update_id, ",".join(event.raw_keys),
+            )
+            return
+
+        route = route_agent_event(event, flags)
+        if not route.allowed:
+            logger.debug(
+                "[%s] Telegram agent surface '%s' gated off (%s)",
+                self.name, event.kind.value, route.reason,
+            )
+            return
+
+        if event.kind == TelegramAgentEventKind.BOT_TO_BOT:
+            # Loop prevention BEFORE routing (plan 3.1): max-depth + dedupe.
+            # Note bot-origin senders remain auth-denied by default at the
+            # runner gate (no Telegram entry in platform_allow_bots_map);
+            # this envelope never bypasses that.
+            allowed, reason = self._bot_to_bot_guard.check(event)
+            if not allowed:
+                logger.warning(
+                    "[%s] Telegram bot-to-bot loop guard tripped: %s (chat=%s update_id=%s)",
+                    self.name, reason, event.chat_id, event.update_id,
+                )
+                return
+
+        excerpt = sanitize_update_excerpt(raw)
+        await self._emit_agent_runtime_event(route, excerpt)
+
+    async def _emit_agent_runtime_event(self, route: "TelegramAgentRoute", excerpt: Dict[str, Any]) -> None:
+        """Routing seam for typed Bot API 10.x envelopes.
+
+        Phase 2 scope: record the envelope (bounded in-memory buffer) and
+        hand it to an optionally injected async router. Phase 4 (rich
+        renderer) and Phase 5 (managed-bot ops, operator-gated) subscribe
+        here. The stored excerpt is pre-sanitized — raw updates are never
+        persisted (no tokens, no chat rosters).
+        """
+        event_dict = dataclasses.asdict(route.event)
+        event_dict["kind"] = route.event.kind.value
+        record = {
+            "kind": route.event.kind.value,
+            "action": route.action,
+            "reason": route.reason,
+            "should_create_receipt": route.should_create_receipt,
+            "should_dispatch_kanban": route.should_dispatch_kanban,
+            "event": event_dict,
+            "excerpt": excerpt,
+        }
+        self._agent_runtime_events.append(record)
+        logger.info(
+            "[%s] Telegram agent event %s -> %s (%s)",
+            self.name, route.event.kind.value, route.action, route.reason,
+        )
+        router = self._agent_runtime_router
+        if router is None:
+            return
+        try:
+            await router(record)
+        except Exception:
+            logger.error(
+                "[%s] Agent-runtime router failed for %s event",
+                self.name, route.event.kind.value, exc_info=True,
+            )
+
     def _link_preview_kwargs(self) -> Dict[str, Any]:
         if not getattr(self, "_disable_link_previews", False):
             return {}
@@ -899,7 +1072,7 @@ class TelegramAdapter(BasePlatformAdapter):
 
         try:
             await self._app.updater.start_polling(
-                allowed_updates=Update.ALL_TYPES,
+                allowed_updates=self._agent_allowed_updates(),
                 drop_pending_updates=False,
                 error_callback=self._polling_error_callback_ref,
             )
@@ -1025,7 +1198,7 @@ class TelegramAdapter(BasePlatformAdapter):
 
             try:
                 await self._app.updater.start_polling(
-                    allowed_updates=Update.ALL_TYPES,
+                    allowed_updates=self._agent_allowed_updates(),
                     drop_pending_updates=False,
                     error_callback=self._polling_error_callback_ref,
                 )
@@ -1448,6 +1621,18 @@ class TelegramAdapter(BasePlatformAdapter):
             ))
             # Handle inline keyboard button callbacks (update prompts)
             self._app.add_handler(CallbackQueryHandler(self._handle_callback_query))
+            # Bot API 10.x agent-runtime tap (group 1 so classic group-0
+            # handlers are untouched). A TypeHandler(Update, ...) matches
+            # every Update object — including chat_join_request and updates
+            # whose 10.x payload PTB 22.6 only carries in api_kwargs — so it
+            # subsumes a dedicated ChatJoinRequestHandler. The callback
+            # no-ops unless at least one telegram_*_enabled profile flag is
+            # on, keeping default behavior identical to today.
+            if TelegramTypeHandler is not None:
+                self._app.add_handler(
+                    TelegramTypeHandler(Update, self._handle_agent_runtime_update),
+                    group=1,
+                )
             
             # Start polling — retry initialize() for transient TLS resets
             try:
@@ -1510,7 +1695,7 @@ class TelegramAdapter(BasePlatformAdapter):
                     url_path=webhook_path,
                     webhook_url=webhook_url,
                     secret_token=webhook_secret,
-                    allowed_updates=Update.ALL_TYPES,
+                    allowed_updates=self._agent_allowed_updates(),
                     drop_pending_updates=True,
                 )
                 self._webhook_mode = True
@@ -1543,7 +1728,7 @@ class TelegramAdapter(BasePlatformAdapter):
                 self._polling_error_callback_ref = _polling_error_callback
 
                 await self._app.updater.start_polling(
-                    allowed_updates=Update.ALL_TYPES,
+                    allowed_updates=self._agent_allowed_updates(),
                     drop_pending_updates=True,
                     error_callback=_polling_error_callback,
                 )
