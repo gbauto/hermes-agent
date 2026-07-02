@@ -1028,6 +1028,30 @@ def load_gateway_config() -> GatewayConfig:
                     os.environ["TELEGRAM_EXCLUSIVE_BOT_MENTIONS"] = str(telegram_cfg["exclusive_bot_mentions"]).lower()
                 if "guest_mode" in telegram_cfg and not os.getenv("TELEGRAM_GUEST_MODE"):
                     os.environ["TELEGRAM_GUEST_MODE"] = str(telegram_cfg["guest_mode"]).lower()
+                # ⚠️ Naming collision (do not "simplify"): the short key
+                # `guest_mode` above is the legacy mention-gate bypass for
+                # non-allowlisted groups (TELEGRAM_GUEST_MODE), NOT Bot API
+                # 10.0 guest bots. The Bot API 10.x agent surfaces below are
+                # gated ONLY by fully-qualified `telegram_*_enabled` keys —
+                # never bridge short-form aliases (guest_mode, bot_to_bot,
+                # rich_messages, ...) to these env vars. All default off.
+                for _tg_agent_flag_key, _tg_agent_flag_env in (
+                    ("telegram_guest_mode_enabled", "TELEGRAM_GUEST_MODE_ENABLED"),
+                    ("telegram_bot_to_bot_enabled", "TELEGRAM_BOT_TO_BOT_ENABLED"),
+                    ("telegram_rich_messages_enabled", "TELEGRAM_RICH_MESSAGES_ENABLED"),
+                    ("telegram_managed_bots_enabled", "TELEGRAM_MANAGED_BOTS_ENABLED"),
+                    ("telegram_guardian_enabled", "TELEGRAM_GUARDIAN_ENABLED"),
+                ):
+                    if _tg_agent_flag_key in telegram_cfg and not os.getenv(_tg_agent_flag_env):
+                        os.environ[_tg_agent_flag_env] = str(telegram_cfg[_tg_agent_flag_key]).lower()
+                # Opt-in widening of getUpdates/webhook allowed_updates with
+                # raw Bot API 10.x update-type strings (PTB 22.6 passes them
+                # through verbatim). Unset ⇒ Update.ALL_TYPES, unchanged.
+                _tg_extra_allowed = telegram_cfg.get("extra_allowed_updates")
+                if _tg_extra_allowed is not None and not os.getenv("TELEGRAM_EXTRA_ALLOWED_UPDATES"):
+                    if isinstance(_tg_extra_allowed, list):
+                        _tg_extra_allowed = ",".join(str(v) for v in _tg_extra_allowed)
+                    os.environ["TELEGRAM_EXTRA_ALLOWED_UPDATES"] = str(_tg_extra_allowed)
                 if "observe_unmentioned_group_messages" in telegram_cfg and not os.getenv("TELEGRAM_OBSERVE_UNMENTIONED_GROUP_MESSAGES"):
                     os.environ["TELEGRAM_OBSERVE_UNMENTIONED_GROUP_MESSAGES"] = str(telegram_cfg["observe_unmentioned_group_messages"]).lower()
                 frc = telegram_cfg.get("free_response_chats")
@@ -1080,7 +1104,20 @@ def load_gateway_config() -> GatewayConfig:
                     if isinstance(group_allowed_chats, list):
                         group_allowed_chats = ",".join(str(v) for v in group_allowed_chats)
                     os.environ["TELEGRAM_GROUP_ALLOWED_CHATS"] = str(group_allowed_chats)
-                for _telegram_extra_key in ("guest_mode", "disable_link_previews", "observe_unmentioned_group_messages"):
+                for _telegram_extra_key in (
+                    "guest_mode",
+                    "disable_link_previews",
+                    "observe_unmentioned_group_messages",
+                    # Bot API 10.x agent-surface flags + allowed_updates
+                    # widening (fully-qualified names only — see the
+                    # guest_mode collision note above).
+                    "telegram_guest_mode_enabled",
+                    "telegram_bot_to_bot_enabled",
+                    "telegram_rich_messages_enabled",
+                    "telegram_managed_bots_enabled",
+                    "telegram_guardian_enabled",
+                    "extra_allowed_updates",
+                ):
                     if _telegram_extra_key in telegram_cfg:
                         plat_data = platforms_data.setdefault(Platform.TELEGRAM.value, {})
                         if not isinstance(plat_data, dict):

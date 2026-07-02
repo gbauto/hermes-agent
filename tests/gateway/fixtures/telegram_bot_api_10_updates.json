@@ -1,0 +1,85 @@
+{
+  "_comment": "Representative Telegram Bot API 10.x update JSON fixtures for the gateway agent-runtime event router (Phase 2.3). Shapes mirror the Bot API 9.6/10.0/10.1 agent surfaces; PTB 22.6 carries the unmodeled fields via api_kwargs and Update.to_dict() merges them back to the top level, which is the form used here. The managed-bot token value is a canary string that must NEVER appear in any persisted envelope or excerpt.",
+  "guest_query": {
+    "update_id": 910001,
+    "guest_message": {
+      "message_id": 501,
+      "guest_query_id": "gq-77f1",
+      "date": 1782000000,
+      "chat": {"id": -1002000000001, "type": "supergroup", "title": "Prospect Group"},
+      "from": {"id": 424242, "is_bot": true, "username": "some_guest_bot"},
+      "text": "What does GBAutomation charge for a discovery sprint?",
+      "guest_bot_caller_user": {"id": 777001, "is_bot": false, "first_name": "Sreya"},
+      "guest_bot_caller_chat": {"id": -1002000000042, "type": "supergroup"}
+    }
+  },
+  "bot_to_bot": {
+    "update_id": 910002,
+    "message": {
+      "message_id": 502,
+      "date": 1782000060,
+      "chat": {"id": -1002000000002, "type": "supergroup", "title": "Ops Group"},
+      "from": {"id": 515151, "is_bot": true, "username": "peer_specialist_bot"},
+      "text": "Handing off: prospect research complete, report at link.",
+      "message_origin": {"type": "bot", "bot": {"id": 515151, "username": "peer_specialist_bot"}}
+    }
+  },
+  "rich_message_callback": {
+    "update_id": 910003,
+    "callback_query": {
+      "id": "cbq-31337",
+      "from": {"id": 777001, "is_bot": false, "first_name": "Greg"},
+      "data": "rich_action:approve",
+      "message": {
+        "message_id": 503,
+        "date": 1782000120,
+        "chat": {"id": 777001, "type": "private"},
+        "from": {"id": 999000, "is_bot": true, "username": "gbauto_hermes_bot"},
+        "rich_message": {
+          "blocks": [
+            {"type": "heading", "text": "Weekly Ecom Report"},
+            {"type": "checklist", "items": [{"text": "Everlane green", "checked": true}]}
+          ]
+        }
+      }
+    }
+  },
+  "managed_bot_event": {
+    "update_id": 910004,
+    "managed_bot": {
+      "bot": {"id": 888001, "is_bot": true, "username": "gbauto_managed_child_bot"},
+      "action": "created",
+      "token": "CANARY-NEVER-PERSIST-1234567890",
+      "owner": {"id": 777001, "is_bot": false}
+    }
+  },
+  "join_request_query": {
+    "update_id": 910005,
+    "chat_join_request": {
+      "chat": {"id": -1002000000005, "type": "supergroup", "title": "Client Community"},
+      "from": {"id": 606060, "is_bot": false, "first_name": "Applicant"},
+      "query_id": "jrq-9",
+      "date": 1782000180,
+      "bio": "Fashion-tech founder, invited by Ellie",
+      "invite_link": {"invite_link": "https://t.me/+SECRET-ROSTER-LINK", "creator": {"id": 777001}}
+    }
+  },
+  "unknown_top_level": {
+    "update_id": 910006,
+    "hypothetical_10_2_surface": {
+      "id": "mystery-1",
+      "payload": {"anything": "goes"}
+    }
+  },
+  "classic_message_with_unknown_fields": {
+    "update_id": 910007,
+    "message": {
+      "message_id": 507,
+      "date": 1782000240,
+      "chat": {"id": 777001, "type": "private"},
+      "from": {"id": 777001, "is_bot": false, "first_name": "Greg"},
+      "text": "hello there",
+      "totally_new_field_10_2": {"nested": true}
+    }
+  }
+}
