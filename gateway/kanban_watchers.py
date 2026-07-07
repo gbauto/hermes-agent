@@ -13,6 +13,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import re
 import sqlite3
 import time
 from pathlib import Path
@@ -21,6 +22,12 @@ from typing import Any, Optional
 # Match the logger run.py uses (logging.getLogger(__name__) where __name__ ==
 # "gateway.run") so extracted log records keep their original logger name.
 logger = logging.getLogger("gateway.run")
+
+# No baked-in public Kanban URL.  A previous constant pointed at a Netlify
+# deploy-preview/static report and caused blocked/review notifications to label
+# stale HTML as the live board.  Only emit Board links from explicit, verified
+# deployment configuration.
+APPROVED_KANBAN_LIVE_BOARD_URL = ""
 
 
 class GatewayKanbanWatchersMixin:
@@ -98,10 +105,37 @@ class GatewayKanbanWatchersMixin:
             self, "_kanban_sub_fail_counts", {}
         )
         self._kanban_sub_fail_counts = sub_fail_counts
+        def _notification_sources_allowed(raw_sources: Any, current_profile: str) -> set[str] | None:
+            """Return allowed subscription-owner profiles for this gateway.
+
+            ``None`` means wildcard/all profiles.  The public kanban-worker
+            guidance documents ``notification_sources: ['*']`` for the
+            gateway that should receive cross-profile Kanban terminal events;
+            honor that config here so subscriptions created by worker profiles
+            (tac-director, tac-ops, etc.) are not silently skipped by the
+            default-profile gateway.
+            """
+            if raw_sources is None or raw_sources == "":
+                return {current_profile}
+            if isinstance(raw_sources, str):
+                parts = [p.strip() for p in raw_sources.split(",")]
+            elif isinstance(raw_sources, (list, tuple, set)):
+                parts = [str(p).strip() for p in raw_sources]
+            else:
+                parts = [str(raw_sources).strip()]
+            parts = [p for p in parts if p]
+            if "*" in parts:
+                return None
+            return set(parts or [current_profile])
+
         notifier_profile = getattr(self, "_kanban_notifier_profile", None)
         if not notifier_profile:
             notifier_profile = self._active_profile_name()
             self._kanban_notifier_profile = notifier_profile
+        allowed_notification_sources = _notification_sources_allowed(
+            cfg.get("notification_sources") if isinstance(cfg, dict) else None,
+            notifier_profile,
+        )
 
         # Initial delay so the gateway can finish wiring adapters.
         await asyncio.sleep(5)
@@ -165,10 +199,15 @@ class GatewayKanbanWatchersMixin:
                                 logger.debug("kanban notifier: board %s has no subscriptions", slug)
                             for sub in subs:
                                 owner_profile = sub.get("notifier_profile") or None
-                                if owner_profile and owner_profile != notifier_profile:
+                                if (
+                                    owner_profile
+                                    and allowed_notification_sources is not None
+                                    and owner_profile not in allowed_notification_sources
+                                ):
                                     logger.debug(
-                                        "kanban notifier: subscription for %s owned by profile %s; current profile %s skipping",
+                                        "kanban notifier: subscription for %s owned by profile %s; current profile %s sources=%s skipping",
                                         sub.get("task_id"), owner_profile, notifier_profile,
+                                        sorted(allowed_notification_sources),
                                     )
                                     continue
                                 platform = (sub.get("platform") or "").lower()
@@ -247,52 +286,76 @@ class GatewayKanbanWatchersMixin:
                             # intentional human-facing handoff, carried
                             # in the event payload), then fall back to
                             # task.result for legacy rows written before
-                            # runs shipped.
+                            # runs shipped. Auto-completed grouping records
+                            # have no worker run; call that out instead of
+                            # making the parent look like execution finished.
                             handoff = ""
                             payload_summary = None
-                            if ev.payload and ev.payload.get("summary"):
-                                payload_summary = str(ev.payload["summary"])
+                            payload_reason = ""
+                            if ev.payload:
+                                if ev.payload.get("summary"):
+                                    payload_summary = str(ev.payload["summary"])
+                                if ev.payload.get("reason"):
+                                    payload_reason = str(ev.payload["reason"])
                             if payload_summary:
                                 lines = payload_summary.strip().splitlines()
                                 h = lines[0][:200] if lines else payload_summary[:200]
-                                handoff = f"\n{h}"
+                                handoff = f"\nSummary: {h}"
+                            elif payload_reason and "grouping record" in payload_reason.lower():
+                                handoff = "\nSummary: grouping record, first child owns execution"
                             elif task and task.result:
                                 lines = task.result.strip().splitlines()
                                 r = lines[0][:160] if lines else task.result[:160]
-                                handoff = f"\n{r}"
+                                handoff = f"\nSummary: {r}"
+                            board_line = self._kanban_board_line(board_slug, sub["task_id"])
+                            board_context = f"\n{board_line}" if board_line else ""
+                            source = f"\n{board_slug or 'default'} · {sub['task_id']} · source kanban-gateway"
                             msg = (
                                 f"✔ {tag}Kanban {sub['task_id']} done"
-                                f" — {title}{handoff}"
+                                f" - {title}{handoff}{board_context}{source}"
                             )
                         elif kind == "blocked":
-                            reason = ""
-                            if ev.payload and ev.payload.get("reason"):
-                                reason = f": {str(ev.payload['reason'])[:160]}"
-                            msg = f"⏸ {tag}Kanban {sub['task_id']} blocked{reason}"
+                            msg, blocked_metadata = self._format_kanban_blocked_notification(
+                                sub=sub,
+                                task=task,
+                                event=ev,
+                                board_slug=board_slug,
+                                title=title,
+                                tag=tag,
+                            )
                         elif kind == "gave_up":
                             err = ""
                             if ev.payload and ev.payload.get("error"):
                                 err = f"\n{str(ev.payload['error'])[:200]}"
+                            board_line = self._kanban_board_line(board_slug, sub["task_id"])
+                            board_context = f"\n{board_line}" if board_line else ""
                             msg = (
                                 f"✖ {tag}Kanban {sub['task_id']} gave up "
-                                f"after repeated spawn failures{err}"
+                                f"after repeated spawn failures{err}{board_context}"
                             )
                         elif kind == "crashed":
+                            board_line = self._kanban_board_line(board_slug, sub["task_id"])
+                            board_context = f"\n{board_line}" if board_line else ""
                             msg = (
                                 f"✖ {tag}Kanban {sub['task_id']} worker crashed "
-                                f"(pid gone); dispatcher will retry"
+                                f"(pid gone); dispatcher will retry{board_context}"
                             )
                         elif kind == "timed_out":
                             limit = 0
                             if ev.payload and ev.payload.get("limit_seconds"):
                                 limit = int(ev.payload["limit_seconds"])
+                            board_line = self._kanban_board_line(board_slug, sub["task_id"])
+                            board_context = f"\n{board_line}" if board_line else ""
                             msg = (
                                 f"⏱ {tag}Kanban {sub['task_id']} timed out "
-                                f"(max_runtime={limit}s); will retry"
+                                f"(max_runtime={limit}s); will retry{board_context}"
                             )
                         else:
                             continue
                         metadata: dict[str, Any] = {}
+                        if kind == "blocked" and "blocked_metadata" in locals():
+                            metadata.update(blocked_metadata)
+                            del blocked_metadata
                         if sub.get("thread_id"):
                             metadata["thread_id"] = sub["thread_id"]
                         sub_key = (
@@ -388,6 +451,280 @@ class GatewayKanbanWatchersMixin:
                     return
                 await asyncio.sleep(1)
 
+
+    def _kanban_board_url(self, board_slug: Optional[str], task_id: str) -> Optional[str]:
+        """Return the configured live board/task URL for Telegram notices.
+
+        Board notices are intentionally opt-in: deployments can set
+        ``HERMES_KANBAN_LIVE_BOARD_URL``, ``HERMES_KANBAN_BOARD_URL``, or
+        ``HERMES_DASHBOARD_URL`` after verifying that the target is a live board.
+        If the URL template includes ``{task_id}`` or ``{board_slug}``, those
+        placeholders are filled; otherwise use the live-board anchor contract:
+        ``<board-url>#task=<task_id>``. Netlify preview/static report URLs are
+        suppressed because they have repeatedly looked like a live board while
+        serving stale report HTML.
+        """
+        from urllib.parse import quote, urlparse
+
+        base = (
+            os.environ.get("HERMES_KANBAN_LIVE_BOARD_URL")
+            or os.environ.get("HERMES_KANBAN_BOARD_URL")
+            or os.environ.get("HERMES_DASHBOARD_URL")
+            or APPROVED_KANBAN_LIVE_BOARD_URL
+        ).strip()
+        if not base:
+            return None
+        try:
+            host = (urlparse(base).hostname or "").lower()
+        except Exception:
+            host = ""
+        if host.endswith(".netlify.app") or host == "netlify.app" or "gbautoxyz" in host:
+            logger.warning(
+                "kanban notifier: suppressing unverified/stale Board URL host %s",
+                host or "<unparseable>",
+            )
+            return None
+        board = quote((board_slug or "default"), safe="")
+        task = quote(task_id, safe="")
+        if "{task_id}" in base or "{board_slug}" in base:
+            return base.format(board_slug=board, task_id=task)
+        root = base.rstrip("/")
+        separator = "&" if "#" in root and "?" in root.rsplit("#", 1)[-1] else "#"
+        if "#" in root:
+            return f"{root}{separator}task={task}"
+        return f"{root}#task={task}"
+
+    def _kanban_board_line(self, board_slug: Optional[str], task_id: str) -> str:
+        """Return a Telegram-friendly Board line for every Kanban update."""
+        url = self._kanban_board_url(board_slug, task_id)
+        return f"Board: {url}" if url else ""
+
+    def _kanban_blocked_issue(self, task, event, board_slug: Optional[str] = None) -> str:
+        """Return a plain-English blocker/root cause for the Issue line."""
+        run_or_log_issue = self._kanban_blocked_issue_from_run_or_log(task, board_slug)
+        candidates: list[str] = []
+        if getattr(event, "payload", None) and event.payload.get("reason"):
+            candidates.append(str(event.payload["reason"]))
+        for attr in ("last_failure_error", "result"):
+            value = getattr(task, attr, None) if task is not None else None
+            if value:
+                candidates.append(str(value))
+        for raw in candidates:
+            first = raw.strip().splitlines()[0].strip()
+            if not first:
+                continue
+            lowered = first.lower()
+            if lowered in {"blocked", "task blocked", "status: blocked"}:
+                continue
+            if self._kanban_blocked_reason_is_meta(lowered):
+                derived = self._derive_kanban_blocked_issue_from_task(task)
+                if derived:
+                    return derived
+                if run_or_log_issue:
+                    return run_or_log_issue
+                return "Worker did not provide a concrete blocker; needs triage."
+            if lowered.startswith("review-required:"):
+                detail = first.split(":", 1)[1].strip()
+                if detail:
+                    return f"Human review required: {detail[:220].rstrip('.')}."
+                return "Human review required before marking this task done."
+            if "pid gone" in lowered or re.search(r"\bpid\s+\d+\s+not\s+alive\b", lowered) or "pid not alive" in lowered:
+                if run_or_log_issue:
+                    return run_or_log_issue
+                return "Worker exited; inspect the latest run log before unblocking."
+            return first[:240].rstrip(".") + "."
+        if run_or_log_issue:
+            return run_or_log_issue
+        derived = self._derive_kanban_blocked_issue_from_task(task)
+        if derived:
+            return derived
+        return "Worker did not provide a concrete blocker; needs triage."
+
+    def _kanban_blocked_issue_from_run_or_log(self, task, board_slug: Optional[str]) -> str:
+        """Best-effort root cause from latest run error or worker log tail."""
+        if task is None:
+            return ""
+        task_id = getattr(task, "id", "") or ""
+        texts: list[str] = []
+        try:
+            from hermes_cli import kanban_db as _kb
+
+            conn = _kb.connect(board=board_slug)
+            try:
+                run = _kb.latest_run(conn, task_id)
+                if run is not None:
+                    for value in (run.error, run.summary):
+                        if value:
+                            texts.append(str(value))
+            finally:
+                conn.close()
+            log_tail = _kb.read_worker_log(task_id, tail_bytes=6000, board=board_slug)
+            if log_tail:
+                texts.append(log_tail)
+        except Exception:
+            return ""
+        for text in texts:
+            issue = self._extract_kanban_root_cause_line(text)
+            if issue:
+                return issue
+        return ""
+
+    def _extract_kanban_root_cause_line(self, text: str) -> str:
+        """Convert a run/log tail into a concise user-facing root cause."""
+        if not text:
+            return ""
+        unknown_skill = re.search(r"Unknown skill\(s\):\s*([^\n\r]+)", text)
+        if unknown_skill:
+            missing = unknown_skill.group(1).strip().strip("`'.\"")
+            return f"Profile cannot load required skill(s): {missing}."
+        for raw in reversed(text.splitlines()):
+            line = raw.strip()
+            if not line:
+                continue
+            lowered = line.lower()
+            if lowered.startswith(("error:", "traceback", "runtimeerror:", "valueerror:")):
+                return line[:240].rstrip(".") + "."
+        return ""
+
+    def _kanban_blocked_reason_is_meta(self, lowered_reason: str) -> bool:
+        """Detect reasons that describe the request, not the actual blocker."""
+        meta_markers = (
+            "greg clarified",
+            "greg said",
+            "user clarified",
+            "human clarified",
+            "ux request",
+            "notification ux",
+            "copy pattern",
+            "current copy is confusing",
+        )
+        return any(marker in lowered_reason for marker in meta_markers)
+
+    def _derive_kanban_blocked_issue_from_task(self, task) -> str:
+        """Best-effort issue extraction from task body when block reason is meta."""
+        body = str(getattr(task, "body", "") or "")
+        lines = [line.strip().lstrip("-• ").strip() for line in body.splitlines()]
+        for line in lines:
+            if line.lower().startswith("issue:"):
+                value = line.split(":", 1)[1].strip()
+                if value:
+                    return value[:240].rstrip(".") + "."
+        for line in lines:
+            if line.lower().startswith("missing "):
+                return line[:240].rstrip(".") + "."
+        for line in lines:
+            lowered = line.lower()
+            if "missing " in lowered and not lowered.startswith("problem:"):
+                idx = lowered.find("missing ")
+                return line[idx:][:240].rstrip(".") + "."
+        return ""
+
+    def _kanban_blocked_suggestions(self, issue: str) -> list[str]:
+        """Map common blocker classes to concise unblock actions."""
+        text = (issue or "").lower()
+        if "logo" in text and ("asset" in text or "path" in text):
+            return [
+                "Provide the logo asset/path.",
+                "Use existing GBAuto wordmark from theme assets.",
+            ]
+        if "review-required" in text or "review required" in text:
+            return [
+                "Approve/promote if the diff is acceptable.",
+                "Create a fix card with requested changes.",
+            ]
+        if "permission" in text or "aws" in text or "secret" in text:
+            return [
+                "Grant the missing permission or secret access.",
+                "Provide an approved token and unblock.",
+            ]
+        if "auth" in text or "token" in text or "oauth" in text or "credential" in text or "api key" in text:
+            return [
+                "Reauth the profile with a known-good credential.",
+                "Sync the approved token, then unblock.",
+            ]
+        if "iteration budget" in text or "goal-turn" in text or "max turns" in text:
+            return [
+                "Split into a smaller follow-up task.",
+                "Raise max turns for a bounded retry.",
+            ]
+        if "skill" in text and (
+            "missing" in text
+            or "not found" in text
+            or "install" in text
+            or "cannot load required" in text
+            or "unknown skill" in text
+        ):
+            return [
+                "Install the missing skill for this profile.",
+                "Reassign to a profile that already has it.",
+            ]
+        if "worker exited" in text or "run log" in text or "pid" in text:
+            return [
+                "Inspect the latest run log, then unblock.",
+                "Reassign or split if the crash repeats.",
+            ]
+        return []
+
+    def _kanban_blocked_unblock_line(self, issue: str) -> str:
+        suggestions = self._kanban_blocked_suggestions(issue)
+        if not suggestions:
+            return "Unblock: add missing context, then promote"
+        options = [f"A) {suggestions[0]}"]
+        if len(suggestions) > 1 and suggestions[1]:
+            options.append(f"B) {suggestions[1]}")
+        return "Unblock: " + "  ".join(options)
+
+    def _format_kanban_blocked_notification(
+        self,
+        *,
+        sub: dict,
+        task,
+        event,
+        board_slug: Optional[str],
+        title: str,
+        tag: str,
+    ) -> tuple[str, dict[str, Any]]:
+        """Build the user-facing blocked notice and Telegram action metadata."""
+        task_id = str(sub["task_id"])
+        issue = self._kanban_blocked_issue(task, event, board_slug)
+        owner = getattr(task, "assignee", None) or "unassigned"
+        owner_text = str(owner)
+        board = board_slug or "default"
+        board_line = self._kanban_board_line(board_slug, task_id)
+        lines = [
+            f"🚫 Blocked - {title}",
+            f"Issue: {issue}",
+            self._kanban_blocked_unblock_line(issue),
+        ]
+        if board_line:
+            lines.append(board_line)
+        lines.append(f"{board} · {task_id} · owner {owner_text} · source kanban-gateway")
+        keyboard = [
+            [
+                {"text": "✅ Unblock", "callback_data": f"kbb:u:{board}:{task_id}"},
+                {"text": "🚀 Promote", "callback_data": f"kbb:p:{board}:{task_id}"},
+            ],
+            [
+                {"text": "⏸ Keep blocked", "callback_data": f"kbb:k:{board}:{task_id}"},
+            ],
+        ]
+        url = self._kanban_board_url(board_slug, task_id)
+        if url:
+            keyboard[-1].append({"text": "🔎 Open board", "url": url})
+        else:
+            keyboard[-1].append({"text": "🔎 Open board", "callback_data": f"kbb:o:{board}:{task_id}"})
+        return "\n".join(lines), {
+            "telegram_inline_keyboard": keyboard,
+            "kanban_blocker_event": {
+                "schema_version": "blocker_event.v1",
+                "task_id": task_id,
+                "board_slug": board,
+                "owner": owner,
+                "issue": issue,
+                "event_id": getattr(event, "id", None),
+            },
+        }
+
     def _kanban_advance(
         self, sub: dict, cursor: int, board: Optional[str] = None,
     ) -> None:
@@ -447,6 +784,88 @@ class GatewayKanbanWatchersMixin:
         finally:
             conn.close()
 
+    def _resolve_hosted_html_artifact_url(self, path: str) -> str:
+        """Resolve a local HTML artifact to a hosted Netlify/GBAutomation URL.
+
+        Kanban gateway notifications should not upload raw `.html` files to
+        chat. This resolver keeps delivery side-effect-free: it uses an explicit
+        JSONL registry if configured, the GBAutomation plan-render path shape,
+        or a URL already embedded in the HTML. Actual publishing is handled by
+        upstream artifact pipelines; when no hosted URL can be found, the caller
+        skips the HTML unless an explicit debug/admin fallback is enabled.
+        """
+        import json as _json
+        import re as _re
+
+        def _is_url(value: str) -> bool:
+            return value.startswith("https://") or value.startswith("http://")
+
+        def _norm(value: str) -> str:
+            return value.replace("\\", "/").rstrip("/")
+
+        def _row_url(row: dict) -> str:
+            # Prefer user-openable public URLs over Netlify's admin/drop viewer links.
+            for key in ("public_url", "url", "deployUrl", "deploy_url"):
+                value = row.get(key)
+                if isinstance(value, str) and _is_url(value) and "app.netlify.com/drop" not in value:
+                    return value
+            urls = row.get("urls")
+            if isinstance(urls, list):
+                for value in urls:
+                    if isinstance(value, str) and _is_url(value) and "app.netlify.com/drop" not in value:
+                        return value
+            value = row.get("deploy_url")
+            if isinstance(value, str) and _is_url(value):
+                return value
+            return ""
+
+        expanded = os.path.expanduser(str(path or ""))
+        needle = _norm(expanded)
+        basename = Path(expanded).name
+
+        registry_env = os.environ.get("HERMES_KANBAN_HTML_ARTIFACT_REGISTRY", "")
+        for raw_registry in [p for p in registry_env.split(os.pathsep) if p.strip()]:
+            registry = Path(raw_registry).expanduser()
+            if not registry.exists():
+                continue
+            try:
+                rows = registry.read_text(encoding="utf-8", errors="replace").splitlines()
+            except OSError:
+                continue
+            for line in rows:
+                try:
+                    row = _json.loads(line)
+                except _json.JSONDecodeError:
+                    continue
+                values = [
+                    _norm(str(row.get(key, "")))
+                    for key in ("html_path", "source", "out_dir", "plan_path")
+                ]
+                if any(needle == v or needle.endswith(v) or v.endswith(needle) for v in values if v):
+                    url = _row_url(row)
+                    if url:
+                        return url
+                if basename and any(v.endswith("/" + basename) for v in values if v):
+                    url = _row_url(row)
+                    if url:
+                        return url
+
+        marker = "/artifacts/plan-renders/"
+        if marker in needle:
+            slug = needle.split(marker, 1)[1].split("/", 1)[0].strip()
+            if slug:
+                return f"https://gbautomation.xyz/prds/{slug}"
+
+        try:
+            html_text = Path(expanded).read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            return ""
+        for match in _re.finditer(r"https?://[^\s'\"<>]+", html_text):
+            url = match.group(0).rstrip(".,);]")
+            if "netlify.app" in url or "gbautomation.xyz" in url:
+                return url
+        return ""
+
     async def _deliver_kanban_artifacts(
         self,
         *,
@@ -456,12 +875,15 @@ class GatewayKanbanWatchersMixin:
         event_payload: Optional[dict],
         task,
     ) -> None:
-        """Upload artifact files referenced by a completed kanban task.
+        """Deliver artifact files referenced by a completed kanban task.
 
         Workers passing ``kanban_complete(artifacts=[...])`` ship absolute
-        file paths through the completion event so downstream humans get
-        the deliverable as a native upload instead of a path printed in
-        chat.
+        file paths through the completion event. Non-HTML artifacts keep the
+        native upload behavior. HTML artifacts are converted to hosted
+        Netlify/GBAutomation links and sent as text, because raw HTML uploads in
+        Telegram are noisy and unusable for normal users. Set
+        ``HERMES_KANBAN_HTML_ARTIFACT_DEBUG_UPLOAD=1`` for an explicit
+        debug/admin fallback upload when no hosted URL can be resolved.
 
         Sources scanned, in priority order:
           1. ``event_payload['artifacts']`` (explicit list — preferred)
@@ -520,13 +942,46 @@ class GatewayKanbanWatchersMixin:
 
         _IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".gif", ".webp"}
         _VIDEO_EXTS = {".mp4", ".mov", ".avi", ".mkv", ".webm", ".3gp"}
+        _HTML_EXTS = {".html", ".htm"}
 
         from urllib.parse import quote as _quote
 
+        # HTML is a special user-facing path: send a hosted URL, not a raw
+        # document upload, unless an operator explicitly opts into debug upload.
+        html_paths = [p for p in candidates if _Path(p).suffix.lower() in _HTML_EXTS]
+        upload_candidates: list[str] = []
+        debug_html_upload = os.environ.get(
+            "HERMES_KANBAN_HTML_ARTIFACT_DEBUG_UPLOAD", ""
+        ).strip().lower() in {"1", "true", "yes", "on"}
+        for path in html_paths:
+            hosted_url = self._resolve_hosted_html_artifact_url(path)
+            if hosted_url:
+                try:
+                    await adapter.send(
+                        chat_id,
+                        f"📎 HTML artifact: {hosted_url}",
+                        metadata=metadata,
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        "kanban notifier: hosted HTML artifact link (%s) failed: %s",
+                        path, exc,
+                    )
+            elif debug_html_upload:
+                upload_candidates.append(path)
+            else:
+                logger.info(
+                    "kanban notifier: skipped raw HTML artifact without hosted URL: %s",
+                    path,
+                )
+
+        non_html_candidates = [p for p in candidates if _Path(p).suffix.lower() not in _HTML_EXTS]
+        upload_candidates.extend(non_html_candidates)
+
         # Partition images so they ride a single send_multiple_images call
         # on platforms that support batch image uploads (Signal/Slack RPCs).
-        image_paths = [p for p in candidates if _Path(p).suffix.lower() in _IMAGE_EXTS]
-        other_paths = [p for p in candidates if _Path(p).suffix.lower() not in _IMAGE_EXTS]
+        image_paths = [p for p in upload_candidates if _Path(p).suffix.lower() in _IMAGE_EXTS]
+        other_paths = [p for p in upload_candidates if _Path(p).suffix.lower() not in _IMAGE_EXTS]
 
         if image_paths:
             try:
