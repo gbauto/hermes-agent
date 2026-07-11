@@ -76,7 +76,8 @@ import DocumentsPage from "@/pages/DocumentsPage";
 import GbAutomationOverviewPage from "@/pages/GbAutomationOverviewPage";
 import GbAutomationReposPage from "@/pages/GbAutomationReposPage";
 import { KanbanPage, LangfusePage, SupabasePage } from "@/pages/SupabaseIndexesPage";
-import ProfilesPage, { ProfileDetailPage } from "@/pages/ProfilesPage";
+import ProfilesPage from "@/pages/ProfilesPage";
+import ProfileBuilderPage from "@/pages/ProfileBuilderPage";
 import SkillsPage from "@/pages/SkillsPage";
 import LiveFleetPage from "@/pages/LiveFleetPage";
 import PluginsPage from "@/pages/PluginsPage";
@@ -129,7 +130,7 @@ const BUILTIN_ROUTES_CORE: Record<string, ComponentType> = {
   "/skills": SkillsPage,
   "/plugins": PluginsPage,
   "/profiles": ProfilesPage,
-  "/profiles/:profileId": ProfileDetailPage,
+  "/profiles/new": ProfileBuilderPage,
   "/live-fleet": LiveFleetPage,
   "/overview": GbAutomationOverviewPage,
   "/repos": GbAutomationReposPage,
