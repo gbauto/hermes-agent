@@ -1854,10 +1854,15 @@ async def fs_list(path: str):
             for entry in scan:
                 if entry.name in _FS_READDIR_HIDDEN:
                     continue
+                try:
+                    modified_at = entry.stat(follow_symlinks=False).st_mtime
+                except OSError:
+                    modified_at = None
                 entries.append({
                     "name": entry.name,
                     "path": str(target / entry.name),
                     "isDirectory": entry.is_dir(follow_symlinks=False),
+                    "modifiedAt": modified_at,
                 })
         entries.sort(key=lambda item: (not item["isDirectory"], item["name"].lower(), item["name"]))
         return {"entries": entries}

@@ -75,6 +75,7 @@ import CronPage from "@/pages/CronPage";
 import DocumentsPage from "@/pages/DocumentsPage";
 import GbAutomationOverviewPage from "@/pages/GbAutomationOverviewPage";
 import GbAutomationReposPage from "@/pages/GbAutomationReposPage";
+import GbAutomationDocsPage from "@/pages/GbAutomationDocsPage";
 import { KanbanPage, LangfusePage, SupabasePage } from "@/pages/SupabaseIndexesPage";
 import ProfilesPage from "@/pages/ProfilesPage";
 import ProfileBuilderPage from "@/pages/ProfileBuilderPage";
@@ -134,6 +135,7 @@ const BUILTIN_ROUTES_CORE: Record<string, ComponentType> = {
   "/live-fleet": LiveFleetPage,
   "/overview": GbAutomationOverviewPage,
   "/repos": GbAutomationReposPage,
+  "/gbauto-docs": GbAutomationDocsPage,
   "/supabase": SupabasePage,
   "/langfuse": LangfusePage,
   "/kanban": KanbanPage,
@@ -189,6 +191,7 @@ const BUILTIN_NAV_REST: NavItem[] = [
 const GB_AUTOMATION_NAV: NavItem[] = [
   { path: "/overview", label: "Overview", icon: BarChart3 },
   { path: "/repos", label: "Repos", icon: GitBranch },
+  { path: "/gbauto-docs", label: "Docs", icon: FileText },
   { path: "/supabase", label: "Supabase", icon: Database },
   { path: "/langfuse", label: "Langfuse", icon: RadioTower },
   { path: "/kanban", label: "Kanban", icon: Workflow },
