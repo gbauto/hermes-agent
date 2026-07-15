@@ -325,7 +325,7 @@ export default function GbAutomationDocsPage() {
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto">
         {selectedEntry ? (
-          <div className="mx-auto max-w-4xl px-8 py-7">
+          <div className="px-10 py-7">
             <h1 className="mb-1 text-2xl font-semibold tracking-tight">
               {title ?? prettyTitle(selectedEntry.name)}
             </h1>
