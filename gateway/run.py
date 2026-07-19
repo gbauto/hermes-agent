@@ -7853,6 +7853,17 @@ class GatewayRunner:
         session_entry = self.session_store.get_or_create_session(source)
         session_key = session_entry.session_key
         self._cache_session_source(session_key, source)
+        # Persist a typed inbound source receipt (chat_id + message_id +
+        # update_id + reply context). The session transcript strips the
+        # platform envelope, which left agents no truthful surface to read
+        # the Telegram message id from when stamping chat-originated kanban
+        # cards (2026-07-19 repair). Routing metadata only — never text.
+        try:
+            from gateway.source_receipts import InboundSourceReceipt
+            InboundSourceReceipt.from_event(
+                event, source, session_entry.session_id).persist()
+        except Exception:
+            logger.debug("Failed to persist inbound source receipt", exc_info=True)
         if self._is_telegram_topic_lane(source):
             try:
                 binding = self._session_db.get_telegram_topic_binding(

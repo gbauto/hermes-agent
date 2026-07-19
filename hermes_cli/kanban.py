@@ -1286,6 +1286,18 @@ def _cmd_create(args: argparse.Namespace) -> int:
             file=sys.stderr,
         )
         return 2
+    # Source-stamp gate (2026-07-19): a card claiming a Telegram origin must
+    # carry a REAL message id — fabricated/placeholder stamps (0, unknown)
+    # forge the audit trail and break threaded completion notices. Cards
+    # without a stamp (sheet/cron lanes) pass untouched.
+    try:
+        from gateway.source_receipts import validate_telegram_source_lines
+        _src_err = validate_telegram_source_lines(args.body or "")
+    except ImportError:
+        _src_err = None
+    if _src_err:
+        print(f"kanban: {_src_err}", file=sys.stderr)
+        return 2
     with kb.connect() as conn:
         task_id = kb.create_task(
             conn,
