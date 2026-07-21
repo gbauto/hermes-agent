@@ -9,6 +9,7 @@
  *   KANBAN_SMOKE_BOARD       Board slug selected before load (default gbautomation)
  *   KANBAN_SMOKE_SCREENSHOT  Optional output PNG path
  *   PLAYWRIGHT_MODULE        Optional absolute module path when Playwright is not local
+ *   PLAYWRIGHT_EXECUTABLE_PATH  Optional existing Chromium/Chrome executable
  */
 
 const fs = require("node:fs");
@@ -22,7 +23,11 @@ async function main() {
   const url = process.env.KANBAN_SMOKE_URL || "http://127.0.0.1:9150/kanban";
   const board = process.env.KANBAN_SMOKE_BOARD || "gbautomation";
   const screenshot = process.env.KANBAN_SMOKE_SCREENSHOT || "";
-  const browser = await playwright.chromium.launch({ headless: true });
+  const launchOptions = { headless: true };
+  if (process.env.PLAYWRIGHT_EXECUTABLE_PATH) {
+    launchOptions.executablePath = process.env.PLAYWRIGHT_EXECUTABLE_PATH;
+  }
+  const browser = await playwright.chromium.launch(launchOptions);
   const page = await browser.newPage({ viewport: { width: 1600, height: 1000 } });
   const pageErrors = [];
   page.on("pageerror", (error) => pageErrors.push(String(error)));
