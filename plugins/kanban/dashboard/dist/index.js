@@ -87,25 +87,29 @@
   }
 
   // Order matches BOARD_COLUMNS in plugin_api.py.
-  const COLUMN_ORDER = ["triage", "todo", "ready", "running", "blocked", "done"];
+  const COLUMN_ORDER = ["triage", "todo", "scheduled", "ready", "running", "blocked", "review", "done"];
   // English fallback dictionaries — used when the i18n catalog is missing
   // a key, and as defaults for the get*() helpers below so callers running
   // outside any React component (where there's no `t`) still get sane text.
   const FALLBACK_COLUMN_LABEL = {
     triage: "Triage",
     todo: "Todo",
+    scheduled: "Scheduled",
     ready: "Ready",
     running: "In Progress",
     blocked: "Blocked",
+    review: "Review",
     done: "Done",
     archived: "Archived",
   };
   const FALLBACK_COLUMN_HELP = {
     triage: "Raw ideas — a specifier will flesh out the spec",
     todo: "Waiting on dependencies or unassigned",
+    scheduled: "Waiting for its scheduled dispatch time",
     ready: "Dependencies satisfied; assign a profile to dispatch",
     running: "Claimed by a worker — in-flight",
     blocked: "Worker asked for human input",
+    review: "Implementation is awaiting validation or operator review",
     done: "Completed",
     archived: "Archived",
   };
@@ -154,9 +158,11 @@
   const COLUMN_DOT = {
     triage: "hermes-kanban-dot-triage",
     todo: "hermes-kanban-dot-todo",
+    scheduled: "hermes-kanban-dot-scheduled",
     ready: "hermes-kanban-dot-ready",
     running: "hermes-kanban-dot-running",
     blocked: "hermes-kanban-dot-blocked",
+    review: "hermes-kanban-dot-review",
     done: "hermes-kanban-dot-done",
     archived: "hermes-kanban-dot-archived",
   };
@@ -206,6 +212,7 @@
   // can inspect any board without shifting the CLI's active board out
   // from under a terminal they left open.
   const LS_BOARD_KEY = "hermes.kanban.selectedBoard";
+  const LS_VIEW_KEY = "hermes.kanban.commandView";
 
   function readSelectedBoard() {
     try {
@@ -230,6 +237,30 @@
       if (slug) window.localStorage.setItem(LS_BOARD_KEY, slug);
       else window.localStorage.removeItem(LS_BOARD_KEY);
     } catch (_e) { /* ignore quota / private mode */ }
+  }
+
+  function readCommandView() {
+    try {
+      const value = window.localStorage.getItem(LS_VIEW_KEY);
+      return ["sprint", "workstreams", "board"].indexOf(value) >= 0 ? value : "sprint";
+    } catch (_e) { return "sprint"; }
+  }
+
+  function writeCommandView(view) {
+    try { window.localStorage.setItem(LS_VIEW_KEY, view); } catch (_e) { /* noop */ }
+  }
+
+  function taskFromHash() {
+    const raw = String(window.location.hash || "").replace(/^#/, "");
+    if (!raw) return null;
+    try { return new URLSearchParams(raw).get("task"); } catch (_e) { return null; }
+  }
+
+  function writeTaskHash(taskId) {
+    const url = new URL(window.location.href);
+    if (taskId) url.hash = `task=${encodeURIComponent(taskId)}`;
+    else if (String(url.hash || "").indexOf("#task=") === 0) url.hash = "";
+    window.history.replaceState(null, "", url.toString());
   }
 
   function withBoard(url, board) {
@@ -509,6 +540,9 @@
     const [board, setBoard] = useState(() => readSelectedBoard() || null);
     const [boardList, setBoardList] = useState([]);      // [{slug, name, counts, ...}]
     const [showNewBoard, setShowNewBoard] = useState(false);
+    const [commandView, setCommandView] = useState(() => readCommandView());
+    const [sprintData, setSprintData] = useState(null);
+    const [sprintError, setSprintError] = useState(null);
 
     const [kanbanBoard, setKanbanBoard] = useState(null);  // the grid data
     // Alias so the rest of the function can keep using `board` semantically
@@ -530,7 +564,7 @@
     const [laneByProfile, setLaneByProfile] = useState(true);
     const [configApplied, setConfigApplied] = useState(false);
 
-    const [selectedTaskId, setSelectedTaskId] = useState(null);
+    const [selectedTaskId, setSelectedTaskId] = useState(() => taskFromHash());
     const [selectedIds, setSelectedIds] = useState(() => new Set());
     const [lastSelectedId, setLastSelectedId] = useState(null);
     const [failedIds, setFailedIds] = useState(() => new Set());
@@ -548,6 +582,28 @@
     const wsRef = useRef(null);
     const wsBackoffRef = useRef(1000);
     const wsClosedRef = useRef(false);
+
+    const changeCommandView = useCallback(function (nextView) {
+      setCommandView(nextView);
+      writeCommandView(nextView);
+    }, []);
+
+    const openTask = useCallback(function (taskId) {
+      if (!taskId) return;
+      setSelectedTaskId(taskId);
+      writeTaskHash(taskId);
+    }, []);
+
+    const closeTask = useCallback(function () {
+      setSelectedTaskId(null);
+      writeTaskHash(null);
+    }, []);
+
+    useEffect(function () {
+      function onHashChange() { setSelectedTaskId(taskFromHash()); }
+      window.addEventListener("hashchange", onHashChange);
+      return function () { window.removeEventListener("hashchange", onHashChange); };
+    }, []);
 
     // --- load config once ---------------------------------------------------
     useEffect(function () {
@@ -582,6 +638,20 @@
         .finally(function () { setLoading(false); });
     }, [tenantFilter, includeArchived, board]);
 
+    // --- fetch the live Sprint Manager projection -------------------------
+    const loadSprint = useCallback(function () {
+      return SDK.fetchJSON(withBoard(`${API}/sprint?days=7`, board))
+        .then(function (data) {
+          setSprintData(data);
+          setSprintError(null);
+          return data;
+        })
+        .catch(function (err) {
+          setSprintError(parseApiErrorMessage(err));
+          return null;
+        });
+    }, [board]);
+
     // --- load list of boards for the switcher ------------------------------
     const loadBoardList = useCallback(function () {
       return SDK.fetchJSON(withBoard(`${API}/boards`, board))
@@ -605,14 +675,16 @@
     }, [board]);
 
     useEffect(function () { loadBoardList(); }, [loadBoardList]);
+    useEffect(function () { loadSprint(); }, [loadSprint]);
 
     const scheduleReload = useCallback(function () {
       if (reloadTimerRef.current) return;
       reloadTimerRef.current = setTimeout(function () {
         reloadTimerRef.current = null;
         loadBoard();
+        loadSprint();
       }, 250);
-    }, [loadBoard]);
+    }, [loadBoard, loadSprint]);
 
     useEffect(function () {
       loadBoard();
@@ -946,6 +1018,7 @@
       // event cursor so the WS reopens aligned to the new board's
       // latest_event_id on the next loadBoard.
       setBoardData(null);
+      setSprintData(null);
       cursorRef.current = 0;
       setLoading(true);
       setBoard(nextSlug);
@@ -1042,63 +1115,455 @@
             return createNewBoard(payload).then(function () { setShowNewBoard(false); });
           },
         }) : null,
-        h(OrchestrationPanel, null),
-        h(AttentionStrip, {
-          boardData,
-          onOpen: setSelectedTaskId,
+        h(CommandViewSwitcher, {
+          value: commandView,
+          onChange: changeCommandView,
+          onRefresh: function () { loadBoard(); loadSprint(); },
         }),
-        h(BoardToolbar, {
-          board: boardData,
-          tenantFilter, setTenantFilter,
-          assigneeFilter, setAssigneeFilter,
-          includeArchived, setIncludeArchived,
-          laneByProfile, setLaneByProfile,
-          search, setSearch,
-          onNudgeDispatch: function () {
-            SDK.fetchJSON(withBoard(`${API}/dispatch?max=8`, board), { method: "POST" })
-              .then(loadBoard)
-              .catch(function (e) { setError(String(e.message || e)); });
-          },
-          onRefresh: loadBoard,
-        }),
-       selectedIds.size > 0 ? h(BulkActionBar, {
-         count: selectedIds.size,
-         assignees: (boardData && boardData.assignees) || [],
-         onApply: applyBulk,
-         onClear: clearSelected,
-         onSelectAllVisible: selectAllVisible,
-         onDelete: deleteSelected,
-       }) : null,
-        error ? h("div", { className: "text-xs text-destructive px-2" }, error) : null,
-        h(BoardColumns, {
-          board: filteredBoard,
-          laneByProfile,
-          selectedIds,
-          failedIds,
-          draggingTaskId,
-          onDragStart: handleDragStart,
-          onDragEnd: handleDragEnd,
-          toggleSelected,
-          toggleRange,
-          selectAllInColumn,
-          onMove: moveTask,
-          onMoveSelected: moveSelected,
-          onDelete: deleteTask,
-          onOpen: setSelectedTaskId,
-          onCreate: createTask,
-          allTasks: boardData.columns.reduce(function (acc, c) { return acc.concat(c.tasks); }, []),
-        }),
+        commandView === "sprint" ? h(SprintCommandCenter, {
+          data: sprintData,
+          loading: !sprintData && !sprintError,
+          error: sprintError,
+          onOpenTask: openTask,
+          onShowWorkstreams: function () { changeCommandView("workstreams"); },
+          onShowBoard: function () { changeCommandView("board"); },
+        }) : null,
+        commandView === "workstreams" ? h(WorkstreamView, {
+          data: sprintData,
+          loading: !sprintData && !sprintError,
+          error: sprintError,
+          onOpenTask: openTask,
+        }) : null,
+        commandView === "board" ? h(React.Fragment, null,
+          h(OrchestrationPanel, null),
+          h(AttentionStrip, {
+            boardData,
+            onOpen: openTask,
+          }),
+          h(BoardToolbar, {
+            board: boardData,
+            tenantFilter, setTenantFilter,
+            assigneeFilter, setAssigneeFilter,
+            includeArchived, setIncludeArchived,
+            laneByProfile, setLaneByProfile,
+            search, setSearch,
+            onNudgeDispatch: function () {
+              SDK.fetchJSON(withBoard(`${API}/dispatch?max=8`, board), { method: "POST" })
+                .then(function () { loadBoard(); loadSprint(); })
+                .catch(function (e) { setError(String(e.message || e)); });
+            },
+            onRefresh: function () { loadBoard(); loadSprint(); },
+          }),
+          selectedIds.size > 0 ? h(BulkActionBar, {
+            count: selectedIds.size,
+            assignees: (boardData && boardData.assignees) || [],
+            onApply: applyBulk,
+            onClear: clearSelected,
+            onSelectAllVisible: selectAllVisible,
+            onDelete: deleteSelected,
+          }) : null,
+          error ? h("div", { className: "text-xs text-destructive px-2" }, error) : null,
+          h(BoardColumns, {
+            board: filteredBoard,
+            laneByProfile,
+            selectedIds,
+            failedIds,
+            draggingTaskId,
+            onDragStart: handleDragStart,
+            onDragEnd: handleDragEnd,
+            toggleSelected,
+            toggleRange,
+            selectAllInColumn,
+            onMove: moveTask,
+            onMoveSelected: moveSelected,
+            onDelete: deleteTask,
+            onOpen: openTask,
+            onCreate: createTask,
+            allTasks: boardData.columns.reduce(function (acc, c) { return acc.concat(c.tasks); }, []),
+          }),
+        ) : null,
         selectedTaskId ? h(TaskDrawer, {
           taskId: selectedTaskId,
           boardSlug: board,
-          onClose: function () { setSelectedTaskId(null); },
-          onRefresh: loadBoard,
+          onClose: closeTask,
+          onRefresh: function () { loadBoard(); loadSprint(); },
           renderMarkdown: renderMd,
           allTasks: boardData.columns.reduce(function (acc, c) { return acc.concat(c.tasks); }, []),
           assignees: (boardData && boardData.assignees) || [],
           eventTick: taskEventTick[selectedTaskId] || 0,
         }) : null,
       ),
+    );
+  }
+
+  // -------------------------------------------------------------------------
+  // Sprint command center — live rocks, scorecard, IDS, plans, and evidence
+  // -------------------------------------------------------------------------
+
+  function formatSprintDate(epoch) {
+    if (!epoch) return "—";
+    try {
+      return new Date(epoch * 1000).toLocaleDateString(undefined, {
+        month: "short", day: "numeric", year: "numeric",
+      });
+    } catch (_e) { return "—"; }
+  }
+
+  function statusClass(status) {
+    return `hermes-kanban-sprint-status hermes-kanban-sprint-status--${status || "open"}`;
+  }
+
+  function copyReference(path) {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(path).catch(function () {
+        window.prompt("Copy path", path);
+      });
+    } else {
+      window.prompt("Copy path", path);
+    }
+  }
+
+  function CommandViewSwitcher(props) {
+    const views = [
+      { id: "sprint", label: "Sprint", hint: "Rocks, scorecard, IDS, plans, and evidence" },
+      { id: "workstreams", label: "Workstreams", hint: "Parent/child execution rollups" },
+      { id: "board", label: "Board", hint: "Native live Kanban cards" },
+    ];
+    return h("div", { className: "hermes-kanban-command-nav" },
+      h("div", { className: "hermes-kanban-command-tabs", role: "tablist", "aria-label": "Kanban views" },
+        views.map(function (view) {
+          return h("button", {
+            key: view.id,
+            type: "button",
+            role: "tab",
+            "aria-selected": props.value === view.id,
+            className: cn(
+              "hermes-kanban-command-tab",
+              props.value === view.id ? "hermes-kanban-command-tab--active" : "",
+            ),
+            title: view.hint,
+            onClick: function () { props.onChange(view.id); },
+          },
+            h("span", null, view.label),
+            h("small", null, view.hint),
+          );
+        }),
+      ),
+      h(Button, {
+        size: "sm",
+        onClick: props.onRefresh,
+        title: "Refresh the board and sprint projection",
+      }, "Refresh live data"),
+    );
+  }
+
+  function SprintLoading(props) {
+    if (props.error) {
+      return h(Card, null,
+        h(CardContent, { className: "p-6" },
+          h("div", { className: "text-sm text-destructive" },
+            "Sprint projection failed: ", props.error),
+          h("p", { className: "text-xs text-muted-foreground mt-2" },
+            "The native board is still available in the Board view."),
+        ),
+      );
+    }
+    return h("div", { className: "hermes-kanban-sprint-loading" },
+      "Building the live sprint projection…");
+  }
+
+  function SprintMetric(props) {
+    return h("div", { className: `hermes-kanban-sprint-metric hermes-kanban-sprint-metric--${props.tone || "neutral"}` },
+      h("div", { className: "hermes-kanban-sprint-metric-label" }, props.label),
+      h("div", { className: "hermes-kanban-sprint-metric-value" }, props.value),
+      h("div", { className: "hermes-kanban-sprint-metric-note" }, props.note),
+    );
+  }
+
+  function RockCard(props) {
+    const rock = props.rock;
+    const progress = rock.progress || { done: 0, total: 0 };
+    const percent = progress.total > 0
+      ? Math.round((progress.done / progress.total) * 100)
+      : 0;
+    return h("article", { className: "hermes-kanban-rock" },
+      h("div", { className: "hermes-kanban-rock-top" },
+        h("span", { className: statusClass(rock.status) }, rock.status),
+        h("span", { className: "hermes-kanban-rock-priority" }, `P${rock.priority || 0}`),
+      ),
+      h("button", {
+        type: "button",
+        className: "hermes-kanban-rock-title",
+        onClick: function () { props.onOpenTask(rock.id); },
+      }, rock.title || rock.id),
+      h("div", { className: "hermes-kanban-rock-meta" },
+        rock.assignee ? h("span", null, rock.assignee) : h("span", null, "Unassigned"),
+        rock.tenant ? h("span", null, rock.tenant) : null,
+      ),
+      progress.total > 0 ? h("div", { className: "hermes-kanban-rock-progress" },
+        h("div", { className: "hermes-kanban-rock-progress-label" },
+          h("span", null, "Linked cards"),
+          h("strong", null, `${progress.done}/${progress.total}`),
+        ),
+        h("div", { className: "hermes-kanban-progress-track" },
+          h("span", { style: { width: `${percent}%` } }),
+        ),
+      ) : h("div", { className: "hermes-kanban-rock-progress-label" },
+        h("span", null, "Focused card"),
+        h("strong", null, `${rock.age_days == null ? "—" : rock.age_days}d old`),
+      ),
+      (rock.references || []).length > 0 ? h("div", { className: "hermes-kanban-rock-reference" },
+        (rock.references || []).slice(0, 1).map(function (ref) {
+          return h("button", {
+            key: ref.path,
+            type: "button",
+            title: ref.path,
+            onClick: function () { copyReference(ref.path); },
+          }, ref.kind === "plan" ? "Plan linked" : "Evidence linked");
+        }),
+      ) : null,
+    );
+  }
+
+  function IDSPanel(props) {
+    const issues = props.issues || [];
+    return h("section", { className: "hermes-kanban-sprint-panel" },
+      h("div", { className: "hermes-kanban-sprint-panel-head" },
+        h("div", null,
+          h("span", { className: "hermes-kanban-sprint-kicker" }, "IDS / attention"),
+          h("h3", null, "Highest-priority blockers"),
+        ),
+        h("span", { className: "hermes-kanban-sprint-count" }, issues.length, " shown"),
+      ),
+      issues.length === 0
+        ? h("div", { className: "hermes-kanban-sprint-empty" }, "No blockers on this board.")
+        : h("div", { className: "hermes-kanban-ids-list" },
+          issues.slice(0, 8).map(function (issue, index) {
+            return h("button", {
+              type: "button",
+              key: issue.id,
+              className: "hermes-kanban-ids-row",
+              onClick: function () { props.onOpenTask(issue.id); },
+            },
+              h("span", { className: "hermes-kanban-ids-index" }, String(index + 1).padStart(2, "0")),
+              h("span", { className: "hermes-kanban-ids-copy" },
+                h("strong", null, issue.title || issue.id),
+                h("small", null,
+                  issue.block_kind || "untyped blocker",
+                  " · ", issue.assignee || "unassigned",
+                  issue.age_days == null ? "" : ` · ${issue.age_days}d`,
+                ),
+              ),
+              h("span", { className: "hermes-kanban-ids-priority" }, `P${issue.priority || 0}`),
+            );
+          }),
+        ),
+    );
+  }
+
+  function PlanEvidencePanel(props) {
+    const [kind, setKind] = useState("all");
+    const [query, setQuery] = useState("");
+    const refs = props.references || [];
+    const q = query.trim().toLowerCase();
+    const visible = refs.filter(function (ref) {
+      if (kind !== "all" && ref.kind !== kind) return false;
+      if (q && String(ref.path || "").toLowerCase().indexOf(q) === -1) return false;
+      return true;
+    });
+    const planCount = refs.filter(function (ref) { return ref.kind === "plan"; }).length;
+    const evidenceCount = refs.length - planCount;
+    return h("section", { className: "hermes-kanban-sprint-panel hermes-kanban-references" },
+      h("div", { className: "hermes-kanban-sprint-panel-head hermes-kanban-reference-head" },
+        h("div", null,
+          h("span", { className: "hermes-kanban-sprint-kicker" }, "Plans & proof"),
+          h("h3", null, "Board-backed execution index"),
+        ),
+        h("div", { className: "hermes-kanban-reference-controls" },
+          h("div", { className: "hermes-kanban-reference-filter" },
+            [
+              { id: "all", label: `All ${refs.length}` },
+              { id: "plan", label: `Plans ${planCount}` },
+              { id: "evidence", label: `Evidence ${evidenceCount}` },
+            ].map(function (option) {
+              return h("button", {
+                type: "button",
+                key: option.id,
+                className: kind === option.id ? "is-active" : "",
+                onClick: function () { setKind(option.id); },
+              }, option.label);
+            }),
+          ),
+          h(Input, {
+            value: query,
+            onChange: function (event) { setQuery(event.target.value); },
+            placeholder: "Filter paths…",
+            className: "h-8 w-52",
+          }),
+        ),
+      ),
+      visible.length === 0
+        ? h("div", { className: "hermes-kanban-sprint-empty" },
+          refs.length === 0
+            ? "No durable plan or evidence paths are referenced by cards yet."
+            : "No references match this filter.")
+        : h("div", { className: "hermes-kanban-reference-list" },
+          visible.slice(0, 32).map(function (ref) {
+            const firstTask = ref.task_ids && ref.task_ids[0];
+            return h("div", { className: "hermes-kanban-reference-row", key: ref.path },
+              h("span", { className: `hermes-kanban-reference-kind hermes-kanban-reference-kind--${ref.kind}` },
+                ref.kind),
+              h("button", {
+                type: "button",
+                className: "hermes-kanban-reference-path",
+                title: "Copy path",
+                onClick: function () { copyReference(ref.path); },
+              }, ref.path),
+              h("span", { className: statusClass(ref.status) }, ref.status),
+              h("span", { className: "hermes-kanban-reference-mentions" },
+                ref.mentions, ref.mentions === 1 ? " card" : " cards"),
+              firstTask ? h(Button, {
+                size: "sm",
+                onClick: function () { props.onOpenTask(firstTask); },
+              }, "Open") : null,
+            );
+          }),
+        ),
+    );
+  }
+
+  function SprintCommandCenter(props) {
+    if (!props.data) return h(SprintLoading, { error: props.error });
+    const data = props.data;
+    const score = data.scorecard || {};
+    const flow = Number(score.flow_delta || 0);
+    return h("div", { className: "hermes-kanban-sprint" },
+      h("header", { className: "hermes-kanban-sprint-hero" },
+        h("div", null,
+          h("span", { className: "hermes-kanban-sprint-kicker" }, "Official live Kanban · Sprint Manager"),
+          h("h2", null, "Execution pulse, decisions, and proof"),
+          h("p", null,
+            `${formatSprintDate(data.window && data.window.start)} — ${formatSprintDate(data.window && data.window.end)}`,
+            " · Derived from native cards and links; no frozen report data.",
+          ),
+        ),
+        h("div", { className: "hermes-kanban-sprint-hero-actions" },
+          h(Button, { size: "sm", onClick: props.onShowWorkstreams }, "Explore workstreams"),
+          h(Button, { size: "sm", onClick: props.onShowBoard }, "Open live board"),
+        ),
+      ),
+      h("div", { className: "hermes-kanban-sprint-scorecard" },
+        h(SprintMetric, { label: "Shipped", value: score.completed || 0, note: "completed in 7 days", tone: "good" }),
+        h(SprintMetric, { label: "Intake", value: score.created || 0, note: "created in 7 days", tone: "neutral" }),
+        h(SprintMetric, {
+          label: "Flow delta",
+          value: flow > 0 ? `+${flow}` : String(flow),
+          note: "shipped minus intake",
+          tone: flow >= 0 ? "good" : "warn",
+        }),
+        h(SprintMetric, { label: "Active", value: score.active || 0, note: "ready · running · review", tone: "active" }),
+        h(SprintMetric, { label: "Blocked", value: score.blocked || 0, note: "IDS backlog", tone: "danger" }),
+        h(SprintMetric, { label: "Open", value: score.open || 0, note: "non-terminal cards", tone: "neutral" }),
+      ),
+      h("div", { className: "hermes-kanban-sprint-primary" },
+        h("section", { className: "hermes-kanban-sprint-panel" },
+          h("div", { className: "hermes-kanban-sprint-panel-head" },
+            h("div", null,
+              h("span", { className: "hermes-kanban-sprint-kicker" }, "Current rocks"),
+              h("h3", null, "Highest-leverage open work"),
+            ),
+            h("span", { className: "hermes-kanban-sprint-count" }, (data.rocks || []).length, " tracked"),
+          ),
+          (data.rocks || []).length === 0
+            ? h("div", { className: "hermes-kanban-sprint-empty" }, "No current rocks were inferred from the live board.")
+            : h("div", { className: "hermes-kanban-rock-grid" },
+              data.rocks.map(function (rock) {
+                return h(RockCard, { key: rock.id, rock, onOpenTask: props.onOpenTask });
+              }),
+            ),
+        ),
+        h(IDSPanel, { issues: data.issues, onOpenTask: props.onOpenTask }),
+      ),
+      h(PlanEvidencePanel, { references: data.references, onOpenTask: props.onOpenTask }),
+    );
+  }
+
+  function WorkstreamView(props) {
+    const [expanded, setExpanded] = useState(null);
+    if (!props.data) return h(SprintLoading, { error: props.error });
+    const workstreams = props.data.workstreams || [];
+    return h("div", { className: "hermes-kanban-workstreams" },
+      h("header", { className: "hermes-kanban-workstream-header" },
+        h("div", null,
+          h("span", { className: "hermes-kanban-sprint-kicker" }, "Interactive execution map"),
+          h("h2", null, "Linked workstreams"),
+          h("p", null, "Top-level parent cards become workstreams; linked children provide the live delivery rollup."),
+        ),
+        h("span", { className: "hermes-kanban-workstream-total" }, workstreams.length, " workstreams"),
+      ),
+      workstreams.length === 0
+        ? h("div", { className: "hermes-kanban-sprint-empty" },
+          "No linked parent/child workstreams are active in this sprint window.")
+        : h("div", { className: "hermes-kanban-workstream-grid" },
+          workstreams.map(function (stream) {
+            const open = expanded === stream.id;
+            const percent = stream.total > 0 ? Math.round((stream.done / stream.total) * 100) : 0;
+            return h("article", {
+              className: cn("hermes-kanban-workstream", open ? "hermes-kanban-workstream--open" : ""),
+              key: stream.id,
+            },
+              h("button", {
+                type: "button",
+                className: "hermes-kanban-workstream-summary",
+                onClick: function () { setExpanded(open ? null : stream.id); },
+                "aria-expanded": open,
+              },
+                h("div", { className: "hermes-kanban-workstream-number" }, `${percent}%`),
+                h("div", { className: "hermes-kanban-workstream-copy" },
+                  h("div", { className: "hermes-kanban-workstream-titleline" },
+                    h("span", { className: statusClass(stream.status) }, stream.status),
+                    h("strong", null, stream.title || stream.id),
+                  ),
+                  h("small", null,
+                    stream.assignee || "unassigned",
+                    stream.tenant ? ` · ${stream.tenant}` : "",
+                    ` · P${stream.priority || 0}`,
+                  ),
+                  h("div", { className: "hermes-kanban-progress-track" },
+                    h("span", { style: { width: `${percent}%` } }),
+                  ),
+                ),
+                h("div", { className: "hermes-kanban-workstream-totals" },
+                  h("strong", null, `${stream.done}/${stream.total}`),
+                  h("small", null, open ? "Collapse" : "Inspect"),
+                ),
+              ),
+              open ? h("div", { className: "hermes-kanban-workstream-detail" },
+                h("div", { className: "hermes-kanban-workstream-counts" },
+                  Object.keys(stream.counts || {}).sort().map(function (status) {
+                    return h("span", { key: status },
+                      h("i", { className: statusClass(status) }, status),
+                      h("strong", null, stream.counts[status]),
+                    );
+                  }),
+                ),
+                h("div", { className: "hermes-kanban-workstream-tasks" },
+                  (stream.tasks || []).map(function (task) {
+                    return h("button", {
+                      type: "button",
+                      key: task.id,
+                      onClick: function () { props.onOpenTask(task.id); },
+                    },
+                      h("span", { className: statusClass(task.status) }, task.status),
+                      h("strong", null, task.title || task.id),
+                      h("small", null, task.assignee || "unassigned"),
+                    );
+                  }),
+                ),
+              ) : null,
+            );
+          }),
+        ),
     );
   }
 
