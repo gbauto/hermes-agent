@@ -1,9 +1,9 @@
 {
   "name": "kanban",
   "label": "Kanban",
-  "description": "Multi-agent collaboration board — drag-drop cards across columns, read comment threads, see which profile is running what",
+  "description": "Live Sprint Manager command center plus the native multi-agent Kanban board",
   "icon": "Package",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "tab": {
     "path": "/kanban",
     "position": "after:skills"

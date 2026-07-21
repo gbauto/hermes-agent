@@ -38,6 +38,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 import sqlite3
 import time
 from dataclasses import asdict
@@ -369,6 +370,323 @@ def _links_for(conn: sqlite3.Connection, task_id: str) -> dict[str, list[str]]:
         )
     ]
     return {"parents": parents, "children": children}
+
+
+# ---------------------------------------------------------------------------
+# Sprint command-center helpers
+# ---------------------------------------------------------------------------
+
+_SPRINT_OPEN_STATUSES = {
+    "triage", "todo", "scheduled", "ready", "running", "blocked", "review",
+}
+_SPRINT_ACTIVE_STATUSES = {"ready", "running", "review"}
+_SPRINT_COMPLETE_STATUSES = {"done", "archived"}
+_SPRINT_REFERENCE_RE = re.compile(
+    r"(?P<path>(?:second-brain|artifacts|docs|receipts)/"
+    r"[A-Za-z0-9_./-]+\.(?:md|html|json|png|svg|pdf))",
+    re.IGNORECASE,
+)
+
+
+def _epoch(value: Any) -> int:
+    """Return a defensive integer epoch for mixed SQLite values."""
+    try:
+        return int(float(value or 0))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _excerpt(value: Any, limit: int = 180) -> str:
+    text = " ".join(str(value or "").split())
+    if len(text) <= limit:
+        return text
+    return text[: max(0, limit - 1)].rstrip() + "…"
+
+
+def _extract_reference_paths(*values: Any) -> list[dict[str, str]]:
+    """Extract stable plan/evidence paths from task text.
+
+    The sprint index intentionally points at durable artifacts already named by
+    cards; it never scans arbitrary files or guesses paths.  That keeps the
+    dashboard live and board-backed while still exposing the plan/evidence
+    vocabulary used by Sprint Manager reports.
+    """
+    found: dict[str, dict[str, str]] = {}
+    for value in values:
+        text = str(value or "").replace("\\", "/")
+        for match in _SPRINT_REFERENCE_RE.finditer(text):
+            path = match.group("path").rstrip(".,;:)]}")
+            lowered = path.lower()
+            kind = (
+                "plan"
+                if lowered.startswith("second-brain/plans/")
+                or lowered.startswith("second-brain/inbox/plans/")
+                else "evidence"
+            )
+            found.setdefault(path, {"path": path, "kind": kind})
+    return list(found.values())
+
+
+def _reference_status(statuses: set[str]) -> str:
+    if "blocked" in statuses:
+        return "blocked"
+    if "running" in statuses:
+        return "running"
+    if "review" in statuses:
+        return "review"
+    if "ready" in statuses:
+        return "ready"
+    if statuses and statuses.issubset(_SPRINT_COMPLETE_STATUSES):
+        return "done"
+    return "open"
+
+
+def _task_sprint_dict(
+    row: dict[str, Any],
+    *,
+    now: int,
+    refs: Optional[list[dict[str, str]]] = None,
+) -> dict[str, Any]:
+    created_at = _epoch(row.get("created_at"))
+    return {
+        "id": row.get("id"),
+        "title": row.get("title"),
+        "status": row.get("status"),
+        "priority": int(row.get("priority") or 0),
+        "assignee": row.get("assignee"),
+        "tenant": row.get("tenant"),
+        "project_id": row.get("project_id"),
+        "block_kind": row.get("block_kind"),
+        "created_at": created_at,
+        "completed_at": _epoch(row.get("completed_at")) or None,
+        "age_days": round(max(0, now - created_at) / 86400, 1) if created_at else None,
+        "references": refs or [],
+    }
+
+
+def _build_sprint_snapshot(
+    task_rows: list[dict[str, Any]],
+    link_rows: list[dict[str, Any]],
+    *,
+    now: int,
+    days: int,
+) -> dict[str, Any]:
+    """Build the live Sprint Manager projection from board-native rows."""
+    start = now - days * 86400
+    by_id = {str(row["id"]): row for row in task_rows}
+    children: dict[str, list[str]] = {}
+    child_ids: set[str] = set()
+    for link in link_rows:
+        parent_id = str(link.get("parent_id") or "")
+        child_id = str(link.get("child_id") or "")
+        if not parent_id or not child_id:
+            continue
+        children.setdefault(parent_id, []).append(child_id)
+        child_ids.add(child_id)
+
+    status_counts: dict[str, int] = {}
+    references_by_task: dict[str, list[dict[str, str]]] = {}
+    reference_index: dict[str, dict[str, Any]] = {}
+    for row in task_rows:
+        task_id = str(row["id"])
+        status = str(row.get("status") or "todo")
+        status_counts[status] = status_counts.get(status, 0) + 1
+        refs = _extract_reference_paths(row.get("title"), row.get("body"), row.get("result"))
+        references_by_task[task_id] = refs
+        for ref in refs:
+            entry = reference_index.setdefault(
+                ref["path"],
+                {
+                    "path": ref["path"],
+                    "kind": ref["kind"],
+                    "mentions": 0,
+                    "task_ids": [],
+                    "task_titles": [],
+                    "statuses": set(),
+                    "latest_at": 0,
+                },
+            )
+            entry["mentions"] += 1
+            entry["task_ids"].append(task_id)
+            entry["task_titles"].append(row.get("title") or task_id)
+            entry["statuses"].add(status)
+            entry["latest_at"] = max(entry["latest_at"], _epoch(row.get("created_at")))
+
+    created_window = sum(1 for row in task_rows if _epoch(row.get("created_at")) >= start)
+    completed_window = sum(
+        1
+        for row in task_rows
+        if str(row.get("status") or "") in _SPRINT_COMPLETE_STATUSES
+        and _epoch(row.get("completed_at")) >= start
+    )
+    open_count = sum(status_counts.get(status, 0) for status in _SPRINT_OPEN_STATUSES)
+    active_count = sum(status_counts.get(status, 0) for status in _SPRINT_ACTIVE_STATUSES)
+    blocked_count = status_counts.get("blocked", 0)
+
+    def task_sort_key(row: dict[str, Any]) -> tuple[int, int]:
+        return (-int(row.get("priority") or 0), -_epoch(row.get("created_at")))
+
+    parent_candidates = [
+        row
+        for task_id, row in by_id.items()
+        if task_id in children
+        and task_id not in child_ids
+        and (
+            str(row.get("status") or "") in _SPRINT_OPEN_STATUSES
+            or _epoch(row.get("completed_at")) >= start
+        )
+    ]
+    parent_candidates.sort(key=task_sort_key)
+
+    rock_rows = [
+        row for row in parent_candidates
+        if str(row.get("status") or "") in _SPRINT_OPEN_STATUSES
+    ]
+    if len(rock_rows) < 6:
+        seen = {str(row["id"]) for row in rock_rows}
+        recent_open = [
+            row
+            for row in task_rows
+            if str(row["id"]) not in seen
+            and str(row.get("status") or "") in _SPRINT_OPEN_STATUSES
+            and (_epoch(row.get("created_at")) >= now - 14 * 86400 or int(row.get("priority") or 0) >= 100)
+        ]
+        recent_open.sort(key=task_sort_key)
+        rock_rows.extend(recent_open[: 6 - len(rock_rows)])
+
+    rocks: list[dict[str, Any]] = []
+    for row in rock_rows[:6]:
+        task_id = str(row["id"])
+        child_rows = [by_id[cid] for cid in children.get(task_id, []) if cid in by_id]
+        total = len(child_rows)
+        done = sum(
+            1 for child in child_rows
+            if str(child.get("status") or "") in _SPRINT_COMPLETE_STATUSES
+        )
+        item = _task_sprint_dict(
+            row, now=now, refs=references_by_task.get(task_id),
+        )
+        item["progress"] = {"done": done, "total": total}
+        rocks.append(item)
+
+    issues = []
+    blocked_rows = [
+        row for row in task_rows if str(row.get("status") or "") == "blocked"
+    ]
+    blocked_rows.sort(key=task_sort_key)
+    for row in blocked_rows[:12]:
+        item = _task_sprint_dict(
+            row, now=now, refs=references_by_task.get(str(row["id"])),
+        )
+        item["failure_excerpt"] = _excerpt(row.get("last_failure_error"), 160)
+        issues.append(item)
+
+    workstreams: list[dict[str, Any]] = []
+    for row in parent_candidates[:16]:
+        task_id = str(row["id"])
+        member_rows = [row] + [
+            by_id[cid] for cid in children.get(task_id, []) if cid in by_id
+        ]
+        counts: dict[str, int] = {}
+        for member in member_rows:
+            status = str(member.get("status") or "todo")
+            counts[status] = counts.get(status, 0) + 1
+        tasks = [
+            _task_sprint_dict(
+                member,
+                now=now,
+                refs=references_by_task.get(str(member["id"])),
+            )
+            for member in sorted(member_rows, key=task_sort_key)
+        ]
+        workstreams.append({
+            "id": task_id,
+            "title": row.get("title"),
+            "status": row.get("status"),
+            "priority": int(row.get("priority") or 0),
+            "assignee": row.get("assignee"),
+            "tenant": row.get("tenant"),
+            "counts": counts,
+            "done": sum(counts.get(s, 0) for s in _SPRINT_COMPLETE_STATUSES),
+            "total": len(member_rows),
+            "tasks": tasks,
+        })
+
+    refs_out: list[dict[str, Any]] = []
+    for entry in reference_index.values():
+        statuses = set(entry.pop("statuses"))
+        entry["status"] = _reference_status(statuses)
+        entry["task_ids"] = entry["task_ids"][:8]
+        entry["task_titles"] = entry["task_titles"][:8]
+        refs_out.append(entry)
+    refs_out.sort(
+        key=lambda item: (
+            0 if item["kind"] == "plan" else 1,
+            -int(item["latest_at"]),
+            -int(item["mentions"]),
+            item["path"],
+        )
+    )
+
+    return {
+        "generated_at": now,
+        "window": {"days": days, "start": start, "end": now},
+        "status_counts": status_counts,
+        "scorecard": {
+            "created": created_window,
+            "completed": completed_window,
+            "flow_delta": completed_window - created_window,
+            "open": open_count,
+            "active": active_count,
+            "blocked": blocked_count,
+            "ready": status_counts.get("ready", 0),
+            "running": status_counts.get("running", 0),
+            "review": status_counts.get("review", 0),
+        },
+        "rocks": rocks,
+        "issues": issues,
+        "workstreams": workstreams,
+        "references": refs_out[:80],
+    }
+
+
+@router.get("/sprint")
+def get_sprint_snapshot(
+    days: int = Query(7, ge=1, le=90),
+    board: Optional[str] = Query(None, description="Kanban board slug (omit for current)"),
+):
+    """Return the live Sprint Manager projection for a board.
+
+    This endpoint is read-only.  Rocks and workstreams come from the native
+    parent/child graph; scorecard numbers and IDS blockers come from task
+    state; plan/evidence entries are durable paths explicitly mentioned by
+    cards.  No frozen report snapshot is embedded in the dashboard.
+    """
+    board = _resolve_board(board)
+    conn = _conn(board=board)
+    try:
+        task_rows = [
+            dict(row)
+            for row in conn.execute(
+                "SELECT id, title, body, assignee, status, priority, created_at, "
+                "started_at, completed_at, tenant, result, last_failure_error, "
+                "project_id, block_kind FROM tasks"
+            ).fetchall()
+        ]
+        link_rows = [
+            dict(row)
+            for row in conn.execute(
+                "SELECT parent_id, child_id FROM task_links"
+            ).fetchall()
+        ]
+        return _build_sprint_snapshot(
+            task_rows,
+            link_rows,
+            now=int(time.time()),
+            days=days,
+        )
+    finally:
+        conn.close()
 
 
 # ---------------------------------------------------------------------------
