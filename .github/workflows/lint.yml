@@ -9,18 +9,12 @@ name: Lint (ruff + ty)
 #      enforcement fails.
 
 on:
-  push:
-    branches: [main]
-    paths-ignore:
-      - "**/*.md"
-      - "docs/**"
-      - "website/**"
-  pull_request:
-    branches: [main]
-    paths-ignore:
-      - "**/*.md"
-      - "docs/**"
-      - "website/**"
+  workflow_call:
+    inputs:
+      event_name:
+        description: The event name from the calling orchestrator (pull_request or push).
+        type: string
+        required: true
 
 permissions:
   contents: read
@@ -54,7 +48,7 @@ jobs:
         run: |
           # For PRs, diff against the merge base with the target branch.
           # For pushes to main, diff against the previous commit on main.
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
+          if [ "${{ inputs.event_name }}" = "pull_request" ]; then
             BASE_SHA=$(git merge-base "origin/${{ github.base_ref }}" HEAD)
             BASE_REF="origin/${{ github.base_ref }}"
           else
@@ -103,6 +97,8 @@ jobs:
           echo "base ty:   $(wc -c < .lint-reports/base/ty.json) bytes"
 
       - name: Generate diff summary
+        env:
+          HEAD_REF: ${{ inputs.event_name == 'pull_request' && github.head_ref || github.ref_name }}
         run: |
           python scripts/lint_diff.py \
             --base-ruff .lint-reports/base/ruff.json \
@@ -110,7 +106,7 @@ jobs:
             --base-ty   .lint-reports/base/ty.json \
             --head-ty   .lint-reports/head/ty.json \
             --base-ref  "${{ steps.base.outputs.ref }}" \
-            --head-ref  "${{ github.event_name == 'pull_request' && github.head_ref || github.ref_name }}" \
+            --head-ref  "$HEAD_REF" \
             --output    .lint-reports/summary.md
           cat .lint-reports/summary.md >> "$GITHUB_STEP_SUMMARY"
 
@@ -122,7 +118,7 @@ jobs:
           retention-days: 14
 
       - name: Post / update PR comment
-        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+        if: inputs.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
         continue-on-error: true
         uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7
         with:

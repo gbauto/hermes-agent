@@ -1,0 +1,72 @@
+name: CI
+
+# Runtime CI orchestrator for the gbauto Hermes Agent fork. It preserves the
+# existing lint/test/docs/lockfile workflow bodies as reusable local callees,
+# centralizes PR/push fan-out, and leaves Nix, release, deploy, OSV, history, contributor,
+# skills-index, Docker publish, and PyPI workflows untouched as special flows.
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  lint:
+    name: Lint (ruff + ty)
+    uses: ./.github/workflows/lint.yml
+    with:
+      event_name: ${{ github.event_name }}
+
+  tests:
+    name: Tests
+    uses: ./.github/workflows/tests.yml
+
+  docs-site-checks:
+    name: Docs Site Checks
+    uses: ./.github/workflows/docs-site-checks.yml
+
+  uv-lockfile-check:
+    name: uv.lock check
+    uses: ./.github/workflows/uv-lockfile-check.yml
+
+  supply-chain-audit:
+    name: Supply Chain Audit
+    if: github.event_name == 'pull_request'
+    uses: ./.github/workflows/supply-chain-audit.yml
+    with:
+      event_name: ${{ github.event_name }}
+
+  all-checks-pass:
+    name: All required checks pass
+    needs:
+      - lint
+      - tests
+      - docs-site-checks
+      - uv-lockfile-check
+      - supply-chain-audit
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Evaluate job results
+        env:
+          RESULTS: ${{ toJSON(needs.*.result) }}
+        run: |
+          echo "$RESULTS" | python3 -c "
+          import json, sys
+          results = json.load(sys.stdin)
+          failed = [r for r in results if r == 'failure']
+          cancelled = [r for r in results if r == 'cancelled']
+          if failed or cancelled:
+              print(f'::error::{len(failed)} failed and {len(cancelled)} cancelled job(s)')
+              sys.exit(1)
+          print('All checks passed (or were skipped)')
+          "
