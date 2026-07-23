@@ -1,5 +1,7 @@
 import asyncio
+import time
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -234,3 +236,187 @@ def test_notifier_redelivers_same_kind_on_dispatch_cycle(tmp_path, monkeypatch):
         f"deliveries (texts: {[d['text'] for d in adapter.sent]})"
     )
     assert "crashed" in adapter.sent[1]["text"].lower()
+
+
+class ArtifactRecordingAdapter(RecordingAdapter):
+    def __init__(self):
+        super().__init__()
+        self.documents = []
+        self.images = []
+        self.videos = []
+
+    def extract_local_files(self, text):
+        from gateway.platforms.base import BasePlatformAdapter
+        return BasePlatformAdapter.extract_local_files(text)
+
+    async def send_document(self, chat_id, file_path, metadata=None, **_kw):
+        self.documents.append(file_path)
+
+    async def send_multiple_images(self, chat_id, images, metadata=None, **_kw):
+        self.images.extend(p for p, _caption in images)
+
+    async def send_video(self, chat_id, video_path, metadata=None, **_kw):
+        self.videos.append(video_path)
+
+
+def _collector_runner():
+    return GatewayRunner.__new__(GatewayRunner)
+
+
+def _collector_task(tmp_path, *, created_at=None, tid="t_parent"):
+    workspace = tmp_path / tid
+    workspace.mkdir(exist_ok=True)
+    return SimpleNamespace(
+        id=tid,
+        title="collector",
+        result=None,
+        created_at=int(created_at or time.time()) - 10,
+        workspace_path=str(workspace),
+    )
+
+
+def test_artifact_collector_explicit_payload_is_authoritative(tmp_path):
+    task = _collector_task(tmp_path)
+    wanted = Path(task.workspace_path) / "report.html"
+    wanted.write_text("<h1>ok</h1>")
+    contaminant = tmp_path / "old-gantt-summary.html"
+    contaminant.write_text("stale")
+    task.result = f"legacy fallback should not upload {contaminant}"
+
+    paths, links = _collector_runner()._collect_kanban_artifacts(
+        adapter=ArtifactRecordingAdapter(),
+        task=task,
+        event_payload={
+            "summary": f"done, but mentions stale {contaminant}",
+            "artifacts": [str(wanted)],
+        },
+    )
+
+    assert paths == [str(wanted.resolve())]
+    assert links == []
+
+
+def test_artifact_collector_manifest_urls_dedupe_and_rank(tmp_path):
+    task = _collector_task(tmp_path)
+    workspace = Path(task.workspace_path)
+    report = workspace / "report.html"
+    manifest = workspace / "manifest.json"
+    evidence = workspace / "public-dom-smoke.json"
+    dup_report = workspace / "nested" / "report.html"
+    dup_report.parent.mkdir()
+    for path in (report, evidence, dup_report):
+        path.write_text(path.name)
+    manifest.write_text(
+        '{"outputs": ['
+        f'{{"path": "{report}", "kind": "html_report"}},'
+        f'{{"path": "{dup_report}", "kind": "duplicate"}},'
+        f'{{"path": "{evidence}", "kind": "validation_evidence"}},'
+        '{"url": "https://files.catbox.moe/6m6vb3.html", "kind": "public_url"}'
+        ']}'
+    )
+
+    paths, links = _collector_runner()._collect_kanban_artifacts(
+        adapter=ArtifactRecordingAdapter(),
+        task=task,
+        event_payload={"artifacts": [str(manifest), str(report)]},
+    )
+
+    assert paths == [str(report.resolve()), str(manifest.resolve()), str(evidence.resolve())]
+    assert links == ["https://files.catbox.moe/6m6vb3.html"]
+    assert str(dup_report.resolve()) not in paths
+
+
+def test_artifact_collector_legacy_fallback_requires_workspace_and_age(tmp_path):
+    created = int(time.time())
+    task = _collector_task(tmp_path, created_at=created)
+    workspace = Path(task.workspace_path)
+    valid = workspace / "implementation-receipt.md"
+    stale = workspace / "old-output.md"
+    outside = tmp_path / "outside.md"
+    for path in (valid, stale, outside):
+        path.write_text(path.name)
+    os_times = [created + 5, created - 100, created + 5]
+    for path, mtime in zip((valid, stale, outside), os_times):
+        path.touch()
+        import os
+        os.utime(path, (mtime, mtime))
+    task.result = f"valid {valid} stale {stale} outside {outside}"
+
+    paths, _links = _collector_runner()._collect_kanban_artifacts(
+        adapter=ArtifactRecordingAdapter(),
+        task=task,
+        event_payload={},
+    )
+
+    assert paths == [str(valid.resolve())]
+
+
+def test_notifier_upload_path_does_not_use_summary_when_explicit_present(tmp_path, monkeypatch):
+    db_path = tmp_path / "explicit-authoritative.db"
+    monkeypatch.setenv("HERMES_KANBAN_DB", str(db_path))
+    kb.init_db()
+
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    wanted = workspace / "manifest.json"
+    wanted.write_text("{}")
+    contaminant = tmp_path / "index.html"
+    contaminant.write_text("stale")
+
+    conn = kb.connect()
+    try:
+        tid = kb.create_task(
+            conn,
+            title="explicit artifacts",
+            assignee="worker",
+            workspace_kind="dir",
+            workspace_path=str(workspace),
+        )
+        kb.add_notify_sub(conn, task_id=tid, platform="telegram", chat_id="chat-1")
+        kb.complete_task(
+            conn,
+            tid,
+            summary=f"real output in payload; unrelated duplicate index is {contaminant}",
+            metadata={"artifacts": [str(wanted)]},
+        )
+    finally:
+        conn.close()
+
+    adapter = ArtifactRecordingAdapter()
+    asyncio.run(_run_one_notifier_tick(monkeypatch, _make_runner(adapter)))
+
+    assert adapter.documents == [str(wanted.resolve())]
+    assert str(contaminant.resolve()) not in adapter.documents
+
+
+def test_completed_notification_says_no_task_specific_deliverable(tmp_path, monkeypatch):
+    db_path = tmp_path / "no-output.db"
+    monkeypatch.setenv("HERMES_KANBAN_DB", str(db_path))
+    kb.init_db()
+    conn = kb.connect()
+    try:
+        tid = kb.create_task(conn, title="no artifact", assignee="worker")
+        kb.add_notify_sub(conn, task_id=tid, platform="telegram", chat_id="chat-1")
+        kb.complete_task(conn, tid, summary="done without artifacts", metadata={"artifacts": [str(tmp_path / 'missing.html')]})
+    finally:
+        conn.close()
+
+    adapter = ArtifactRecordingAdapter()
+    asyncio.run(_run_one_notifier_tick(monkeypatch, _make_runner(adapter)))
+
+    assert adapter.documents == []
+    assert "No task-specific deliverable recorded" in adapter.sent[0]["text"]
+
+
+def test_dry_run_fixture_has_before_after_without_chat_ids():
+    fixture_path = Path(__file__).parents[1] / "fixtures" / "kanban_notifier_artifact_selection.json"
+    text = fixture_path.read_text()
+    assert "chat_id" not in text
+    assert "thread_id" not in text
+    assert "-100" not in text
+    data = __import__("json").loads(text)
+    assert set(data["fixtures"]) == {"t_98bee624", "t_59ef1e8c"}
+    for fixture in data["fixtures"].values():
+        assert fixture["before"]["explicit_artifacts"]
+        assert fixture["after"]["selected_outputs"]
+        assert fixture["after"]["rejected"]

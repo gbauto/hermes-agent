@@ -1,0 +1,66 @@
+{
+  "description": "Dry-run Kanban completion notification artifact selection fixtures. No platform send is performed and no chat IDs are included.",
+  "fixtures": {
+    "t_98bee624": {
+      "before": {
+        "task_id": "t_98bee624",
+        "summary": "receipt_only: TAC Lead settled the V2 repo boundary and dispatched the isolated implementation graph. Primary package is /Users/greg/repos/gbautomation/second-brain/intelligence/architecture/vinyl-dj-v2/README.md; reject unrelated 2026-07-07 and 2026-07-11 docs.",
+        "explicit_artifacts": [
+          "/Users/greg/repos/gbautomation/second-brain/intelligence/architecture/vinyl-dj-v2/README.md",
+          "/Users/greg/repos/gbautomation/second-brain/intelligence/architecture/vinyl-dj-v2/music-domain-contracts.ts",
+          "/Users/greg/repos/gbautomation/second-brain/intelligence/architecture/vinyl-dj-v2/music-domain-v2-migration-plan.sql",
+          "/Users/greg/repos/gbautomation/second-brain/intelligence/architecture/vinyl-dj-v2/manifest.json"
+        ],
+        "contaminants_pre_fix": [
+          "unrelated 2026-07-07 docs mentioned in summary/result",
+          "unrelated 2026-07-11 docs mentioned in summary/result"
+        ]
+      },
+      "after": {
+        "notification_text_contains": "receipt_only: TAC Lead settled the V2 repo boundary",
+        "selected_outputs": [
+          "/Users/greg/repos/gbautomation/second-brain/intelligence/architecture/vinyl-dj-v2/README.md",
+          "/Users/greg/repos/gbautomation/second-brain/intelligence/architecture/vinyl-dj-v2/music-domain-contracts.ts",
+          "/Users/greg/repos/gbautomation/second-brain/intelligence/architecture/vinyl-dj-v2/music-domain-v2-migration-plan.sql",
+          "/Users/greg/repos/gbautomation/second-brain/intelligence/architecture/vinyl-dj-v2/manifest.json"
+        ],
+        "selected_links": [
+          "Vinyl PR #6 receipt URL if represented explicitly",
+          "DJ PR #1/#2 receipt URLs if represented explicitly"
+        ],
+        "rejected": [
+          "unrelated 2026-07-07 docs",
+          "unrelated 2026-07-11 docs"
+        ]
+      }
+    },
+    "t_59ef1e8c": {
+      "before": {
+        "task_id": "t_59ef1e8c",
+        "summary": "Published report at https://files.catbox.moe/6m6vb3.html; also mentions stale Gantt summary and duplicate index.html entries as rejected evidence.",
+        "explicit_artifacts": [
+          "/Users/greg/.hermes/kanban/boards/gbautomation/workspaces/t_59ef1e8c/v2-telegram-branding-report/v2-closeout-telegram-board-branding-t_59ef1e8c.html",
+          "/Users/greg/.hermes/kanban/boards/gbautomation/workspaces/t_59ef1e8c/v2-telegram-branding-report/t_59ef1e8c-manifest.json",
+          "/Users/greg/.hermes/kanban/boards/gbautomation/workspaces/t_59ef1e8c/v2-telegram-branding-report/public-dom-smoke.json"
+        ],
+        "contaminants_pre_fix": [
+          "Gantt summary",
+          "duplicate index.html entries"
+        ]
+      },
+      "after": {
+        "notification_text_contains": "Published the combined V2 closeout + Telegram board-aware bot branding report",
+        "selected_outputs": [
+          "/Users/greg/.hermes/kanban/boards/gbautomation/workspaces/t_59ef1e8c/v2-telegram-branding-report/v2-closeout-telegram-board-branding-t_59ef1e8c.html",
+          "/Users/greg/.hermes/kanban/boards/gbautomation/workspaces/t_59ef1e8c/v2-telegram-branding-report/t_59ef1e8c-manifest.json",
+          "/Users/greg/.hermes/kanban/boards/gbautomation/workspaces/t_59ef1e8c/v2-telegram-branding-report/public-dom-smoke.json",
+          "https://files.catbox.moe/6m6vb3.html"
+        ],
+        "rejected": [
+          "Gantt summary",
+          "duplicate index.html entries"
+        ]
+      }
+    }
+  }
+}
