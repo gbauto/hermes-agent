@@ -114,14 +114,14 @@ Local gates run before commit:
 Representative PR smoke:
 
 - PR: https://github.com/gbauto/hermes-agent/pull/18
-- Head SHA tested: `8594544d0fff0c189d2a3e773cdadbaf303c3877`
+- Head SHA tested: `b6d39efc7ffcf13228ea481668543af4c23deead`
 - Passing unaffected/special checks: `History Check / check-common-ancestor`, `Nix / nix (macos-latest)`, `Nix / nix (ubuntu-latest)`.
 - Migrated workflow smoke result: blocked. GitHub created zero-job failed runs for each caller workflow:
-  - Tests: https://github.com/gbauto/hermes-agent/actions/runs/30053718554
-  - Lint (ruff + ty): https://github.com/gbauto/hermes-agent/actions/runs/30053718545
-  - Contributor Attribution Check: https://github.com/gbauto/hermes-agent/actions/runs/30053718563
-  - uv.lock check: https://github.com/gbauto/hermes-agent/actions/runs/30053718596
-  - Docs Site Checks: https://github.com/gbauto/hermes-agent/actions/runs/30053718593
+  - Tests: https://github.com/gbauto/hermes-agent/actions/runs/30053932622
+  - Lint (ruff + ty): https://github.com/gbauto/hermes-agent/actions/runs/30053932593
+  - Contributor Attribution Check: https://github.com/gbauto/hermes-agent/actions/runs/30053932590
+  - uv.lock check: https://github.com/gbauto/hermes-agent/actions/runs/30053932602
+  - Docs Site Checks: https://github.com/gbauto/hermes-agent/actions/runs/30053932610
 - Blocking cause: `gbauto/hermes-agent` is a public fork, while `gbauto/gbautomation` is private. The reusable catalog content is reachable with maintainer `gh` credentials, but GitHub Actions cannot resolve/run private cross-repo reusable workflows from this public repo under the current repository settings.
 - Required decision before merge: either expose the reusable catalog through a public repo/tag, configure organization/repository Actions access so this public fork may call the private catalog, or keep these workflows local in `gbauto/hermes-agent`.
 
