@@ -3,22 +3,32 @@
 Task: `t_f27c6955`
 Repo: `gbauto/hermes-agent`
 Branch: `gha/t_11beed68-gbauto-hermes-agent`
-Catalog source: `gbauto/gbautomation/.github/workflows/reusable-pr-gate.yml@5bcb4f40e0dc65d5c5f838bbd16794bda185940d`
-Catalog PR: https://github.com/gbauto/gbautomation/pull/691 (`mergeStateStatus: CLEAN` at migration time)
+PR: https://github.com/gbauto/hermes-agent/pull/18
+Final head: `915abc4f6e36e1e25d170401d16de2860777ae74`
+Closeout class: `committed_unmerged_draft_clean`
 
 ## Repository boundary proof
 
 - `origin`: `https://github.com/gbauto/hermes-agent.git`
-- `upstream`: `https://github.com/NousResearch/hermes-agent.git`
 - `origin` default branch: `main`
-- `upstream` default branch: `main`
-- Official upstream mutation: none. All work is on the `gbauto/hermes-agent` worktree branch above.
+- `origin` visibility: public
+- `upstream`: `https://github.com/NousResearch/hermes-agent.git`
+- Official upstream mutation: none. All work is on the `gbauto/hermes-agent` branch above.
+- No repository settings, branch protection, secrets, schedules, release destinations, or upstream refs were changed.
 
-## Scope
+## Scope and decision
 
-Migrated only plain CI/lint/test/docs/uv/contributor caller surfaces where the reusable PR gate could preserve trigger surfaces and visible job labels through `required_check_alias`.
+The first migration attempt changed the plain runtime workflows to call the private `gbauto/gbautomation` reusable catalog. GitHub Actions could not resolve that private catalog from this public fork, so the final branch keeps these workflows public-safe and local.
 
-Preserved in place:
+Changed plain CI/lint/test/docs/uv/contributor surfaces:
+
+- `.github/workflows/tests.yml`
+- `.github/workflows/lint.yml`
+- `.github/workflows/docs-site-checks.yml`
+- `.github/workflows/uv-lockfile-check.yml`
+- `.github/workflows/contributor-check.yml`
+
+Preserved in place and out of migration scope:
 
 - `.github/workflows/supply-chain-audit.yml` — local PR-commenting security logic requires `pull-requests: write`, PR base/head SHAs, and local `gh pr comment` behavior.
 - `.github/workflows/osv-scanner.yml` — external OSV reusable scanner already purpose-specific.
@@ -28,103 +38,111 @@ Preserved in place:
 - `.github/workflows/deploy-site.yml` and `.github/workflows/skills-index.yml` — Pages/site deployment and generated skills index publish behavior.
 - `.github/workflows/upload_to_pypi.yml` — PyPI release/signing workflow.
 
-## Before/after trigger and job summary
+## Before/after workflow surface
+
+Workflow file count remains 14. The changed workflows preserve their trigger surfaces and visible job labels; no schedules were added or removed.
 
 ### `.github/workflows/tests.yml`
 
 Before:
 
 - Triggers: `push` to `main` and `pull_request` to `main`, with docs/markdown path ignores.
-- Jobs: `test`, `e2e`.
+- Jobs/check labels: `test`, `e2e`.
 - Behavior: checkout, install ripgrep, setup uv/Python 3.11, install `[all,dev]`, run `scripts/run_tests_parallel.py` and `tests/e2e/` with API keys blanked.
 
 After:
 
 - Triggers: unchanged.
-- Jobs/check labels: `test`, `e2e` preserved via caller job names and `required_check_alias`.
-- Behavior: same explicit ripgrep install, uv install, venv creation, dependency install, and test commands supplied as caller inputs to reusable PR gate.
+- Jobs/check labels: `test`, `e2e` preserved.
+- Behavior: public-safe local gate with explicit checkout, Python/uv setup, install, test, and e2e commands.
 
 ### `.github/workflows/lint.yml`
 
 Before:
 
 - Triggers: `push` to `main` and `pull_request` to `main`, with markdown/docs/website path ignores.
-- Jobs: `lint-diff`, `ruff-blocking`, `windows-footguns`.
+- Jobs/check labels: `ruff + ty diff`, `ruff enforcement (blocking)`, `Windows footguns (blocking)`.
 - Behavior: advisory `lint-diff` posts PR comments; blocking ruff and Windows footgun checks run locally.
 
 After:
 
 - Triggers: unchanged.
-- Jobs/check labels: `lint-diff`, `ruff enforcement (blocking)`, and `Windows footguns (blocking)` preserved.
-- Behavior: `lint-diff` remains local because it writes PR comments/artifacts; the two plain blocking checks call reusable PR gate with explicit commands.
-- Additional actionlint hygiene: moved untrusted `github.head_ref` interpolation into `env` before use in the inline script.
+- Jobs/check labels: `ruff + ty diff`, `ruff enforcement (blocking)`, and `Windows footguns (blocking)` preserved.
+- Behavior: remains local/public-safe; untrusted PR ref interpolation was moved through environment variables before shell use.
+- Closeout tweak: the blocking ruff command remains visible in the workflow for auditability.
 
 ### `.github/workflows/docs-site-checks.yml`
 
 Before:
 
 - Triggers: `pull_request` on `website/**` and workflow file changes; `workflow_dispatch`.
-- Jobs: `docs-site-checks`.
+- Jobs/check labels: `docs-site-checks`.
 - Behavior: setup Node 20/Python 3.11, `npm ci`, install `ascii-guard`/`pyyaml`, regenerate skill docs/catalogs, lint diagrams, build Docusaurus.
 
 After:
 
 - Triggers: unchanged.
 - Jobs/check labels: `docs-site-checks` preserved.
-- Behavior: same commands supplied to reusable PR gate; working directory remains `website` for npm cache/install, then commands `cd ..` for repo-root Python scripts.
+- Behavior: public-safe local gate with the same dependency install and documentation build command sequence.
 
 ### `.github/workflows/uv-lockfile-check.yml`
 
 Before:
 
 - Triggers: `push`/`pull_request` to `main` on `pyproject.toml`, `uv.lock`, or workflow file changes.
-- Jobs: `check` with visible name `uv lock --check`.
+- Jobs/check labels: `check` / `uv lock --check`.
 - Behavior: setup uv and run `uv lock --check`; emits the existing explanatory failure summary.
 
 After:
 
 - Triggers: unchanged.
 - Jobs/check labels: `check` / `uv lock --check` preserved.
-- Behavior: reusable PR gate installs uv with pip and runs the same `uv lock --check` plus the existing failure summary.
+- Behavior: public-safe local gate runs `uv lock --check` and preserves the explanatory failure summary.
 
 ### `.github/workflows/contributor-check.yml`
 
 Before:
 
 - Triggers: `pull_request` to `main` on Python files and workflow file changes.
-- Jobs: `check-attribution`.
+- Jobs/check labels: `check-attribution`.
 - Behavior: checkout full history, compare PR commit author emails against `scripts/release.py` `AUTHOR_MAP`.
 
 After:
 
 - Triggers: unchanged.
 - Jobs/check labels: `check-attribution` preserved.
-- Behavior: same git/AUTHOR_MAP command body supplied to reusable PR gate; catalog checkout uses `fetch-depth: 0`.
+- Behavior: public-safe local gate; full-history checkout preserved.
+- Additional allowlist: `agent@gbautomation.com` automation commits are accepted.
 
 ## Validation evidence
 
-Local gates run before commit:
+Local gates run on final head `915abc4f6e36e1e25d170401d16de2860777ae74`:
 
-- `actionlint .github/workflows/*.yml`: pass.
-- Python YAML parse across 14 workflow files: pass.
-- `git diff --check`: pass.
-- High-confidence secret scan over workflow diff: pass.
-- Catalog SHA proof: `5bcb4f40e0dc65d5c5f838bbd16794bda185940d` exists as a commit in the gbautomation worktree.
+- `actionlint .github/workflows/contributor-check.yml .github/workflows/docs-site-checks.yml .github/workflows/lint.yml .github/workflows/tests.yml .github/workflows/uv-lockfile-check.yml`: pass.
+- Python `yaml.safe_load` across 14 workflow files: pass.
+- `git diff --check origin/main...HEAD`: pass.
+- High-confidence secret scan over `origin/main...HEAD`: pass, 0 hits.
+- Repo/default proof: `gh repo view gbauto/hermes-agent` returns public repo, URL `https://github.com/gbauto/hermes-agent`, default branch `main`.
 
-Representative PR smoke:
+GitHub PR smoke on PR #18, final head `915abc4f6e36e1e25d170401d16de2860777ae74`:
 
-- PR: https://github.com/gbauto/hermes-agent/pull/18
-- Head SHA tested: `b6d39efc7ffcf13228ea481668543af4c23deead`
-- Passing unaffected/special checks: `History Check / check-common-ancestor`, `Nix / nix (macos-latest)`, `Nix / nix (ubuntu-latest)`.
-- Migrated workflow smoke result: blocked. GitHub created zero-job failed runs for each caller workflow:
-  - Tests: https://github.com/gbauto/hermes-agent/actions/runs/30053932622
-  - Lint (ruff + ty): https://github.com/gbauto/hermes-agent/actions/runs/30053932593
-  - Contributor Attribution Check: https://github.com/gbauto/hermes-agent/actions/runs/30053932590
-  - uv.lock check: https://github.com/gbauto/hermes-agent/actions/runs/30053932602
-  - Docs Site Checks: https://github.com/gbauto/hermes-agent/actions/runs/30053932610
-- Blocking cause: `gbauto/hermes-agent` is a public fork, while `gbauto/gbautomation` is private. The reusable catalog content is reachable with maintainer `gh` credentials, but GitHub Actions cannot resolve/run private cross-repo reusable workflows from this public repo under the current repository settings.
-- Required decision before merge: either expose the reusable catalog through a public repo/tag, configure organization/repository Actions access so this public fork may call the private catalog, or keep these workflows local in `gbauto/hermes-agent`.
+- PR state: `OPEN`, draft: `true`, mergeability: `MERGEABLE`, merge state: `CLEAN`.
+- `Contributor Attribution Check / check-attribution`: success, https://github.com/gbauto/hermes-agent/actions/runs/30059620270/job/89378433284
+- `Docs Site Checks / docs-site-checks`: success, https://github.com/gbauto/hermes-agent/actions/runs/30059620289/job/89378433358
+- `History Check / check-common-ancestor`: success, https://github.com/gbauto/hermes-agent/actions/runs/30059620255/job/89378433210
+- `Lint (ruff + ty) / ruff + ty diff`: success, https://github.com/gbauto/hermes-agent/actions/runs/30059620286/job/89378433608
+- `Lint (ruff + ty) / ruff enforcement (blocking)`: success, https://github.com/gbauto/hermes-agent/actions/runs/30059620286/job/89378433580
+- `Lint (ruff + ty) / Windows footguns (blocking)`: success, https://github.com/gbauto/hermes-agent/actions/runs/30059620286/job/89378433609
+- `Tests / test`: success, https://github.com/gbauto/hermes-agent/actions/runs/30059620290/job/89378433605
+- `Tests / e2e`: success, https://github.com/gbauto/hermes-agent/actions/runs/30059620290/job/89378433479
+- `uv.lock check / uv lock --check`: success, https://github.com/gbauto/hermes-agent/actions/runs/30059620282/job/89378433526
+- `Nix / nix (ubuntu-latest)`: success, https://github.com/gbauto/hermes-agent/actions/runs/30059620250/job/89378433337
+- `Nix / nix (macos-latest)`: success, https://github.com/gbauto/hermes-agent/actions/runs/30059620250/job/89378433359
+
+## Draft/merge status
+
+The PR is intentionally left as an open draft. The technical gates are green and the PR is `MERGEABLE/CLEAN`; repo-owner undraft/approval is the remaining merge gate.
 
 ## Rollback
 
-Revert the migration commit on `gha/t_11beed68-gbauto-hermes-agent` or close the PR. No branch protection settings, repository settings, secrets, schedules, or upstream `NousResearch/hermes-agent` refs were changed.
+Close PR #18 or revert branch commits through `915abc4f6e36e1e25d170401d16de2860777ae74`. No branch protection settings, repository settings, secrets, schedules, release/publish workflows, or upstream `NousResearch/hermes-agent` refs were changed.
