@@ -1,37 +1,32 @@
 name: Tests
-
-on:
-  push:
-    branches: [main]
-    paths-ignore:
-      - '**/*.md'
-      - 'docs/**'
-  pull_request:
-    branches: [main]
-    paths-ignore:
-      - '**/*.md'
-      - 'docs/**'
-
 permissions:
   contents: read
-
-# Cancel in-progress runs for the same PR/branch
 concurrency:
   group: tests-${{ github.ref }}
   cancel-in-progress: true
-
 jobs:
   test:
     name: test
-    uses: gbauto/gbautomation/.github/workflows/reusable-pr-gate.yml@5bcb4f40e0dc65d5c5f838bbd16794bda185940d
-    with:
-      repo_profile: gbauto-hermes-agent
-      language: python
-      python_versions: '["3.11"]'
-      node_versions: '[]'
-      actionlint_enabled: false
-      required_check_alias: test
-      install_command: |
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash
+    env:
+      REPO_PROFILE: gbauto-hermes-agent
+      LANGUAGE_HINT: python
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+        persist-credentials: false
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+    - name: Install dependencies
+      run: |-
         set -euo pipefail
         RG_VERSION=15.1.0
         RG_SHA256=1c9297be4a084eea7ecaedf93eb03d058d6faae29bbc57ecdaf5063921491599
@@ -47,21 +42,32 @@ jobs:
         uv venv .venv --python 3.11
         source .venv/bin/activate
         uv pip install -e ".[all,dev]"
-      test_command: |
+    - name: Run test command
+      run: |-
         source .venv/bin/activate
         env OPENROUTER_API_KEY= OPENAI_API_KEY= NOUS_API_KEY= python scripts/run_tests_parallel.py
-
   e2e:
     name: e2e
-    uses: gbauto/gbautomation/.github/workflows/reusable-pr-gate.yml@5bcb4f40e0dc65d5c5f838bbd16794bda185940d
-    with:
-      repo_profile: gbauto-hermes-agent
-      language: python
-      python_versions: '["3.11"]'
-      node_versions: '[]'
-      actionlint_enabled: false
-      required_check_alias: e2e
-      install_command: |
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash
+    env:
+      REPO_PROFILE: gbauto-hermes-agent
+      LANGUAGE_HINT: python
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+        persist-credentials: false
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+    - name: Install dependencies
+      run: |-
         set -euo pipefail
         RG_VERSION=15.1.0
         RG_SHA256=1c9297be4a084eea7ecaedf93eb03d058d6faae29bbc57ecdaf5063921491599
@@ -77,6 +83,20 @@ jobs:
         uv venv .venv --python 3.11
         source .venv/bin/activate
         uv pip install -e ".[all,dev]"
-      test_command: |
+    - name: Run test command
+      run: |-
         source .venv/bin/activate
         env OPENROUTER_API_KEY= OPENAI_API_KEY= NOUS_API_KEY= python -m pytest tests/e2e/ -v --tb=short
+'on':
+  push:
+    branches:
+    - main
+    paths-ignore:
+    - '**/*.md'
+    - docs/**
+  pull_request:
+    branches:
+    - main
+    paths-ignore:
+    - '**/*.md'
+    - docs/**

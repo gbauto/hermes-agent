@@ -4,7 +4,6 @@ on:
   pull_request:
     branches: [main]
     paths:
-      # Only run when code files change (not docs-only PRs)
       - '*.py'
       - '**/*.py'
       - '.github/workflows/contributor-check.yml'
@@ -15,61 +14,63 @@ permissions:
 jobs:
   check-attribution:
     name: check-attribution
-    uses: gbauto/gbautomation/.github/workflows/reusable-pr-gate.yml@5bcb4f40e0dc65d5c5f838bbd16794bda185940d
-    with:
-      repo_profile: gbauto-hermes-agent
-      language: python
-      python_versions: '[]'
-      node_versions: '[]'
-      actionlint_enabled: false
-      required_check_alias: check-attribution
-      test_command: |
-        # Get the merge base between this PR and main
-        MERGE_BASE=$(git merge-base origin/main HEAD)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash
+    env:
+      REPO_PROFILE: gbauto-hermes-agent
+      LANGUAGE_HINT: python
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
 
-        # Find any new author emails in this PR's commits
-        NEW_EMAILS=$(git log ${MERGE_BASE}..HEAD --format='%ae' --no-merges | sort -u)
+      - name: Run contributor attribution check
+        run: |
+          MERGE_BASE=$(git merge-base origin/main HEAD)
+          NEW_EMAILS=$(git log "${MERGE_BASE}..HEAD" --format='%ae' --no-merges | sort -u)
 
-        if [ -z "$NEW_EMAILS" ]; then
-          echo "No new commits to check."
-          exit 0
-        fi
-
-        # Check each email against AUTHOR_MAP in release.py
-        MISSING=""
-        while IFS= read -r email; do
-          # Skip teknium and bot emails
-          case "$email" in
-            *teknium*|*noreply@github.com*|*dependabot*|*github-actions*|*anthropic.com*|*cursor.com*)
-              continue ;;
-          esac
-
-          # Check if email is in AUTHOR_MAP (either as a key or matches noreply pattern)
-          if echo "$email" | grep -qP '\+.*@users\.noreply\.github\.com'; then
-            continue  # GitHub noreply emails auto-resolve
+          if [ -z "$NEW_EMAILS" ]; then
+            echo "No new commits to check."
+            exit 0
           fi
 
-          if ! grep -qF "\"${email}\"" scripts/release.py 2>/dev/null; then
-            AUTHOR=$( git log --author="$email" --format='%an' -1 )
-            MISSING="${MISSING}\n  ${email} (${AUTHOR})"
-          fi
-        done <<< "$NEW_EMAILS"
+          MISSING=""
+          while IFS= read -r email; do
+            case "$email" in
+              *teknium*|*noreply@github.com*|*dependabot*|*github-actions*|*anthropic.com*|*cursor.com*)
+                continue ;;
+            esac
 
-        if [ -n "$MISSING" ]; then
-          echo ""
-          echo "⚠️  New contributor email(s) not in AUTHOR_MAP:"
-          echo -e "$MISSING"
-          echo ""
-          echo "Please add mappings to scripts/release.py AUTHOR_MAP:"
-          echo -e "$MISSING" | while read -r line; do
-            email=$(echo "$line" | sed 's/^ *//' | cut -d' ' -f1)
-            [ -z "$email" ] && continue
-            echo "    \"${email}\": \"<github-username>\","
-          done
-          echo ""
-          echo "To find the GitHub username for an email:"
-          echo "  gh api 'search/users?q=EMAIL+in:email' --jq '.items[0].login'"
-          exit 1
-        else
+            if echo "$email" | grep -qP '\+.*@users\.noreply\.github\.com'; then
+              continue
+            fi
+
+            if ! grep -qF "\"${email}\"" scripts/release.py 2>/dev/null; then
+              AUTHOR=$(git log --author="$email" --format='%an' -1)
+              MISSING="${MISSING}\n  ${email} (${AUTHOR})"
+            fi
+          done <<< "$NEW_EMAILS"
+
+          if [ -n "$MISSING" ]; then
+            echo ""
+            echo "⚠️  New contributor email(s) not in AUTHOR_MAP:"
+            echo -e "$MISSING"
+            echo ""
+            echo "Please add mappings to scripts/release.py AUTHOR_MAP:"
+            echo -e "$MISSING" | while read -r line; do
+              email=$(echo "$line" | sed 's/^ *//' | cut -d' ' -f1)
+              [ -z "$email" ] && continue
+              echo "    \"${email}\": \"<github-username>\","
+            done
+            echo ""
+            echo "To find the GitHub username for an email:"
+            echo "  gh api 'search/users?q=EMAIL+in:email' --jq '.items[0].login'"
+            exit 1
+          fi
+
           echo "✅ All contributor emails are mapped in AUTHOR_MAP."
-        fi

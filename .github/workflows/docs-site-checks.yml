@@ -1,33 +1,48 @@
 name: Docs Site Checks
-
-on:
-  pull_request:
-    paths:
-      - 'website/**'
-      - '.github/workflows/docs-site-checks.yml'
-  workflow_dispatch:
-
 permissions:
   contents: read
-
 jobs:
   docs-site-checks:
     name: docs-site-checks
-    uses: gbauto/gbautomation/.github/workflows/reusable-pr-gate.yml@5bcb4f40e0dc65d5c5f838bbd16794bda185940d
-    with:
-      repo_profile: gbauto-hermes-agent
-      language: mixed
-      python_versions: '["3.11"]'
-      node_versions: '["20"]'
-      working_directory: website
-      actionlint_enabled: false
-      required_check_alias: docs-site-checks
-      install_command: |
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash
+        working-directory: website
+    env:
+      REPO_PROFILE: gbauto-hermes-agent
+      LANGUAGE_HINT: mixed
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+        persist-credentials: false
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+    - name: Set up Node
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+        cache: npm
+        cache-dependency-path: website/package-lock.json
+    - name: Install dependencies
+      run: |-
         npm ci
         python -m pip install ascii-guard==2.3.0 pyyaml==6.0.3
-      build_command: |
+    - name: Run build command
+      run: |-
         cd ..
         python3 website/scripts/extract-skills.py
         python3 website/scripts/generate-skill-docs.py
         npm --prefix website run lint:diagrams
         npm --prefix website run build
+'on':
+  pull_request:
+    paths:
+    - website/**
+    - .github/workflows/docs-site-checks.yml
+  workflow_dispatch: null
