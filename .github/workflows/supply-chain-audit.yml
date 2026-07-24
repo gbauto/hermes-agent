@@ -1,17 +1,12 @@
 name: Supply Chain Audit
 
 on:
-  pull_request:
-    types: [opened, synchronize, reopened]
-    paths:
-      - '**/*.py'
-      - '**/*.pth'
-      - '**/setup.py'
-      - '**/setup.cfg'
-      - '**/sitecustomize.py'
-      - '**/usercustomize.py'
-      - '**/__init__.pth'
-      - 'pyproject.toml'
+  workflow_call:
+    inputs:
+      event_name:
+        description: The event name from the calling orchestrator.
+        type: string
+        required: true
 
 permissions:
   pull-requests: write
@@ -29,6 +24,7 @@ permissions:
 jobs:
   scan:
     name: Scan PR for critical supply chain risks
+    if: inputs.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -141,8 +137,8 @@ jobs:
 
   dep-bounds:
     name: Check PyPI dependency upper bounds
+    if: inputs.event_name == 'pull_request'
     runs-on: ubuntu-latest
-    if: contains(github.event.pull_request.changed_files_url, 'pyproject.toml') || true
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
