@@ -42,7 +42,7 @@ jobs:
           MISSING=""
           while IFS= read -r email; do
             case "$email" in
-              *teknium*|*noreply@github.com*|*dependabot*|*github-actions*|*anthropic.com*|*cursor.com*)
+              *teknium*|*noreply@github.com*|*dependabot*|*github-actions*|*anthropic.com*|*cursor.com*|agent@gbautomation.com)
                 continue ;;
             esac
 
