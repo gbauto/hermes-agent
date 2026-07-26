@@ -264,7 +264,8 @@ jobs:
       - name: Install ruff
         run: uv tool install ruff
       - name: ruff check .
-        run: ruff check .
+        run: |
+          ruff check .
 
   windows-footguns:
     name: Lint / Windows footguns (blocking)
