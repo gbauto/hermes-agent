@@ -1,0 +1,704 @@
+name: CI
+
+# Single default-branch workflow for gbauto/hermes-agent.
+# Consolidates the previous 14 workflow files while intentionally parking
+# deploy-site, Docker publish, PyPI publish, and release/signing write paths.
+# This workflow does not run on release or tag events and defaults to read-only
+# token permissions; jobs opt into the narrow extra permissions they require.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened, ready_for_review]
+  schedule:
+    - cron: '0 9 * * 1'      # weekly OSV lockfile scan
+    - cron: '0 6,18 * * *'   # justified skills-index freshness check
+  workflow_dispatch:
+    inputs:
+      run_nix_lock_check:
+        description: 'Run the manual Nix lockfile hash check (never writes commits)'
+        required: false
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  PYTHON_VERSION: '3.11'
+
+jobs:
+  changes:
+    name: Workflow inventory and change routing
+    runs-on: ubuntu-latest
+    outputs:
+      python: ${{ steps.filter.outputs.python }}
+      docs_site: ${{ steps.filter.outputs.docs_site }}
+      deps: ${{ steps.filter.outputs.deps }}
+      docker: ${{ steps.filter.outputs.docker }}
+      skills_index: ${{ steps.filter.outputs.skills_index }}
+      workflow: ${{ steps.filter.outputs.workflow }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        with:
+          fetch-depth: 0
+
+      - name: Verify single workflow file
+        run: |
+          set -euo pipefail
+          count=$(find .github/workflows -maxdepth 1 -type f \( -name '*.yml' -o -name '*.yaml' \) | wc -l | tr -d ' ')
+          if [ "$count" != "1" ] || [ ! -f .github/workflows/ci.yml ]; then
+            echo "::error::Expected exactly one workflow YAML file: .github/workflows/ci.yml; found $count"
+            find .github/workflows -maxdepth 1 -type f \( -name '*.yml' -o -name '*.yaml' \) -print
+            exit 1
+          fi
+
+      - name: Detect changed areas
+        id: filter
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            base="${{ github.event.pull_request.base.sha }}"
+            head="${{ github.event.pull_request.head.sha }}"
+            files=$(git diff --name-only "$base".."$head")
+          elif [ "${{ github.event_name }}" = "push" ]; then
+            base="${{ github.event.before }}"
+            head="${{ github.sha }}"
+            if [ -z "$base" ] || [ "$base" = "0000000000000000000000000000000000000000" ]; then
+              base=$(git rev-parse "$head^" 2>/dev/null || echo "$head")
+            fi
+            files=$(git diff --name-only "$base".."$head")
+          else
+            files="__all__"
+          fi
+          printf '%s\n' "$files" > changed-files.txt
+          cat changed-files.txt
+
+          has() { grep -Eq "$1" changed-files.txt; }
+          all=false
+          grep -qx '__all__' changed-files.txt && all=true
+          emit() { echo "$1=$2" >> "$GITHUB_OUTPUT"; }
+
+          if $all || has '(^|/).*\.py$|(^|/).*\.pth$|(^|/)(setup\.py|setup\.cfg|sitecustomize\.py|usercustomize\.py|__init__\.pth)$|^pyproject\.toml$|^uv\.lock$|^scripts/|^tests/|^agent/|^gateway/|^tools/|^plugins/|^hermes_cli/|^cron/|^\.github/workflows/ci\.yml$'; then emit python true; else emit python false; fi
+          if $all || has '^website/|^skills/|^optional-skills/|^\.github/workflows/ci\.yml$'; then emit docs_site true; else emit docs_site false; fi
+          if $all || has '(^|/)package(-lock)?\.json$|^uv\.lock$|^pyproject\.toml$|^ui-tui/package(-lock)?\.json$|^website/package(-lock)?\.json$|^\.github/workflows/ci\.yml$'; then emit deps true; else emit deps false; fi
+          if $all || has '^Dockerfile$|^docker/|^\.github/actions/hermes-smoke-test/|^pyproject\.toml$|^uv\.lock$|(^|/).*\.py$|^\.github/workflows/ci\.yml$'; then emit docker true; else emit docker false; fi
+          if $all || has '^scripts/build_skills_index\.py$|^website/scripts/|^skills/|^optional-skills/|^\.github/workflows/ci\.yml$'; then emit skills_index true; else emit skills_index false; fi
+          if has '^\.github/workflows/ci\.yml$'; then emit workflow true; else emit workflow false; fi
+
+      - name: Upload change routing artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
+        with:
+          name: ci-change-routing
+          path: changed-files.txt
+          retention-days: 7
+
+  history-check:
+    name: History Check / check-common-ancestor
+    needs: changes
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        with:
+          fetch-depth: 0
+      - name: Reject PRs with no common ancestor on main
+        run: |
+          if ! BASE=$(git merge-base origin/main HEAD 2>/dev/null) || [ -z "$BASE" ]; then
+            echo "::error::This PR has no common ancestor with main. Rebase onto current main before merging."
+            exit 1
+          fi
+          echo "::notice::Common ancestor with main: $BASE"
+
+  contributor-attribution:
+    name: Contributor Attribution Check / check-attribution
+    needs: changes
+    if: github.event_name == 'pull_request' && needs.changes.outputs.python == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        with:
+          fetch-depth: 0
+      - name: Check for unmapped contributor emails
+        run: |
+          set -euo pipefail
+          MERGE_BASE=$(git merge-base origin/main HEAD)
+          NEW_EMAILS=$(git log "${MERGE_BASE}..HEAD" --format='%ae' --no-merges | sort -u)
+          if [ -z "$NEW_EMAILS" ]; then
+            echo "No new commits to check."
+            exit 0
+          fi
+          MISSING=""
+          while IFS= read -r email; do
+            case "$email" in
+              *teknium*|*noreply@github.com*|*dependabot*|*github-actions*|*anthropic.com*|*cursor.com*|agent@gbautomation.com)
+                continue ;;
+            esac
+            if echo "$email" | grep -qP '\+.*@users\.noreply\.github\.com'; then
+              continue
+            fi
+            if ! grep -qF "\"${email}\"" scripts/release.py 2>/dev/null; then
+              AUTHOR=$(git log --author="$email" --format='%an' -1)
+              MISSING="${MISSING}\n  ${email} (${AUTHOR})"
+            fi
+          done <<< "$NEW_EMAILS"
+          if [ -n "$MISSING" ]; then
+            echo "::error::New contributor email(s) not in AUTHOR_MAP:${MISSING}"
+            exit 1
+          fi
+          echo "✅ All contributor emails are mapped in AUTHOR_MAP."
+
+  lint-diff:
+    name: Lint / ruff + ty diff
+    needs: changes
+    if: needs.changes.outputs.python == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    timeout-minutes: 10
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        with:
+          fetch-depth: 0
+      - name: Install uv
+        uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86  # v5
+      - name: Install ruff + ty
+        run: |
+          uv tool install ruff
+          uv tool install ty
+      - name: Determine base ref
+        id: base
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            BASE_SHA=$(git merge-base "origin/${{ github.base_ref }}" HEAD)
+            BASE_REF="origin/${{ github.base_ref }}"
+          else
+            BASE_SHA=$(git rev-parse HEAD~1 2>/dev/null || git rev-parse HEAD)
+            BASE_REF="HEAD~1"
+          fi
+          echo "sha=${BASE_SHA}" >> "$GITHUB_OUTPUT"
+          echo "ref=${BASE_REF}" >> "$GITHUB_OUTPUT"
+      - name: Run ruff + ty on HEAD
+        run: |
+          mkdir -p .lint-reports/head
+          ruff check --output-format json --exit-zero > .lint-reports/head/ruff.json || true
+          ty check --output-format gitlab --exit-zero > .lint-reports/head/ty.json || true
+      - name: Run ruff + ty on base
+        run: |
+          mkdir -p .lint-reports/base
+          HEAD_SHA=$(git rev-parse HEAD)
+          BASE_SHA="${{ steps.base.outputs.sha }}"
+          if [ "$BASE_SHA" = "$HEAD_SHA" ]; then
+            echo '[]' > .lint-reports/base/ruff.json
+            echo '[]' > .lint-reports/base/ty.json
+          else
+            git worktree add --detach /tmp/lint-base "$BASE_SHA"
+            (
+              cd /tmp/lint-base
+              ruff check --output-format json --exit-zero > "$GITHUB_WORKSPACE/.lint-reports/base/ruff.json" || true
+              ty check --output-format gitlab --exit-zero > "$GITHUB_WORKSPACE/.lint-reports/base/ty.json" || true
+            )
+            git worktree remove --force /tmp/lint-base
+          fi
+      - name: Generate diff summary
+        env:
+          LINT_BASE_REF: ${{ steps.base.outputs.ref }}
+          LINT_HEAD_REF: ${{ github.event_name == 'pull_request' && github.head_ref || github.ref_name }}
+        run: |
+          python scripts/lint_diff.py \
+            --base-ruff .lint-reports/base/ruff.json \
+            --head-ruff .lint-reports/head/ruff.json \
+            --base-ty .lint-reports/base/ty.json \
+            --head-ty .lint-reports/head/ty.json \
+            --base-ref "$LINT_BASE_REF" \
+            --head-ref "$LINT_HEAD_REF" \
+            --output .lint-reports/summary.md
+          cat .lint-reports/summary.md >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload reports as artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
+        with:
+          name: lint-reports
+          path: .lint-reports/
+          retention-days: 14
+      - name: Post / update PR comment
+        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+        continue-on-error: true
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea  # v7
+        with:
+          script: |
+            const fs = require('fs');
+            const body = fs.readFileSync('.lint-reports/summary.md', 'utf8');
+            const marker = '<!-- lint-diff-summary -->';
+            const fullBody = marker + '\n' + body;
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+            const existing = comments.find(c => c.body && c.body.includes(marker));
+            if (existing) {
+              await github.rest.issues.updateComment({ owner: context.repo.owner, repo: context.repo.repo, comment_id: existing.id, body: fullBody });
+            } else {
+              await github.rest.issues.createComment({ owner: context.repo.owner, repo: context.repo.repo, issue_number: context.issue.number, body: fullBody });
+            }
+
+  ruff-blocking:
+    name: Lint / ruff enforcement (blocking)
+    needs: changes
+    if: needs.changes.outputs.python == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+      - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86  # v5
+      - name: Install ruff
+        run: uv tool install ruff
+      - name: ruff check .
+        run: ruff check .
+
+  windows-footguns:
+    name: Lint / Windows footguns (blocking)
+    needs: changes
+    if: needs.changes.outputs.python == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405  # v6.2.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Run footgun checker
+        run: python scripts/check-windows-footguns.py --all
+
+  tests:
+    name: Tests / unit
+    needs: changes
+    if: needs.changes.outputs.python == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+      - name: Install ripgrep (prebuilt binary)
+        run: |
+          set -euo pipefail
+          RG_VERSION=15.1.0
+          RG_SHA256=1c9297be4a084eea7ecaedf93eb03d058d6faae29bbc57ecdaf5063921491599
+          RG_TARBALL=ripgrep-${RG_VERSION}-x86_64-unknown-linux-musl.tar.gz
+          curl -sSfL -o "$RG_TARBALL" "https://github.com/BurntSushi/ripgrep/releases/download/${RG_VERSION}/${RG_TARBALL}"
+          echo "${RG_SHA256}  ${RG_TARBALL}" | sha256sum -c -
+          tar -xzf "$RG_TARBALL"
+          sudo mv "ripgrep-${RG_VERSION}-x86_64-unknown-linux-musl/rg" /usr/local/bin/rg
+          rm -rf "$RG_TARBALL" "ripgrep-${RG_VERSION}-x86_64-unknown-linux-musl"
+      - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86  # v5
+      - name: Set up Python 3.11
+        run: uv python install 3.11
+      - name: Install dependencies
+        run: |
+          uv venv .venv --python 3.11
+          source .venv/bin/activate
+          uv pip install -e ".[all,dev]"
+      - name: Run tests
+        run: |
+          source .venv/bin/activate
+          python scripts/run_tests_parallel.py
+        env:
+          OPENROUTER_API_KEY: ""
+          OPENAI_API_KEY: ""
+          NOUS_API_KEY: ""
+
+  e2e:
+    name: Tests / e2e
+    needs: changes
+    if: needs.changes.outputs.python == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+      - name: Install ripgrep (prebuilt binary)
+        run: |
+          set -euo pipefail
+          RG_VERSION=15.1.0
+          RG_SHA256=1c9297be4a084eea7ecaedf93eb03d058d6faae29bbc57ecdaf5063921491599
+          RG_TARBALL=ripgrep-${RG_VERSION}-x86_64-unknown-linux-musl.tar.gz
+          curl -sSfL -o "$RG_TARBALL" "https://github.com/BurntSushi/ripgrep/releases/download/${RG_VERSION}/${RG_TARBALL}"
+          echo "${RG_SHA256}  ${RG_TARBALL}" | sha256sum -c -
+          tar -xzf "$RG_TARBALL"
+          sudo mv "ripgrep-${RG_VERSION}-x86_64-unknown-linux-musl/rg" /usr/local/bin/rg
+          rm -rf "$RG_TARBALL" "ripgrep-${RG_VERSION}-x86_64-unknown-linux-musl"
+      - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86  # v5
+      - name: Set up Python 3.11
+        run: uv python install 3.11
+      - name: Install dependencies
+        run: |
+          uv venv .venv --python 3.11
+          source .venv/bin/activate
+          uv pip install -e ".[all,dev]"
+      - name: Run e2e tests
+        run: |
+          source .venv/bin/activate
+          python -m pytest tests/e2e/ -v --tb=short
+        env:
+          OPENROUTER_API_KEY: ""
+          OPENAI_API_KEY: ""
+          NOUS_API_KEY: ""
+
+  docs-site:
+    name: Docs Site Checks / build
+    needs: changes
+    if: needs.changes.outputs.docs_site == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020  # v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: website/package-lock.json
+      - name: Install website dependencies
+        run: npm ci
+        working-directory: website
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405  # v6.2.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Install ascii-guard
+        run: python -m pip install ascii-guard==2.3.0 pyyaml==6.0.3
+      - name: Extract skill metadata for dashboard
+        run: python3 website/scripts/extract-skills.py
+      - name: Regenerate per-skill docs pages + catalogs
+        run: python3 website/scripts/generate-skill-docs.py
+      - name: Lint docs diagrams
+        run: npm run lint:diagrams
+        working-directory: website
+      - name: Build Docusaurus
+        run: npm run build
+        working-directory: website
+
+  uv-lock:
+    name: uv.lock check / uv lock --check
+    needs: changes
+    if: needs.changes.outputs.deps == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+      - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86  # v5
+      - name: Verify uv.lock is up-to-date
+        run: |
+          if ! uv lock --check; then
+            cat <<'EOF' >> "$GITHUB_STEP_SUMMARY"
+          ## ❌ uv.lock is out of sync with pyproject.toml
+
+          This check runs against the merged state on PRs. Sync with main,
+          run `uv lock`, commit `uv.lock`, and push again.
+          EOF
+            echo "::error title=uv.lock out of sync::Run uv lock locally and commit the result."
+            exit 1
+          fi
+
+  supply-chain:
+    name: Supply Chain Audit / critical diff scan
+    needs: changes
+    if: github.event_name == 'pull_request' && needs.changes.outputs.python == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        with:
+          fetch-depth: 0
+      - name: Scan diff for critical patterns
+        id: scan
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          BASE="${{ github.event.pull_request.base.sha }}"
+          HEAD="${{ github.event.pull_request.head.sha }}"
+          DIFF=$(git diff "$BASE".."$HEAD" -- . ':!uv.lock' ':!*.lock' ':!package-lock.json' ':!yarn.lock' || true)
+          FINDINGS=""
+          PTH_FILES=$(git diff --name-only "$BASE".."$HEAD" | grep '\.pth$' || true)
+          if [ -n "$PTH_FILES" ]; then
+            FINDINGS="${FINDINGS}
+          ### 🚨 CRITICAL: .pth file added or modified
+          ${PTH_FILES}
+          "
+          fi
+          B64_EXEC_HITS=$(echo "$DIFF" | grep -n '^+' | grep -iE 'base64\.(b64decode|decodebytes|urlsafe_b64decode)' | grep -iE 'exec\(|eval\(' | head -10 || true)
+          if [ -n "$B64_EXEC_HITS" ]; then
+            FINDINGS="${FINDINGS}
+          ### 🚨 CRITICAL: base64 decode + exec/eval combo
+          ${B64_EXEC_HITS}
+          "
+          fi
+          PROC_HITS=$(echo "$DIFF" | grep -n '^+' | grep -E 'subprocess\.(Popen|call|run)\s*\(' | grep -iE 'base64|\\x[0-9a-f]{2}|chr\(' | head -10 || true)
+          if [ -n "$PROC_HITS" ]; then
+            FINDINGS="${FINDINGS}
+          ### 🚨 CRITICAL: subprocess with encoded/obfuscated command
+          ${PROC_HITS}
+          "
+          fi
+          SETUP_HITS=$(git diff --name-only "$BASE".."$HEAD" | grep -E '(^|/)(setup\.py|setup\.cfg|sitecustomize\.py|usercustomize\.py|__init__\.pth)$' || true)
+          if [ -n "$SETUP_HITS" ]; then
+            FINDINGS="${FINDINGS}
+          ### 🚨 CRITICAL: install-hook file added or modified
+          ${SETUP_HITS}
+          "
+          fi
+          if [ -n "$FINDINGS" ]; then
+            echo "found=true" >> "$GITHUB_OUTPUT"
+            echo "$FINDINGS" > /tmp/findings.md
+          else
+            echo "found=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Post critical finding comment
+        if: steps.scan.outputs.found == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          BODY="## 🚨 CRITICAL Supply Chain Risk Detected
+
+          This PR contains a high-signal supply-chain risk pattern.
+
+          $(cat /tmp/findings.md)"
+          gh pr comment "${{ github.event.pull_request.number }}" --body "$BODY" || echo "::warning::Could not post PR comment"
+      - name: Fail on critical findings
+        if: steps.scan.outputs.found == 'true'
+        run: |
+          echo "::error::CRITICAL supply chain risk patterns detected in this PR."
+          exit 1
+
+  dep-bounds:
+    name: Supply Chain Audit / dependency upper bounds
+    needs: changes
+    if: github.event_name == 'pull_request' && needs.changes.outputs.deps == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        with:
+          fetch-depth: 0
+      - name: Check for unbounded PyPI deps
+        id: bounds
+        run: |
+          set -euo pipefail
+          BASE="${{ github.event.pull_request.base.sha }}"
+          HEAD="${{ github.event.pull_request.head.sha }}"
+          ADDED=$(git diff "$BASE".."$HEAD" -- pyproject.toml | grep '^+' | grep -v '^+++' || true)
+          if [ -z "$ADDED" ]; then
+            echo "found=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          UNBOUNDED=$(echo "$ADDED" | grep -oE '"[a-zA-Z0-9_-]+(\[[^\]]*\])?>=[ 0-9.]+"' | grep -v ',<' || true)
+          if [ -n "$UNBOUNDED" ]; then
+            echo "found=true" >> "$GITHUB_OUTPUT"
+            echo "$UNBOUNDED" > /tmp/unbounded.txt
+          else
+            echo "found=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Post unbounded dep warning
+        if: steps.bounds.outputs.found == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          BODY="## ⚠️ Unbounded PyPI Dependency Detected
+
+          PyPI dependencies should use >=floor,<next_major bounds.
+
+          \`\`\`
+          $(cat /tmp/unbounded.txt)
+          \`\`\`"
+          gh pr comment "${{ github.event.pull_request.number }}" --body "$BODY" || echo "::warning::Could not post PR comment"
+      - name: Fail on unbounded deps
+        if: steps.bounds.outputs.found == 'true'
+        run: exit 1
+
+  osv:
+    name: OSV-Scanner / Scan lockfiles
+    needs: changes
+    if: needs.changes.outputs.deps == 'true' || github.event_name == 'workflow_dispatch' || (github.event_name == 'schedule' && github.event.schedule == '0 9 * * 1')
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+    uses: google/osv-scanner-action/.github/workflows/osv-scanner-reusable.yml@9a498708959aeaef5ef730655706c5a1df1edbc2  # v2.3.8
+    with:
+      scan-args: |-
+        --lockfile=uv.lock
+        --lockfile=ui-tui/package-lock.json
+        --lockfile=website/package-lock.json
+      fail-on-vuln: false
+
+  nix:
+    name: Nix / ${{ matrix.os }}
+    needs: changes
+    if: github.event_name != 'schedule'
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+      pull-requests: write
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+      - uses: ./.github/actions/nix-setup
+        with:
+          cachix-auth-token: ${{ secrets.CACHIX_AUTH_TOKEN }}
+      - name: Resolve head SHA
+        if: github.event_name == 'pull_request'
+        id: sha
+        shell: bash
+        run: |
+          FULL="${{ github.event.pull_request.head.sha || github.sha }}"
+          echo "full=$FULL" >> "$GITHUB_OUTPUT"
+          echo "short=${FULL:0:7}" >> "$GITHUB_OUTPUT"
+      - name: Check flake
+        id: flake
+        if: runner.os == 'Linux'
+        continue-on-error: true
+        run: nix flake check --print-build-logs
+      - name: Build package
+        id: build
+        if: runner.os == 'Linux'
+        continue-on-error: true
+        run: nix build --print-build-logs
+      - name: Diagnose npm lockfile hashes
+        id: hash_check
+        if: (steps.flake.outcome == 'failure' || steps.build.outcome == 'failure') && runner.os == 'Linux'
+        continue-on-error: true
+        env:
+          LINK_SHA: ${{ steps.sha.outputs.full }}
+        run: nix run .#fix-lockfiles -- --check
+      - name: Fail if hash check crashed without reporting
+        if: steps.hash_check.outcome == 'failure' && steps.hash_check.outputs.stale != 'true' && steps.hash_check.outputs.stale != 'false'
+        run: |
+          echo "::error::fix-lockfiles exited without reporting stale status."
+          exit 1
+      - name: Post sticky PR comment (manual stale hash repair)
+        if: steps.hash_check.outputs.stale == 'true' && github.event_name == 'pull_request'
+        uses: marocchino/sticky-pull-request-comment@52423e01640425a022ef5fd42c6fb5f633a02728  # v2.9.1
+        with:
+          header: nix-lockfile-check
+          message: |
+            ### ⚠️ npm lockfile hash out of date
+
+            Checked against commit [`${{ steps.sha.outputs.short }}`](${{ github.server_url }}/${{ github.repository }}/commit/${{ steps.sha.outputs.full }}).
+
+            ${{ steps.hash_check.outputs.report }}
+
+            Repair is manual and authorized only: run `nix run .#fix-lockfiles` locally, review the diff, and push the resulting commit. No comment-triggered write path is enabled.
+      - name: Clear sticky PR comment (resolved)
+        if: |
+          github.event_name == 'pull_request' &&
+          runner.os == 'Linux' &&
+          (steps.hash_check.outputs.stale == 'false' ||
+           (steps.flake.outcome == 'success' && steps.build.outcome == 'success'))
+        uses: marocchino/sticky-pull-request-comment@52423e01640425a022ef5fd42c6fb5f633a02728  # v2.9.1
+        with:
+          header: nix-lockfile-check
+          delete: true
+      - name: Final fail if build or flake failed
+        if: steps.flake.outcome == 'failure' || steps.build.outcome == 'failure'
+        run: |
+          if [ "${{ steps.hash_check.outputs.stale }}" = "true" ]; then
+            echo "::error::Nix build failed due to stale npm lockfile hash. Run: nix run .#fix-lockfiles"
+          else
+            echo "::error::Nix build/flake check failed. See logs above."
+          fi
+          exit 1
+      - name: Evaluate flake (macOS)
+        if: runner.os == 'macOS'
+        run: nix flake show --json > /dev/null
+
+  nix-lockfile-manual-check:
+    name: Nix Lockfile Fix / manual check only
+    needs: changes
+    if: github.event_name == 'workflow_dispatch' && inputs.run_nix_lock_check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+      - uses: ./.github/actions/nix-setup
+        with:
+          cachix-auth-token: ${{ secrets.CACHIX_AUTH_TOKEN }}
+      - name: Check Nix lockfile hashes without writing
+        run: |
+          nix run .#fix-lockfiles -- --check
+          echo "Manual repair remains local/operator-authorized; this job never commits or pushes."
+
+  docker-build:
+    name: Docker Build / build smoke (no publish)
+    needs: changes
+    if: needs.changes.outputs.docker == 'true' && github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        with:
+          submodules: recursive
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f  # v3
+      - name: Build image locally (publish path parked)
+        uses: docker/build-push-action@bcafcacb16a39f128d818304e6c9c0c18556b85f  # v7.1.0
+        with:
+          context: .
+          file: Dockerfile
+          load: true
+          platforms: linux/amd64
+          tags: hermes-agent:test
+          push: false
+          cache-from: type=gha,scope=docker-amd64
+          cache-to: type=gha,mode=max,scope=docker-amd64
+      - name: Smoke test image
+        uses: ./.github/actions/hermes-smoke-test
+        with:
+          image: hermes-agent:test
+
+  skills-index:
+    name: Build Skills Index / artifact only
+    needs: changes
+    if: needs.changes.outputs.skills_index == 'true' || github.event_name == 'workflow_dispatch' || (github.event_name == 'schedule' && github.event.schedule == '0 6,18 * * *')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405  # v6.2.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Install dependencies
+        run: pip install httpx==0.28.1 pyyaml==6.0.2
+      - name: Build skills index
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: python scripts/build_skills_index.py
+      - name: Upload index artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
+        with:
+          name: skills-index
+          path: website/static/api/skills-index.json
+          retention-days: 7
+
+  parked-write-paths:
+    name: Parked deploy/publish/release paths
+    needs: changes
+    runs-on: ubuntu-latest
+    steps:
+      - name: Confirm write paths are parked
+        run: |
+          cat <<'EOF'
+          Retired workflow files: deploy-site.yml, docker-publish.yml, upload_to_pypi.yml, nix-lockfile-fix.yml, skills-index.yml deploy job.
+          Preserved as non-publishing checks: docs build, Docker local build smoke, skills-index artifact, Nix hash diagnostics.
+          No release, tag, pages deploy, Docker login/push, PyPI trusted publishing, GitHub Release asset upload, or comment-triggered commit path is enabled in ci.yml.
+          EOF
