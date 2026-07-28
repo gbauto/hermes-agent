@@ -41,8 +41,8 @@ async function main() {
     invariant(response && response.ok(), `dashboard navigation failed: ${response && response.status()}`);
     await page.locator(".hermes-kanban-command-nav").waitFor({ timeout: 30_000 });
 
-    invariant(await page.locator(".hermes-kanban-command-tab").count() === 3,
-      "expected Sprint, Workstreams, and Board tabs");
+    invariant(await page.locator(".hermes-kanban-command-tab").count() === 4,
+      "expected Sprint, Data Spine, Workstreams, and Board tabs");
     await page.getByText("Execution pulse, decisions, and proof", { exact: true }).waitFor();
     invariant(await page.locator(".hermes-kanban-sprint-metric").count() === 6,
       "expected six sprint scorecard metrics");
@@ -56,6 +56,17 @@ async function main() {
     await page.locator(".hermes-kanban-drawer").waitFor();
     invariant(/#task=t_[a-z0-9]+/i.test(page.url()), "task drawer did not write a deep link");
     await page.locator(".hermes-kanban-drawer-close").first().click();
+
+    await page.getByRole("tab", { name: /Data Spine/ }).click();
+    await page.getByText("Sprint → proof, row by row", { exact: true }).waitFor();
+    invariant(await page.locator(".hermes-kanban-data-chain-node").count() === 9,
+      "expected the nine-stage sprint-to-PR data chain");
+    const dataSources = await page.locator(".hermes-kanban-data-source-row").count();
+    const databaseRocks = await page.locator(".hermes-kanban-data-rock").count();
+    invariant(dataSources > 0,
+      "expected matched-row readback for canonical source tables");
+    invariant(databaseRocks > 0,
+      "expected at least one database-backed rock");
 
     await page.getByRole("tab", { name: /Workstreams/ }).click();
     await page.getByText("Linked workstreams", { exact: true }).waitFor();
@@ -78,9 +89,11 @@ async function main() {
 
     process.stdout.write(JSON.stringify({
       ok: true,
-      tabs: 3,
+      tabs: 4,
       metrics: 6,
       rocks: await page.locator(".hermes-kanban-rock").count(),
+      databaseRocks,
+      dataSources,
       blockers: await page.locator(".hermes-kanban-ids-row").count(),
       screenshot: screenshot || null,
     }) + "\n");
