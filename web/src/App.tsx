@@ -1,4 +1,6 @@
 import {
+  lazy,
+  Suspense,
   useCallback,
   useEffect,
   useMemo,
@@ -64,26 +66,6 @@ import { SidebarStatusStrip } from "@/components/SidebarStatusStrip";
 import { PageHeaderProvider } from "@/contexts/PageHeaderProvider";
 import { useSystemActions } from "@/contexts/useSystemActions";
 import type { SystemAction } from "@/contexts/system-actions-context";
-import ConfigPage from "@/pages/ConfigPage";
-import DocsPage from "@/pages/DocsPage";
-import EnvPage from "@/pages/EnvPage";
-import SessionsPage from "@/pages/SessionsPage";
-import LogsPage from "@/pages/LogsPage";
-import AnalyticsPage from "@/pages/AnalyticsPage";
-import ModelsPage from "@/pages/ModelsPage";
-import CronPage from "@/pages/CronPage";
-import DocumentsPage from "@/pages/DocumentsPage";
-import GbAutomationOverviewPage from "@/pages/GbAutomationOverviewPage";
-import GbAutomationReposPage from "@/pages/GbAutomationReposPage";
-import GbAutomationDocsPage from "@/pages/GbAutomationDocsPage";
-import InboxPage from "@/pages/InboxPage";
-import { LangfusePage, SupabasePage } from "@/pages/SupabaseIndexesPage";
-import ProfilesPage from "@/pages/ProfilesPage";
-import ProfileBuilderPage from "@/pages/ProfileBuilderPage";
-import SkillsPage from "@/pages/SkillsPage";
-import LiveFleetPage from "@/pages/LiveFleetPage";
-import PluginsPage from "@/pages/PluginsPage";
-import ChatPage from "@/pages/ChatPage";
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import { ThemeSwitcher } from "@/components/ThemeSwitcher";
 import { useI18n } from "@/i18n";
@@ -94,8 +76,49 @@ import { useTheme } from "@/themes";
 import { isDashboardEmbeddedChatEnabled } from "@/lib/dashboard-flags";
 import { api } from "@/lib/api";
 
+const ConfigPage = lazy(() => import("@/pages/ConfigPage"));
+const DocsPage = lazy(() => import("@/pages/DocsPage"));
+const EnvPage = lazy(() => import("@/pages/EnvPage"));
+const SessionsPage = lazy(() => import("@/pages/SessionsPage"));
+const LogsPage = lazy(() => import("@/pages/LogsPage"));
+const AnalyticsPage = lazy(() => import("@/pages/AnalyticsPage"));
+const ModelsPage = lazy(() => import("@/pages/ModelsPage"));
+const CronPage = lazy(() => import("@/pages/CronPage"));
+const DocumentsPage = lazy(() => import("@/pages/DocumentsPage"));
+const GbAutomationOverviewPage = lazy(
+  () => import("@/pages/GbAutomationOverviewPage"),
+);
+const GbAutomationReposPage = lazy(() => import("@/pages/GbAutomationReposPage"));
+const GbAutomationDocsPage = lazy(() => import("@/pages/GbAutomationDocsPage"));
+const InboxPage = lazy(() => import("@/pages/InboxPage"));
+const ProfilesPage = lazy(() => import("@/pages/ProfilesPage"));
+const ProfileBuilderPage = lazy(() => import("@/pages/ProfileBuilderPage"));
+const SkillsPage = lazy(() => import("@/pages/SkillsPage"));
+const LiveFleetPage = lazy(() => import("@/pages/LiveFleetPage"));
+const PluginsPage = lazy(() => import("@/pages/PluginsPage"));
+const ChatPage = lazy(() => import("@/pages/ChatPage"));
+const SupabasePage = lazy(() =>
+  import("@/pages/SupabaseIndexesPage").then((module) => ({
+    default: module.SupabasePage,
+  })),
+);
+const LangfusePage = lazy(() =>
+  import("@/pages/SupabaseIndexesPage").then((module) => ({
+    default: module.LangfusePage,
+  })),
+);
+
 function RootRedirect() {
   return <Navigate to="/sessions" replace />;
+}
+
+function RouteLoading() {
+  return (
+    <div className="flex items-center gap-2 p-4 text-sm text-text-tertiary">
+      <Spinner className="shrink-0" />
+      <span>Loading…</span>
+    </div>
+  );
 }
 
 function UnknownRouteFallback({ pluginsLoading }: { pluginsLoading: boolean }) {
@@ -367,6 +390,10 @@ export default function App() {
   const normalizedPath = pathname.replace(/\/$/, "") || "/";
   const isChatRoute = normalizedPath === "/chat";
   const embeddedChat = isDashboardEmbeddedChatEnabled();
+  const [chatWasVisited, setChatWasVisited] = useState(isChatRoute);
+  useEffect(() => {
+    if (isChatRoute) setChatWasVisited(true);
+  }, [isChatRoute]);
 
   // `dashboard.show_token_analytics` gates the Analytics nav item.  The
   // page itself remains reachable by URL (it renders an explanation when
@@ -830,20 +857,23 @@ export default function App() {
                     "min-h-0 flex flex-1 flex-col",
                 )}
               >
-                <Routes>
-                  {routes.map(({ key, path, element }) => (
-                    <Route key={key} path={path} element={element} />
-                  ))}
-                  <Route
-                    path="*"
-                    element={
-                      <UnknownRouteFallback pluginsLoading={pluginsLoading} />
-                    }
-                  />
-                </Routes>
+                <Suspense fallback={<RouteLoading />}>
+                  <Routes>
+                    {routes.map(({ key, path, element }) => (
+                      <Route key={key} path={path} element={element} />
+                    ))}
+                    <Route
+                      path="*"
+                      element={
+                        <UnknownRouteFallback pluginsLoading={pluginsLoading} />
+                      }
+                    />
+                  </Routes>
+                </Suspense>
 
                 {embeddedChat &&
                   !chatOverriddenByPlugin &&
+                  (isChatRoute || chatWasVisited) &&
                   (pluginsLoading ? (
                     isChatRoute ? (
                       <div
@@ -866,7 +896,9 @@ export default function App() {
                       )}
                       aria-hidden={!isChatRoute}
                     >
-                      <ChatPage isActive={isChatRoute} />
+                      <Suspense fallback={isChatRoute ? <RouteLoading /> : null}>
+                        <ChatPage isActive={isChatRoute} />
+                      </Suspense>
                     </div>
                   ))}
               </div>

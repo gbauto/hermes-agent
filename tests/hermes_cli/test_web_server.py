@@ -6317,9 +6317,25 @@ class TestDashboardPluginStaticAssetAllowlist:
         resp = self.client.get("/dashboard-plugins/example/manifest.json")
         assert resp.status_code == 200
         assert resp.headers["content-type"].startswith("application/json")
+        assert resp.headers["cache-control"] == (
+            "public, max-age=31536000, immutable"
+        )
         # And the body is actually the manifest, not the SPA fallback.
         body = resp.json()
         assert body.get("name") == "example"
+
+    def test_large_plugin_asset_is_compressed_and_cacheable(self):
+        """Versioned dashboard bundles should be cheap on first and repeat loads."""
+        resp = self.client.get(
+            "/dashboard-plugins/kanban/dist/index.js?v=1.1.1",
+            headers={"Accept-Encoding": "gzip"},
+        )
+        assert resp.status_code == 200
+        assert resp.headers["content-encoding"] == "gzip"
+        assert resp.headers["cache-control"] == (
+            "public, max-age=31536000, immutable"
+        )
+        assert len(resp.content) > 1024
 
     def test_unknown_plugin_is_404(self):
         """Existing behaviour preserved: nonexistent plugin name → 404."""
