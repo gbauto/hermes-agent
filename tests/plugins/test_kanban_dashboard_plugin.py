@@ -2265,3 +2265,194 @@ def test_dashboard_failed_card_highlight_class_exists():
     assert "hermes-kanban-card--failed" in js
     assert "hermes-kanban-card--failed" in css
     assert "failedIds" in js
+
+
+def test_all_boards_aggregate_tags_every_task_with_its_source(client):
+    client.post(
+        "/api/plugins/kanban/tasks",
+        json={"title": "default task", "assignee": "ops"},
+    )
+    created = client.post(
+        "/api/plugins/kanban/boards",
+        json={"slug": "client-work", "name": "Client Work"},
+    )
+    assert created.status_code == 200, created.text
+    task = client.post(
+        "/api/plugins/kanban/tasks?board=client-work",
+        json={"title": "client decision", "assignee": "researcher"},
+    ).json()["task"]
+
+    response = client.get("/api/plugins/kanban/boards/all")
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["aggregate"] is True
+    tasks = [
+        item
+        for column in payload["columns"]
+        for item in column["tasks"]
+    ]
+    aggregate_task = next(item for item in tasks if item["id"] == task["id"])
+    assert aggregate_task["source_board"] == "client-work"
+    assert aggregate_task["source_board_name"] == "Client Work"
+    assert {board["slug"] for board in payload["boards"]} >= {
+        "default",
+        "client-work",
+    }
+
+
+def test_inbox_supports_decisions_and_dynamic_forms(client):
+    created = client.post(
+        "/api/plugins/kanban/inbox",
+        json={
+            "item_type": "dynamic_form",
+            "title": "Approve audience",
+            "prompt": "Who should receive the report?",
+            "form_schema": {
+                "fields": [
+                    {
+                        "name": "audience",
+                        "label": "Audience",
+                        "type": "select",
+                        "options": ["Greg", "Jason"],
+                    }
+                ]
+            },
+        },
+    )
+    assert created.status_code == 200, created.text
+    item_id = created.json()["item"]["id"]
+
+    listing = client.get("/api/plugins/kanban/inbox?status=pending")
+    assert listing.status_code == 200
+    assert listing.json()["counts"]["dynamic_form"] == 1
+
+    answered = client.post(
+        f"/api/plugins/kanban/inbox/{item_id}/respond",
+        json={
+            "action": "answer",
+            "response": {"fields": {"audience": "Greg"}},
+            "note": "Use the internal list",
+        },
+    )
+    assert answered.status_code == 200, answered.text
+    assert answered.json()["item"]["status"] == "answered"
+    assert answered.json()["item"]["response"]["fields"]["audience"] == "Greg"
+
+
+def test_carlos_swipe_import_is_idempotent_and_preserves_response(
+    client, kanban_home,
+):
+    report_dir = (
+        kanban_home
+        / "artifacts"
+        / "carlos-blocker-swipe-cards"
+        / "latest"
+    )
+    report_dir.mkdir(parents=True)
+    (report_dir / "swipe-cards-data.json").write_text(
+        """
+        {
+          "report_id": "carlos-test-1",
+          "cards": [{
+            "card_id": "sprint-manager:t_123",
+            "board": "sprint-manager",
+            "task_id": "t_123",
+            "title": "Unblock the runtime",
+            "prompt": "Free disk and retry",
+            "reason": "Disk is full",
+            "priority": 100
+          }]
+        }
+        """,
+        encoding="utf-8",
+    )
+
+    first = client.post("/api/plugins/kanban/inbox/import/carlos-swipe")
+    assert first.status_code == 200, first.text
+    assert first.json()["created"] == 1
+    item = client.get(
+        "/api/plugins/kanban/inbox?status=pending&item_type=swipe"
+    ).json()["items"][0]
+    client.post(
+        f"/api/plugins/kanban/inbox/{item['id']}/respond",
+        json={"action": "go", "response": {"gesture": "right"}},
+    )
+
+    second = client.post("/api/plugins/kanban/inbox/import/carlos-swipe")
+    assert second.status_code == 200, second.text
+    assert second.json()["created"] == 0
+    assert second.json()["refreshed"] == 1
+    all_items = client.get(
+        "/api/plugins/kanban/inbox?status=all&item_type=swipe"
+    ).json()["items"]
+    assert len(all_items) == 1
+    assert all_items[0]["status"] == "answered"
+    assert all_items[0]["response_action"] == "go"
+
+
+def test_squash_board_snapshots_archives_and_creates_decisions(
+    client, kanban_home,
+):
+    created = client.post(
+        "/api/plugins/kanban/boards",
+        json={"slug": "finished-sprint", "name": "Finished Sprint"},
+    )
+    assert created.status_code == 200
+    pending = client.post(
+        "/api/plugins/kanban/tasks?board=finished-sprint",
+        json={"title": "Needs Greg", "assignee": "ops"},
+    ).json()["task"]
+    done = client.post(
+        "/api/plugins/kanban/tasks?board=finished-sprint",
+        json={"title": "Already complete", "assignee": "ops"},
+    ).json()["task"]
+    board_conn = kb.connect(board="finished-sprint")
+    try:
+        with kb.write_txn(board_conn):
+            board_conn.execute(
+                "UPDATE tasks SET status = 'done', completed_at = ? WHERE id = ?",
+                (int(time.time()), done["id"]),
+            )
+    finally:
+        board_conn.close()
+
+    response = client.post(
+        "/api/plugins/kanban/boards/finished-sprint/squash"
+    )
+    assert response.status_code == 200, response.text
+    result = response.json()
+    assert result["task_total"] == 2
+    assert result["outstanding_total"] == 1
+    assert result["decisions_created"] == 1
+    assert not kb.board_exists("finished-sprint")
+    assert Path(result["archive"]["new_path"]).is_dir()
+    assert str(kanban_home) in result["archive"]["new_path"]
+
+    inbox = client.get(
+        "/api/plugins/kanban/inbox?status=pending&item_type=decision"
+    ).json()["items"]
+    assert len(inbox) == 1
+    assert inbox[0]["source_board"] == "finished-sprint"
+    assert inbox[0]["source_task_id"] == pending["id"]
+
+    events = client.get("/api/plugins/kanban/inbox/squashes").json()["events"]
+    assert events[0]["status"] == "completed"
+    assert len(events[0]["board_snapshot"]["tasks"]) == 2
+
+
+def test_dashboard_exposes_all_boards_and_squash_as_read_only_controls():
+    repo_root = Path(__file__).resolve().parents[2]
+    js = (
+        repo_root
+        / "plugins"
+        / "kanban"
+        / "dashboard"
+        / "dist"
+        / "index.js"
+    ).read_text(encoding="utf-8")
+
+    assert 'const ALL_BOARDS = "__all__"' in js
+    assert "All boards" in js
+    assert "Squash Board into Decisions" in js
+    assert "readOnly: isAllBoards" in js
+    assert "hermes-kanban-source-board" in js

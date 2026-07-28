@@ -51,6 +51,7 @@ from pydantic import BaseModel, Field
 
 from hermes_cli import kanban_db
 from hermes_cli import kanban_diagnostics as kd
+from plugins.kanban.dashboard import inbox_store
 
 log = logging.getLogger(__name__)
 
@@ -2310,6 +2311,31 @@ class RenameBoardBody(BaseModel):
     color: Optional[str] = None
 
 
+class InboxItemBody(BaseModel):
+    item_type: str = "decision"
+    title: str
+    prompt: str
+    detail: Optional[str] = None
+    choices: list[Any] = Field(default_factory=list)
+    form_schema: dict[str, Any] = Field(default_factory=dict)
+    source_type: Optional[str] = None
+    source_ref: Optional[str] = None
+    source_board: Optional[str] = None
+    source_task_id: Optional[str] = None
+    source_snapshot: dict[str, Any] = Field(default_factory=dict)
+    priority: int = 0
+    assignee: Optional[str] = None
+    recipient: str = "greg"
+    due_at: Optional[int] = None
+
+
+class InboxResponseBody(BaseModel):
+    action: str
+    response: dict[str, Any] = Field(default_factory=dict)
+    note: Optional[str] = None
+    actor: str = "dashboard"
+
+
 def _board_counts(slug: str) -> dict[str, int]:
     """Return ``{status: count}`` for a board. Safe on an empty DB."""
     try:
@@ -2338,6 +2364,72 @@ def list_boards(include_archived: bool = Query(False)):
         b["counts"] = _board_counts(b["slug"])
         b["total"] = sum(b["counts"].values())
     return {"boards": boards, "current": current}
+
+
+@router.get("/boards/all")
+def get_all_boards():
+    """Return a read-only aggregate of every active board.
+
+    Task ids are only unique inside a board, so every aggregate card carries
+    ``source_board`` and ``source_board_name``. The dashboard uses those fields
+    when opening the task drawer against the original board.
+    """
+
+    boards = kanban_db.list_boards(include_archived=False)
+    columns: dict[str, list[dict[str, Any]]] = {
+        column: [] for column in BOARD_COLUMNS
+    }
+    tenants: set[str] = set()
+    assignees: set[str] = set()
+    board_summaries: list[dict[str, Any]] = []
+
+    for meta in boards:
+        slug = str(meta["slug"])
+        payload = get_board(
+            tenant=None,
+            include_archived=False,
+            board=slug,
+            workflow_template_id=None,
+            current_step_key=None,
+        )
+        counts: dict[str, int] = {}
+        for column in payload["columns"]:
+            name = column["name"]
+            tasks = column["tasks"]
+            counts[name] = len(tasks)
+            for task in tasks:
+                task["source_board"] = slug
+                task["source_board_name"] = meta.get("name") or slug
+                columns.setdefault(name, []).append(task)
+        tenants.update(payload.get("tenants") or [])
+        assignees.update(payload.get("assignees") or [])
+        summary = dict(meta)
+        summary["counts"] = counts
+        summary["total"] = sum(counts.values())
+        board_summaries.append(summary)
+
+    for tasks in columns.values():
+        tasks.sort(
+            key=lambda task: (
+                -int(task.get("priority") or 0),
+                int(task.get("created_at") or 0),
+                str(task.get("source_board") or ""),
+                str(task.get("id") or ""),
+            )
+        )
+
+    return {
+        "aggregate": True,
+        "columns": [
+            {"name": name, "tasks": tasks}
+            for name, tasks in columns.items()
+        ],
+        "tenants": sorted(tenants),
+        "assignees": sorted(assignees),
+        "boards": board_summaries,
+        "latest_event_id": 0,
+        "now": int(time.time()),
+    }
 
 
 @router.post("/boards")
@@ -2390,6 +2482,125 @@ def delete_board(slug: str, delete: bool = Query(False, description="Hard-delete
     return {"result": res, "current": kanban_db.get_current_board()}
 
 
+@router.post("/boards/{slug}/squash")
+def squash_board_into_decisions(slug: str):
+    """Snapshot and archive a board, promoting unresolved work to Inbox.
+
+    The operation intentionally creates the durable Inbox decisions before
+    moving the board directory. If the archive move fails, the event receipt
+    is marked failed and no task data has been destroyed.
+    """
+
+    try:
+        normed = kanban_db._normalize_board_slug(slug)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    if not normed:
+        raise HTTPException(status_code=400, detail="board slug is required")
+    if normed == kanban_db.DEFAULT_BOARD:
+        raise HTTPException(
+            status_code=400,
+            detail="the default board cannot be squashed",
+        )
+    if not kanban_db.board_exists(normed):
+        raise HTTPException(
+            status_code=404,
+            detail=f"board {normed!r} does not exist",
+        )
+
+    board_conn = kanban_db.connect(board=normed)
+    try:
+        meta = kanban_db.read_board_metadata(normed)
+        tasks = kanban_db.list_tasks(board_conn, include_archived=True)
+        task_rows = [asdict(task) for task in tasks]
+        outstanding = [
+            task
+            for task in task_rows
+            if task.get("status") not in {"done", "archived"}
+        ]
+        snapshot = {
+            "schema_version": "hermes-board-squash.v1",
+            "board": meta,
+            "tasks": task_rows,
+            "captured_at": int(time.time()),
+        }
+    finally:
+        board_conn.close()
+
+    inbox_conn = inbox_store.connect()
+    event_id = inbox_store.create_squash_event(
+        inbox_conn,
+        board_slug=normed,
+        board_name=meta.get("name"),
+        task_total=len(task_rows),
+        outstanding_total=len(outstanding),
+        board_snapshot=snapshot,
+    )
+    decisions = [
+        {
+            "item_type": "decision",
+            "title": task.get("title") or task["id"],
+            "prompt": (
+                f"What should happen next with this unresolved "
+                f"{meta.get('name') or normed} item?"
+            ),
+            "detail": task.get("body") or task.get("result"),
+            "choices": [
+                {"value": "go", "label": "Move forward"},
+                {"value": "delegate", "label": "Delegate"},
+                {"value": "hold", "label": "Keep for later"},
+                {"value": "archive", "label": "Archive"},
+            ],
+            "source_type": "board_squash",
+            "source_ref": event_id,
+            "source_board": normed,
+            "source_task_id": task["id"],
+            "source_snapshot": task,
+            "priority": int(task.get("priority") or 0),
+            "assignee": task.get("assignee"),
+            "recipient": "greg",
+        }
+        for task in outstanding
+    ]
+
+    decisions_created = 0
+    try:
+        result = inbox_store.upsert_items(inbox_conn, decisions)
+        decisions_created = int(result["created"])
+        archive = kanban_db.remove_board(normed, archive=True)
+        archive_path = archive.get("new_path")
+        inbox_store.finish_squash_event(
+            inbox_conn,
+            event_id,
+            status="completed",
+            decisions_created=decisions_created,
+            archive_path=archive_path,
+        )
+        return {
+            "event_id": event_id,
+            "board": normed,
+            "task_total": len(task_rows),
+            "outstanding_total": len(outstanding),
+            "decisions_created": decisions_created,
+            "archive": archive,
+        }
+    except Exception as exc:
+        log.exception("Failed to squash Kanban board %s", normed)
+        inbox_store.finish_squash_event(
+            inbox_conn,
+            event_id,
+            status="failed",
+            decisions_created=decisions_created,
+            error=str(exc),
+        )
+        raise HTTPException(
+            status_code=500,
+            detail=f"failed to squash board {normed!r}",
+        )
+    finally:
+        inbox_conn.close()
+
+
 @router.post("/boards/{slug}/switch")
 def switch_board(slug: str):
     """Persist ``slug`` as the active board for subsequent CLI / slash calls.
@@ -2406,6 +2617,193 @@ def switch_board(slug: str):
         raise HTTPException(status_code=404, detail=f"board {slug!r} does not exist")
     kanban_db.set_current_board(normed)
     return {"current": normed}
+
+
+# ---------------------------------------------------------------------------
+# Daily Inbox
+# ---------------------------------------------------------------------------
+
+@router.get("/inbox")
+def list_inbox_items(
+    status: str = Query("pending"),
+    item_type: Optional[str] = Query(None),
+    recipient: Optional[str] = Query(None),
+    limit: int = Query(250, ge=1, le=1000),
+):
+    conn = inbox_store.connect()
+    try:
+        try:
+            items = inbox_store.list_items(
+                conn,
+                status=status,
+                item_type=item_type,
+                recipient=recipient,
+                limit=limit,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+        counts = {
+            kind: len(
+                inbox_store.list_items(
+                    conn,
+                    status="pending",
+                    item_type=kind,
+                    recipient=recipient,
+                    limit=1000,
+                )
+            )
+            for kind in sorted(inbox_store.ITEM_TYPES)
+        }
+        return {
+            "items": items,
+            "counts": counts,
+            "pending_total": sum(counts.values()),
+        }
+    finally:
+        conn.close()
+
+
+@router.post("/inbox")
+def create_inbox_item(payload: InboxItemBody):
+    conn = inbox_store.connect()
+    try:
+        item = {
+            "item_type": payload.item_type,
+            "title": payload.title,
+            "prompt": payload.prompt,
+            "detail": payload.detail,
+            "choices": payload.choices,
+            "form_schema": payload.form_schema,
+            "source_type": payload.source_type,
+            "source_ref": payload.source_ref,
+            "source_board": payload.source_board,
+            "source_task_id": payload.source_task_id,
+            "source_snapshot": payload.source_snapshot,
+            "priority": payload.priority,
+            "assignee": payload.assignee,
+            "recipient": payload.recipient,
+            "due_at": payload.due_at,
+        }
+        try:
+            result = inbox_store.upsert_items(conn, [item])
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+        item_id = (result["created_ids"] or result["refreshed_ids"])[0]
+        return {"item": inbox_store.get_item(conn, item_id)}
+    finally:
+        conn.close()
+
+
+@router.post("/inbox/{item_id}/respond")
+def respond_to_inbox_item(item_id: str, payload: InboxResponseBody):
+    conn = inbox_store.connect()
+    try:
+        try:
+            item = inbox_store.respond_item(
+                conn,
+                item_id,
+                action=payload.action,
+                response=payload.response,
+                note=payload.note,
+                actor=payload.actor,
+            )
+        except KeyError:
+            raise HTTPException(status_code=404, detail="inbox item not found")
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+        return {"item": item}
+    finally:
+        conn.close()
+
+
+@router.post("/inbox/import/carlos-swipe")
+def import_carlos_swipe_report():
+    """Import the latest Carlos blocker report without resetting responses."""
+
+    report_path = (
+        inbox_store.inbox_db_path().parents[1]
+        / "artifacts"
+        / "carlos-blocker-swipe-cards"
+        / "latest"
+        / "swipe-cards-data.json"
+    )
+    if not report_path.is_file():
+        raise HTTPException(
+            status_code=404,
+            detail="the latest Carlos swipe-card report was not found",
+        )
+    try:
+        report = json.loads(report_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise HTTPException(
+            status_code=422,
+            detail=f"the latest Carlos swipe-card report is invalid: {exc}",
+        )
+    cards = report.get("cards")
+    if not isinstance(cards, list):
+        raise HTTPException(
+            status_code=422,
+            detail="the Carlos swipe-card report has no cards array",
+        )
+    report_id = str(report.get("report_id") or report_path.parent.name)
+    items = []
+    for card in cards:
+        if not isinstance(card, dict):
+            continue
+        board = str(card.get("board") or "")
+        task_id = str(card.get("task_id") or card.get("card_id") or "")
+        if not board or not task_id:
+            continue
+        items.append(
+            {
+                "item_type": "swipe",
+                "title": str(card.get("title") or task_id),
+                "prompt": str(
+                    card.get("prompt")
+                    or card.get("primary_action")
+                    or "What should happen next?"
+                ),
+                "detail": card.get("reason") or card.get("body_excerpt"),
+                "choices": [
+                    {"value": "archive", "label": "Archive", "direction": "left"},
+                    {
+                        "value": "snooze_until_tomorrow",
+                        "label": "Tomorrow",
+                        "direction": "up",
+                    },
+                    {"value": "go", "label": "Go", "direction": "right"},
+                ],
+                "source_type": "carlos_swipe_report",
+                "source_ref": "carlos-blocker-swipe-cards",
+                "source_board": board,
+                "source_task_id": task_id,
+                "source_snapshot": card,
+                "priority": int(card.get("priority") or 0),
+                "assignee": card.get("assignee"),
+                "recipient": "greg",
+            }
+        )
+    conn = inbox_store.connect()
+    try:
+        result = inbox_store.upsert_items(conn, items)
+        return {
+            "report_id": report_id,
+            "report_path": str(report_path),
+            "cards_seen": len(cards),
+            "items_valid": len(items),
+            **result,
+        }
+    finally:
+        conn.close()
+
+
+@router.get("/inbox/squashes")
+def list_board_squashes(limit: int = Query(50, ge=1, le=250)):
+    conn = inbox_store.connect()
+    try:
+        return {"events": inbox_store.list_squash_events(conn, limit=limit)}
+    finally:
+        conn.close()
 
 
 # ---------------------------------------------------------------------------

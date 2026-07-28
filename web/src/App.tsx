@@ -28,6 +28,7 @@ import {
   GitBranch,
   Globe,
   Heart,
+  Inbox,
   KeyRound,
   Menu,
   MessageSquare,
@@ -41,7 +42,6 @@ import {
   Star,
   Terminal,
   Users,
-  Workflow,
   Wrench,
   X,
   Zap,
@@ -76,7 +76,8 @@ import DocumentsPage from "@/pages/DocumentsPage";
 import GbAutomationOverviewPage from "@/pages/GbAutomationOverviewPage";
 import GbAutomationReposPage from "@/pages/GbAutomationReposPage";
 import GbAutomationDocsPage from "@/pages/GbAutomationDocsPage";
-import { KanbanPage, LangfusePage, SupabasePage } from "@/pages/SupabaseIndexesPage";
+import InboxPage from "@/pages/InboxPage";
+import { LangfusePage, SupabasePage } from "@/pages/SupabaseIndexesPage";
 import ProfilesPage from "@/pages/ProfilesPage";
 import ProfileBuilderPage from "@/pages/ProfileBuilderPage";
 import SkillsPage from "@/pages/SkillsPage";
@@ -134,11 +135,11 @@ const BUILTIN_ROUTES_CORE: Record<string, ComponentType> = {
   "/profiles/new": ProfileBuilderPage,
   "/live-fleet": LiveFleetPage,
   "/overview": GbAutomationOverviewPage,
+  "/inbox": InboxPage,
   "/repos": GbAutomationReposPage,
   "/gbauto-docs": GbAutomationDocsPage,
   "/supabase": SupabasePage,
   "/langfuse": LangfusePage,
-  "/kanban": KanbanPage,
   "/artifacts": DocumentsPage,
   "/documents": DocumentsPage,
   "/config": ConfigPage,
@@ -189,12 +190,12 @@ const BUILTIN_NAV_REST: NavItem[] = [
 ];
 
 const GB_AUTOMATION_NAV: NavItem[] = [
+  { path: "/inbox", label: "Inbox", icon: Inbox },
   { path: "/overview", label: "Overview", icon: BarChart3 },
   { path: "/repos", label: "Repos", icon: GitBranch },
   { path: "/gbauto-docs", label: "Docs", icon: FileText },
   { path: "/supabase", label: "Supabase", icon: Database },
   { path: "/langfuse", label: "Langfuse", icon: RadioTower },
-  { path: "/kanban", label: "Kanban", icon: Workflow },
   { path: "/cron", label: "Cron", icon: Clock },
   { path: "/skills", label: "Skills", icon: Package },
   { path: "/plugins", label: "Plugins", icon: Puzzle },

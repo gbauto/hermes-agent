@@ -200,6 +200,7 @@
 
   const API = "/api/plugins/kanban";
   const MIME_TASK = "text/x-hermes-task";
+  const ALL_BOARDS = "__all__";
 
   // Docs link — surfaced as a `?` icon next to the board switcher and as
   // `title=` hints on unlabelled controls. Kept in one place so rebrands or
@@ -216,6 +217,8 @@
 
   function readSelectedBoard() {
     try {
+      const fromUrl = new URLSearchParams(window.location.search || "").get("board");
+      if (fromUrl) return fromUrl.trim();
       const v = window.localStorage.getItem(LS_BOARD_KEY);
       return (v || "").trim() || null;
     } catch (_e) { return null; }
@@ -236,6 +239,10 @@
       // design intent. Regression: #20879.
       if (slug) window.localStorage.setItem(LS_BOARD_KEY, slug);
       else window.localStorage.removeItem(LS_BOARD_KEY);
+      const url = new URL(window.location.href);
+      if (slug) url.searchParams.set("board", slug);
+      else url.searchParams.delete("board");
+      window.history.replaceState(null, "", url.toString());
     } catch (_e) { /* ignore quota / private mode */ }
   }
 
@@ -270,7 +277,7 @@
     // means the dashboard's tab selection gets silently overridden by
     // whatever board the CLI or "switch" checkbox last activated.
     // Regression: #20879.
-    if (!board) return url;
+    if (!board || board === ALL_BOARDS) return url;
     const sep = url.indexOf("?") >= 0 ? "&" : "?";
     return `${url}${sep}board=${encodeURIComponent(board)}`;
   }
@@ -538,6 +545,7 @@
   function KanbanPage() {
     const { t } = useI18n();
     const [board, setBoard] = useState(() => readSelectedBoard() || null);
+    const isAllBoards = board === ALL_BOARDS;
     const [boardList, setBoardList] = useState([]);      // [{slug, name, counts, ...}]
     const [showNewBoard, setShowNewBoard] = useState(false);
     const [commandView, setCommandView] = useState(() => readCommandView());
@@ -588,11 +596,25 @@
       writeCommandView(nextView);
     }, []);
 
-    const openTask = useCallback(function (taskId) {
+    const openTask = useCallback(function (taskId, sourceBoard) {
       if (!taskId) return;
+      // Aggregate cards are read-only. Opening one jumps to its owning board,
+      // where the normal task drawer can safely use board-scoped task ids.
+      if (board === ALL_BOARDS && sourceBoard) {
+        setBoardData(null);
+        setSprintData(null);
+        cursorRef.current = 0;
+        setLoading(true);
+        setBoard(sourceBoard);
+        writeSelectedBoard(sourceBoard);
+        setSearch("");
+        setTenantFilter("");
+        setAssigneeFilter("");
+        setIncludeArchived(false);
+      }
       setSelectedTaskId(taskId);
       writeTaskHash(taskId);
-    }, []);
+    }, [board]);
 
     const closeTask = useCallback(function () {
       setSelectedTaskId(null);
@@ -622,6 +644,18 @@
 
     // --- fetch full board ---------------------------------------------------
     const loadBoard = useCallback(() => {
+      if (board === ALL_BOARDS) {
+        return SDK.fetchJSON(`${API}/boards/all`)
+          .then(function (data) {
+            setBoardData(data);
+            cursorRef.current = 0;
+            setError(null);
+          })
+          .catch(function (err) {
+            setError(String(err && err.message ? err.message : err));
+          })
+          .finally(function () { setLoading(false); });
+      }
       const qs = new URLSearchParams();
       if (tenantFilter) qs.set("tenant", tenantFilter);
       if (includeArchived) qs.set("include_archived", "true");
@@ -640,6 +674,11 @@
 
     // --- fetch the live Sprint Manager projection -------------------------
     const loadSprint = useCallback(function () {
+      if (board === ALL_BOARDS) {
+        setSprintData(null);
+        setSprintError(null);
+        return Promise.resolve(null);
+      }
       return SDK.fetchJSON(withBoard(`${API}/sprint?days=7`, board))
         .then(function (data) {
           setSprintData(data);
@@ -666,7 +705,7 @@
           // If the stored slug isn't in the list any longer (board was
           // deleted in the CLI while dashboard was open), fall back to
           // default so the UI doesn't hang on a 404.
-          if (board && board !== "default" && !boards.find(function (b) { return b.slug === board; })) {
+          if (board && board !== "default" && board !== ALL_BOARDS && !boards.find(function (b) { return b.slug === board; })) {
             setBoard("default");
             writeSelectedBoard("default");
           }
@@ -698,7 +737,7 @@
 
     // --- WebSocket ---------------------------------------------------------
     useEffect(function () {
-      if (!boardData) return undefined;
+      if (!boardData || board === ALL_BOARDS) return undefined;
       wsClosedRef.current = false;
       function openWs() {
         if (wsClosedRef.current) return;
@@ -774,7 +813,7 @@
         if (tenantFilter && t.tenant !== tenantFilter) return false;
         if (assigneeFilter && t.assignee !== assigneeFilter) return false;
         if (q) {
-          const hay = `${t.id} ${t.title || ""} ${t.body || ""} ${t.result || ""} ${t.latest_summary || ""} ${t.assignee || ""} ${t.tenant || ""}`.toLowerCase();
+          const hay = `${t.id} ${t.source_board || ""} ${t.title || ""} ${t.body || ""} ${t.result || ""} ${t.latest_summary || ""} ${t.assignee || ""} ${t.tenant || ""}`.toLowerCase();
           if (hay.indexOf(q) === -1) return false;
         }
         return true;
@@ -1054,6 +1093,25 @@
       });
     }, [board, loadBoardList, switchBoard]);
 
+    const squashBoard = useCallback(function (slug) {
+      if (!slug || slug === "default" || slug === ALL_BOARDS) return Promise.resolve();
+      return SDK.fetchJSON(`${API}/boards/${encodeURIComponent(slug)}/squash`, {
+        method: "POST",
+      }).then(function (result) {
+        const created = result && result.decisions_created || 0;
+        window.alert(
+          `Board archived. ${created} unresolved item${created === 1 ? "" : "s"} ` +
+          `added to the daily Inbox as decision${created === 1 ? "" : "s"}.`
+        );
+        loadBoardList();
+        if (board === slug) switchBoard(ALL_BOARDS);
+        return result;
+      }).catch(function (e) {
+        setError("Squash failed: " + parseApiErrorMessage(e));
+        throw e;
+      });
+    }, [board, loadBoardList, switchBoard]);
+
    const deleteTask = useCallback(function (taskId) {
      if (!window.confirm(tx(t, "trash.confirm", FALLBACK_TRASH.confirm))) return Promise.resolve();
      return SDK.fetchJSON(`${API}/tasks/${encodeURIComponent(taskId)}`, {
@@ -1108,6 +1166,7 @@
           onSwitch: switchBoard,
           onNewClick: function () { setShowNewBoard(true); },
           onDeleteBoard: deleteBoard,
+          onSquashBoard: squashBoard,
         }),
         showNewBoard ? h(NewBoardDialog, {
           onCancel: function () { setShowNewBoard(false); },
@@ -1115,12 +1174,15 @@
             return createNewBoard(payload).then(function () { setShowNewBoard(false); });
           },
         }) : null,
-        h(CommandViewSwitcher, {
+        !isAllBoards ? h(CommandViewSwitcher, {
           value: commandView,
           onChange: changeCommandView,
           onRefresh: function () { loadBoard(); loadSprint(); },
-        }),
-        commandView === "sprint" ? h(SprintCommandCenter, {
+        }) : h("div", { className: "hermes-kanban-all-notice" },
+          h("strong", null, "All boards"),
+          h("span", null, "Read-only overview. Open a card to continue on its source board."),
+        ),
+        !isAllBoards && commandView === "sprint" ? h(SprintCommandCenter, {
           data: sprintData,
           loading: !sprintData && !sprintError,
           error: sprintError,
@@ -1128,20 +1190,21 @@
           onShowWorkstreams: function () { changeCommandView("workstreams"); },
           onShowBoard: function () { changeCommandView("board"); },
         }) : null,
-        commandView === "workstreams" ? h(WorkstreamView, {
+        !isAllBoards && commandView === "workstreams" ? h(WorkstreamView, {
           data: sprintData,
           loading: !sprintData && !sprintError,
           error: sprintError,
           onOpenTask: openTask,
         }) : null,
-        commandView === "board" ? h(React.Fragment, null,
-          h(OrchestrationPanel, null),
-          h(AttentionStrip, {
+        (isAllBoards || commandView === "board") ? h(React.Fragment, null,
+          !isAllBoards ? h(OrchestrationPanel, null) : null,
+          !isAllBoards ? h(AttentionStrip, {
             boardData,
             onOpen: openTask,
-          }),
+          }) : null,
           h(BoardToolbar, {
             board: boardData,
+            readOnly: isAllBoards,
             tenantFilter, setTenantFilter,
             assigneeFilter, setAssigneeFilter,
             includeArchived, setIncludeArchived,
@@ -1154,7 +1217,7 @@
             },
             onRefresh: function () { loadBoard(); loadSprint(); },
           }),
-          selectedIds.size > 0 ? h(BulkActionBar, {
+          !isAllBoards && selectedIds.size > 0 ? h(BulkActionBar, {
             count: selectedIds.size,
             assignees: (boardData && boardData.assignees) || [],
             onApply: applyBulk,
@@ -1165,6 +1228,7 @@
           error ? h("div", { className: "text-xs text-destructive px-2" }, error) : null,
           h(BoardColumns, {
             board: filteredBoard,
+            readOnly: isAllBoards,
             laneByProfile,
             selectedIds,
             failedIds,
@@ -2273,30 +2337,13 @@
     const { t } = useI18n();
     const list = props.boardList || [];
     const current = list.find(function (b) { return b.slug === props.board; });
-    const currentName = current && current.name ? current.name : props.board;
-    const currentTotal = current ? current.total : 0;
-    const hasMultipleBoards = list.length > 1;
-
-    // Hide entirely when only the default board exists AND it's empty —
-    // single-project users never see boards UI unless they ask for it.
-    // We show the [+ New board] affordance as soon as any board has a
-    // task (so the user can discover multi-project before they need it)
-    // OR when any non-default board exists.
     const totalAcrossAllBoards = list.reduce(function (n, b) { return n + (b.total || 0); }, 0);
-    const shouldShow = hasMultipleBoards || totalAcrossAllBoards > 0;
-    if (!shouldShow) {
-      return h("div", {
-        className: "hermes-kanban-boardswitcher-compact",
-        title: tx(t, "boardSwitcherHint", "Boards let you separate unrelated streams of work"),
-      },
-        h(Button, {
-          onClick: props.onNewClick,
-          size: "sm",
-          className: "h-7 text-xs",
-        }, tx(t, "newBoard", "+ New board")),
-        h(DocsLink, null),
-      );
-    }
+    const currentName = props.board === ALL_BOARDS
+      ? "All boards"
+      : (current && current.name ? current.name : props.board);
+    const currentTotal = props.board === ALL_BOARDS
+      ? totalAcrossAllBoards
+      : (current ? current.total : 0);
 
     return h("div", { className: "hermes-kanban-boardswitcher" },
       h("div", { className: "hermes-kanban-boardswitcher-inner" },
@@ -2310,6 +2357,8 @@
               "aria-label": "Switch kanban board",
               title: "Boards are independent work streams. Each board has its own tasks, tenants, and assignees.",
             }, selectChangeHandler(function (v) { if (v) props.onSwitch(v); })),
+              h(SelectOption, { key: ALL_BOARDS, value: ALL_BOARDS },
+                `All boards · ${totalAcrossAllBoards}`),
               list.map(function (b) {
                 const label = b.total > 0
                   ? `${b.name || b.slug} · ${b.total}`
@@ -2329,7 +2378,21 @@
           className: "h-8",
           title: "Create a new board. Useful when you want an unrelated work stream (different project, different team, isolated scratch area).",
         }, tx(t, "newBoard", "+ New board")),
-        props.board !== "default"
+        props.board !== "default" && props.board !== ALL_BOARDS
+          ? h(Button, {
+            onClick: function () {
+              const msg =
+                `Squash board '${currentName}' into Decisions?\n\n` +
+                "Hermes will snapshot and archive the board, then turn every " +
+                "unresolved task into a question in the daily Inbox.";
+              if (window.confirm(msg)) props.onSquashBoard(props.board);
+            },
+            size: "sm",
+            className: "h-8 hermes-kanban-squash-button",
+            title: "Snapshot and archive this board, then move unresolved work to Inbox decisions",
+          }, "Squash Board into Decisions")
+          : null,
+        props.board !== "default" && props.board !== ALL_BOARDS
           ? h(Button, {
             onClick: function () {
               const msg = tx(t, "archiveBoardConfirm",
@@ -2513,14 +2576,14 @@
           }),
         ),
       ),
-      h("label", { className: "flex items-center gap-2 text-xs",
+      !props.readOnly ? h("label", { className: "flex items-center gap-2 text-xs",
                    title: "Include archived tasks in the board view. Archived tasks are hidden by default." },
         h(Checkbox, {
           checked: props.includeArchived,
           onCheckedChange: function (checked) { props.setIncludeArchived(checked === true); },
         }),
         tx(t, "showArchived", "Show archived"),
-      ),
+      ) : null,
       h("label", { className: "flex items-center gap-2 text-xs",
                    title: "Group the Running column by assigned profile" },
         h(Checkbox, {
@@ -2530,11 +2593,11 @@
         tx(t, "lanesByProfile", "Lanes by profile"),
       ),
       h("div", { className: "flex-1" }),
-      h(Button, {
+      !props.readOnly ? h(Button, {
         onClick: props.onNudgeDispatch,
         size: "sm",
         title: "Wake the dispatcher to claim ready tasks now instead of waiting for the next tick. Use this after adding tasks if you want them picked up immediately.",
-      }, tx(t, "nudgeDispatcher", "Nudge dispatcher")),
+      }, tx(t, "nudgeDispatcher", "Nudge dispatcher")) : null,
       h(Button, {
         onClick: props.onRefresh,
         size: "sm",
@@ -2747,11 +2810,16 @@
     const handleDragEnd = useCallback(function () {
       if (props.onDragEnd) props.onDragEnd();
     }, [props.onDragEnd]);
-    return h("div", { className: "hermes-kanban-columns", onDragStart: handleDragStart, onDragEnd: handleDragEnd },
+    return h("div", {
+      className: "hermes-kanban-columns",
+      onDragStart: props.readOnly ? undefined : handleDragStart,
+      onDragEnd: props.readOnly ? undefined : handleDragEnd,
+    },
       props.board.columns.map(function (col) {
         return h(Column, {
           key: col.name,
           column: col,
+          readOnly: props.readOnly,
           laneByProfile: props.laneByProfile,
           selectedIds: props.selectedIds,
           failedIds: props.failedIds,
@@ -2766,11 +2834,11 @@
           allTasks: props.allTasks,
         });
       }),
-      h(TrashDropZone, {
+      !props.readOnly ? h(TrashDropZone, {
         draggingTaskId: props.draggingTaskId,
         selectedIds: props.selectedIds,
         onDelete: props.onDelete,
-      }),
+      }) : null,
     );
   }
 
@@ -2782,7 +2850,7 @@
 
     // Listen for our synthetic touch-drop events from attachTouchDrag().
     useEffect(function () {
-      if (!colRef.current) return undefined;
+      if (props.readOnly || !colRef.current) return undefined;
       const el = colRef.current;
       function onTouchDrop(e) {
         if (e.detail && e.detail.status === props.column.name) {
@@ -2796,7 +2864,7 @@
       }
       el.addEventListener("hermes-kanban:drop", onTouchDrop);
       return function () { el.removeEventListener("hermes-kanban:drop", onTouchDrop); };
-    }, [props.column.name, props.onMove, props.selectedIds, props.onMoveSelected]);
+    }, [props.readOnly, props.column.name, props.onMove, props.selectedIds, props.onMoveSelected]);
 
     const handleDragOver = function (e) {
       e.preventDefault();
@@ -2838,13 +2906,13 @@
         "hermes-kanban-column",
         dragOver ? "hermes-kanban-column--drop" : "",
       ),
-      onDragOver: handleDragOver,
-      onDragLeave: handleDragLeave,
-      onDrop: handleDrop,
+      onDragOver: props.readOnly ? undefined : handleDragOver,
+      onDragLeave: props.readOnly ? undefined : handleDragLeave,
+      onDrop: props.readOnly ? undefined : handleDrop,
     },
       h("div", { className: "hermes-kanban-column-header",
                  title: colHelp || "" },
-        h(Checkbox, {
+        !props.readOnly ? h(Checkbox, {
           className: "hermes-kanban-col-check",
           title: "Select all tasks in this column",
           "aria-label": `Select all tasks in ${colLabel || props.column.name}`,
@@ -2853,23 +2921,23 @@
             if (props.selectAllInColumn) props.selectAllInColumn(props.column.name);
           },
           onClick: function (e) { e.stopPropagation(); },
-        }),
+        }) : null,
         h("span", { className: cn("hermes-kanban-dot", COLUMN_DOT[props.column.name]) }),
         h("span", { className: "hermes-kanban-column-label" },
           colLabel || props.column.name),
         h("span", { className: "hermes-kanban-column-count",
                     title: `${props.column.tasks.length} task${props.column.tasks.length === 1 ? "" : "s"} in this column` },
           props.column.tasks.length),
-        h("button", {
+        !props.readOnly ? h("button", {
           type: "button",
           className: "hermes-kanban-column-add",
           title: tx(t, "createTask", "Create task in this column"),
           onClick: function () { setShowCreate(function (v) { return !v; }); },
-        }, showCreate ? "×" : "+"),
+        }, showCreate ? "×" : "+") : null,
       ),
       h("div", { className: "hermes-kanban-column-sub" },
         colHelp || ""),
-      showCreate ? h(InlineCreate, {
+      showCreate && !props.readOnly ? h(InlineCreate, {
         columnName: props.column.name,
         allTasks: props.allTasks,
         onSubmit: function (body) {
@@ -2889,7 +2957,8 @@
                   ),
                   lane.tasks.map(function (tk) {
                     return h(TaskCard, {
-                      key: tk.id, task: tk,
+                      key: `${tk.source_board || ""}:${tk.id}`, task: tk,
+                      readOnly: props.readOnly,
                       selected: props.selectedIds.has(tk.id),
                       failed: props.failedIds && props.failedIds.has(tk.id),
                       draggingTaskId: props.draggingTaskId,
@@ -2903,7 +2972,8 @@
               })
             : props.column.tasks.map(function (tk) {
                 return h(TaskCard, {
-                  key: tk.id, task: tk,
+                  key: `${tk.source_board || ""}:${tk.id}`, task: tk,
+                  readOnly: props.readOnly,
                   selected: props.selectedIds.has(tk.id),
                   failed: props.failedIds && props.failedIds.has(tk.id),
                   draggingTaskId: props.draggingTaskId,
@@ -2948,8 +3018,9 @@
     const cardRef = useRef(null);
 
     useEffect(function () {
+      if (props.readOnly) return undefined;
       return attachTouchDrag(cardRef.current, t.id);
-    }, [t.id]);
+    }, [props.readOnly, t.id]);
 
     const handleDragStart = function (e) {
       e.dataTransfer.setData(MIME_TASK, t.id);
@@ -2967,24 +3038,24 @@
       }
     };
     const handleClick = function (e) {
-      if (e.shiftKey) {
+      if (!props.readOnly && e.shiftKey) {
         e.preventDefault();
         e.stopPropagation();
         if (props.toggleRange) props.toggleRange(t.id);
         return;
       }
-      if (e.ctrlKey || e.metaKey) {
+      if (!props.readOnly && (e.ctrlKey || e.metaKey)) {
         e.preventDefault();
         e.stopPropagation();
         props.toggleSelected(t.id, true);
         return;
       }
-      props.onOpen(t.id);
+      props.onOpen(t.id, t.source_board);
     };
     const handleKeyDown = function (e) {
       if (e.key === "Enter" || e.key === " ") {
         e.preventDefault();
-        props.onOpen(t.id);
+        props.onOpen(t.id, t.source_board);
       }
       if (e.key === "Escape") {
         if (props.toggleSelected) props.toggleSelected(t.id, false);
@@ -3002,23 +3073,24 @@
       "data-task-id": t.id,
       className: cn(
         "hermes-kanban-card",
+        props.readOnly ? "hermes-kanban-card--read-only" : "",
         props.selected ? "hermes-kanban-card--selected" : "",
         props.failed ? "hermes-kanban-card--failed" : "",
         props.draggingSource ? "hermes-kanban-card--dragging-source" : "",
         stalenessClass(t),
       ),
-      draggable: true,
+      draggable: !props.readOnly,
       tabIndex: 0,
       role: "button",
       "aria-label": `${t.title || "untitled"} — ${t.id} — ${t.status}`,
-      onDragStart: handleDragStart,
+      onDragStart: props.readOnly ? undefined : handleDragStart,
       onClick: handleClick,
       onKeyDown: handleKeyDown,
     },
       h(Card, null,
         h(CardContent, { className: "hermes-kanban-card-content" },
           h("div", { className: "hermes-kanban-card-row" },
-            h("label", {
+            !props.readOnly ? h("label", {
               className: "hermes-kanban-card-check-wrap",
               title: tx(i18n, "selectForBulk", "Select for bulk actions"),
               onClick: function (e) { e.stopPropagation(); },
@@ -3030,9 +3102,16 @@
                 onClick: function (e) { e.stopPropagation(); },
                 "aria-label": `Select task ${t.id}`,
               }),
-            ),
+            ) : null,
             h("span", { className: "hermes-kanban-card-id",
                         title: `Task id: ${t.id}. Use this id with kanban_show, /kanban show, or hermes kanban show.` }, t.id),
+            t.source_board
+              ? h(Badge, {
+                  variant: "outline",
+                  className: "hermes-kanban-source-board",
+                  title: `Source board: ${t.source_board_name || t.source_board}`,
+                }, t.source_board_name || t.source_board)
+              : null,
             t.warnings && t.warnings.count > 0
               ? h("span", {
                   className: cn(
