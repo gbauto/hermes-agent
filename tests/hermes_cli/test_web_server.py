@@ -5021,6 +5021,14 @@ class TestNormaliseThemeDefinition:
         assert r["palette"]["background"]["alpha"] == 1.0
 
 
+def test_builtin_dashboard_themes_include_gbautomation_palettes():
+    """Persisted GBauto tenants must resolve to selectable frontend presets."""
+    from hermes_cli.web_server import _BUILTIN_DASHBOARD_THEMES
+
+    names = {theme["name"] for theme in _BUILTIN_DASHBOARD_THEMES}
+    assert {"gbautomation", "gbautomation-full"} <= names
+
+
 class TestDiscoverUserThemes:
     """Tests for _discover_user_themes() — scans ~/.hermes/dashboard-themes/."""
 

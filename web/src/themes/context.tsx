@@ -47,6 +47,9 @@ const FONT_STORAGE_KEY = "hermes-dashboard-font";
  *  Keep entries here until enough release cycles have passed that we can
  *  reasonably assume nobody still has the old value persisted. */
 const THEME_NAME_ALIASES: Record<string, string> = {
+  // Original GBauto tenant keys retained in existing config.yaml files.
+  gbauto: "gbautomation",
+  "gbauto-full": "gbautomation-full",
   // Renamed during the LENS_5I port + Nous-blue rebrand.
   "lens-5i": "nous-blue",
 };
