@@ -155,6 +155,14 @@ BOARD_COLUMNS: list[str] = [
 
 
 _CARD_SUMMARY_PREVIEW_CHARS = 200
+_CARD_BODY_PREVIEW_CHARS = 320
+_DASHBOARD_CARD_LIMIT_DEFAULT = 100
+_DASHBOARD_CARD_LIMIT_MAX = 100
+_PRD_HINT_RE = re.compile(
+    r"(?:\bprd\b|product[-_ ]requirements?|second-brain/(?:inbox/)?plans/|"
+    r"(?:^|/)(?:prd|prds)/)",
+    re.IGNORECASE,
+)
 
 
 def _task_dict(
@@ -176,6 +184,217 @@ def _task_dict(
     d["latest_summary"] = latest_summary
     # Keep body short on list endpoints; full body comes from /tasks/:id.
     return d
+
+
+def _task_activity_at(
+    task: kanban_db.Task,
+    *,
+    latest_event_at: Optional[int] = None,
+) -> int:
+    """Best available task activity timestamp, including persisted updates."""
+    return max(
+        int(task.created_at or 0),
+        int(task.started_at or 0),
+        int(task.completed_at or 0),
+        int(task.last_heartbeat_at or 0),
+        int(latest_event_at or 0),
+    )
+
+
+def _repo_label(project_id: Any, workspace_path: Any) -> Optional[str]:
+    """Derive a compact repository facet from task-native workspace fields."""
+    project = str(project_id or "").strip()
+    if project:
+        return project
+    raw_path = str(workspace_path or "").strip().replace("\\", "/").rstrip("/")
+    if not raw_path:
+        return None
+    name = raw_path.rsplit("/", 1)[-1]
+    if not name or re.fullmatch(r"t_[0-9a-f]+", name, re.IGNORECASE):
+        return None
+    return name
+
+
+def _task_has_prd(task: kanban_db.Task) -> bool:
+    values = (
+        task.title,
+        task.body,
+        task.result,
+        task.workflow_template_id,
+    )
+    return any(_PRD_HINT_RE.search(str(value or "")) for value in values)
+
+
+def _compact_task_dict(
+    task: kanban_db.Task,
+    *,
+    latest_summary: Optional[str] = None,
+    latest_event_at: Optional[int] = None,
+) -> dict[str, Any]:
+    """Card-list projection; the task drawer remains the full-data endpoint."""
+    d = _task_dict(task, latest_summary=latest_summary)
+    d["body"] = _excerpt(task.body, _CARD_BODY_PREVIEW_CHARS)
+    d["result"] = _excerpt(task.result, _CARD_SUMMARY_PREVIEW_CHARS)
+    d["last_failure_error"] = _excerpt(
+        task.last_failure_error,
+        _CARD_SUMMARY_PREVIEW_CHARS,
+    )
+    d["activity_at"] = _task_activity_at(
+        task,
+        latest_event_at=latest_event_at,
+    )
+    d["repo"] = _repo_label(task.project_id, task.workspace_path)
+    d["has_prd"] = _task_has_prd(task)
+    return d
+
+
+def _compact_board_where(
+    *,
+    tenant: Optional[str],
+    assignee: Optional[str],
+    include_archived: bool,
+    query: Optional[str],
+    parent_only: bool,
+    repo: Optional[str],
+    prd_only: bool,
+) -> tuple[str, list[Any]]:
+    clauses = ["1=1"]
+    params: list[Any] = []
+    if not include_archived:
+        clauses.append("t.status != 'archived'")
+    if tenant:
+        clauses.append("t.tenant = ?")
+        params.append(tenant)
+    if assignee:
+        clauses.append("t.assignee = ?")
+        params.append(assignee)
+    if parent_only:
+        clauses.append(
+            "EXISTS (SELECT 1 FROM task_links parent_link "
+            "WHERE parent_link.parent_id = t.id)"
+        )
+    if repo:
+        normalized_repo = str(repo).strip().lower()
+        clauses.append(
+            "(LOWER(COALESCE(t.project_id, '')) = ? "
+            "OR LOWER(REPLACE(COALESCE(t.workspace_path, ''), '\\', '/')) = ? "
+            "OR LOWER(REPLACE(COALESCE(t.workspace_path, ''), '\\', '/')) "
+            "LIKE ?)"
+        )
+        params.extend(
+            [
+                normalized_repo,
+                normalized_repo,
+                f"%/{normalized_repo}",
+            ]
+        )
+    if prd_only:
+        clauses.append(
+            "("
+            "LOWER(COALESCE(t.title, '')) LIKE '%prd%' "
+            "OR LOWER(COALESCE(t.body, '')) LIKE '%prd%' "
+            "OR LOWER(COALESCE(t.body, '')) LIKE '%second-brain/plans/%' "
+            "OR LOWER(COALESCE(t.body, '')) LIKE '%second-brain/inbox/plans/%' "
+            "OR LOWER(COALESCE(t.result, '')) LIKE '%prd%' "
+            "OR LOWER(COALESCE(t.workflow_template_id, '')) LIKE '%prd%'"
+            ")"
+        )
+    q = str(query or "").strip().lower()
+    if q:
+        clauses.append(
+            "LOWER("
+            "COALESCE(t.id, '') || ' ' || "
+            "COALESCE(t.title, '') || ' ' || "
+            "COALESCE(t.body, '') || ' ' || "
+            "COALESCE(t.result, '') || ' ' || "
+            "COALESCE(t.assignee, '') || ' ' || "
+            "COALESCE(t.tenant, '') || ' ' || "
+            "COALESCE(t.project_id, '') || ' ' || "
+            "COALESCE(t.workspace_path, '')"
+            ") LIKE ?"
+        )
+        params.append(f"%{q}%")
+    return " AND ".join(clauses), params
+
+
+def _compact_board_tasks(
+    conn: sqlite3.Connection,
+    *,
+    tenant: Optional[str],
+    assignee: Optional[str],
+    include_archived: bool,
+    query: Optional[str],
+    parent_only: bool,
+    repo: Optional[str],
+    prd_only: bool,
+    limit_per_column: int,
+    sort: str,
+) -> tuple[list[kanban_db.Task], dict[str, int]]:
+    """Return exact filtered totals plus a bounded card window per status.
+
+    Separate status queries let SQLite use ``idx_tasks_status`` and stop after
+    each column's limit. A window function over the entire tasks table looked
+    elegant but still materialized and ranked all 100k+ rows before discarding
+    almost all of them.
+    """
+    where_sql, params = _compact_board_where(
+        tenant=tenant,
+        assignee=assignee,
+        include_archived=include_archived,
+        query=query,
+        parent_only=parent_only,
+        repo=repo,
+        prd_only=prd_only,
+    )
+    if sort == "recent":
+        order_sql = (
+            "MAX(t.created_at, COALESCE(t.started_at, 0), "
+            "COALESCE(t.completed_at, 0), COALESCE(t.last_heartbeat_at, 0), "
+            "COALESCE((SELECT MAX(activity_event.created_at) "
+            "FROM task_events activity_event "
+            "WHERE activity_event.task_id = t.id), 0)) "
+            "DESC, t.priority DESC, t.id DESC"
+        )
+    else:
+        order_sql = "t.priority DESC, t.created_at ASC, t.id ASC"
+    total_rows = conn.execute(
+        f"SELECT t.status, COUNT(*) AS n FROM tasks t "
+        f"WHERE {where_sql} GROUP BY t.status",
+        params,
+    ).fetchall()
+    totals = {
+        str(row["status"]): int(row["n"])
+        for row in total_rows
+    }
+    statuses = list(BOARD_COLUMNS)
+    if include_archived:
+        statuses.append("archived")
+    rows: list[sqlite3.Row] = []
+    for status_name in statuses:
+        if totals.get(status_name, 0) <= 0:
+            continue
+        rows.extend(
+            conn.execute(
+                f"SELECT t.* FROM tasks t "
+                f"WHERE {where_sql} AND t.status = ? "
+                f"ORDER BY {order_sql} LIMIT ?",
+                [*params, status_name, int(limit_per_column)],
+            ).fetchall()
+        )
+    return [kanban_db.Task.from_row(row) for row in rows], totals
+
+
+def _board_repositories(conn: sqlite3.Connection) -> list[str]:
+    repos: set[str] = set()
+    for row in conn.execute(
+        "SELECT DISTINCT project_id, workspace_path FROM tasks "
+        "WHERE status != 'archived' "
+        "AND (project_id IS NOT NULL OR workspace_path IS NOT NULL)"
+    ).fetchall():
+        label = _repo_label(row["project_id"], row["workspace_path"])
+        if label:
+            repos.add(label)
+    return sorted(repos, key=str.lower)
 
 
 def _event_dict(event: kanban_db.Event) -> dict[str, Any]:
@@ -694,9 +913,167 @@ def get_sprint_snapshot(
 # GET /board
 # ---------------------------------------------------------------------------
 
+def _get_compact_board(
+    *,
+    board: Optional[str],
+    tenant: Optional[str],
+    assignee: Optional[str],
+    include_archived: bool,
+    query: Optional[str],
+    parent_only: bool,
+    repo: Optional[str],
+    prd_only: bool,
+    limit_per_column: int,
+    sort: str,
+    include_diagnostics: bool = True,
+) -> dict[str, Any]:
+    """Bounded dashboard card projection with lazy full details."""
+    conn = _conn(board=board)
+    try:
+        tasks, column_totals = _compact_board_tasks(
+            conn,
+            tenant=tenant,
+            assignee=assignee,
+            include_archived=include_archived,
+            query=query,
+            parent_only=parent_only,
+            repo=repo,
+            prd_only=prd_only,
+            limit_per_column=limit_per_column,
+            sort=sort,
+        )
+        task_ids = [task.id for task in tasks]
+        link_counts: dict[str, dict[str, int]] = {}
+        comment_counts: dict[str, int] = {}
+        progress: dict[str, dict[str, int]] = {}
+        diagnostics_per_task: dict[str, list[dict]] = {}
+        summary_map: dict[str, str] = {}
+        activity_map: dict[str, int] = {}
+        if task_ids:
+            placeholders = ",".join("?" for _ in task_ids)
+            activity_map = {
+                row["task_id"]: int(row["activity_at"])
+                for row in conn.execute(
+                    f"SELECT task_id, MAX(created_at) AS activity_at "
+                    f"FROM task_events WHERE task_id IN ({placeholders}) "
+                    f"GROUP BY task_id",
+                    task_ids,
+                ).fetchall()
+            }
+            for row in conn.execute(
+                f"SELECT parent_id, child_id FROM task_links "
+                f"WHERE parent_id IN ({placeholders}) "
+                f"OR child_id IN ({placeholders})",
+                [*task_ids, *task_ids],
+            ).fetchall():
+                link_counts.setdefault(
+                    row["parent_id"], {"parents": 0, "children": 0},
+                )["children"] += 1
+                link_counts.setdefault(
+                    row["child_id"], {"parents": 0, "children": 0},
+                )["parents"] += 1
+            comment_counts = {
+                row["task_id"]: int(row["n"])
+                for row in conn.execute(
+                    f"SELECT task_id, COUNT(*) AS n FROM task_comments "
+                    f"WHERE task_id IN ({placeholders}) GROUP BY task_id",
+                    task_ids,
+                ).fetchall()
+            }
+            for row in conn.execute(
+                f"SELECT l.parent_id AS pid, t.status AS cstatus "
+                f"FROM task_links l JOIN tasks t ON t.id = l.child_id "
+                f"WHERE l.parent_id IN ({placeholders})",
+                task_ids,
+            ).fetchall():
+                item = progress.setdefault(
+                    row["pid"], {"done": 0, "total": 0},
+                )
+                item["total"] += 1
+                if row["cstatus"] == "done":
+                    item["done"] += 1
+            if include_diagnostics:
+                diagnostics_per_task = _compute_task_diagnostics(
+                    conn, task_ids=task_ids,
+                )
+            summary_map = kanban_db.latest_summaries(conn, task_ids)
+
+        column_names = list(BOARD_COLUMNS)
+        if include_archived:
+            column_names.append("archived")
+        columns: dict[str, list[dict[str, Any]]] = {
+            name: [] for name in column_names
+        }
+        for task in tasks:
+            full_summary = summary_map.get(task.id)
+            preview = (
+                full_summary[:_CARD_SUMMARY_PREVIEW_CHARS]
+                if full_summary else None
+            )
+            item = _compact_task_dict(
+                task,
+                latest_summary=preview,
+                latest_event_at=activity_map.get(task.id),
+            )
+            item["link_counts"] = link_counts.get(
+                task.id, {"parents": 0, "children": 0},
+            )
+            item["is_parent"] = item["link_counts"]["children"] > 0
+            item["comment_count"] = comment_counts.get(task.id, 0)
+            item["progress"] = progress.get(task.id)
+            diagnostics = diagnostics_per_task.get(task.id)
+            if diagnostics:
+                item["diagnostics"] = diagnostics
+                item["warnings"] = _warnings_summary_from_diagnostics(
+                    diagnostics,
+                )
+            column = task.status if task.status in columns else "todo"
+            columns[column].append(item)
+
+        tenants = [
+            row["tenant"]
+            for row in conn.execute(
+                "SELECT DISTINCT tenant FROM tasks "
+                "WHERE tenant IS NOT NULL ORDER BY tenant"
+            )
+        ]
+        assignees = [
+            row["assignee"]
+            for row in conn.execute(
+                "SELECT DISTINCT assignee FROM tasks "
+                "WHERE assignee IS NOT NULL AND status != 'archived' "
+                "ORDER BY assignee"
+            )
+        ]
+        latest_event_id = conn.execute(
+            "SELECT COALESCE(MAX(id), 0) AS m FROM task_events"
+        ).fetchone()["m"]
+        return {
+            "compact": True,
+            "columns": [
+                {
+                    "name": name,
+                    "tasks": columns[name],
+                    "total": int(column_totals.get(name, len(columns[name]))),
+                    "limited": int(column_totals.get(name, 0)) > len(columns[name]),
+                }
+                for name in column_names
+            ],
+            "tenants": tenants,
+            "assignees": assignees,
+            "repositories": _board_repositories(conn),
+            "latest_event_id": int(latest_event_id),
+            "limit_per_column": int(limit_per_column),
+            "now": int(time.time()),
+        }
+    finally:
+        conn.close()
+
+
 @router.get("/board")
 def get_board(
     tenant: Optional[str] = Query(None, description="Filter to a single tenant"),
+    assignee: Optional[str] = Query(None, description="Filter to one agent profile"),
     include_archived: bool = Query(False),
     board: Optional[str] = Query(None, description="Kanban board slug (omit for current)"),
     workflow_template_id: Optional[str] = Query(
@@ -705,6 +1082,17 @@ def get_board(
     current_step_key: Optional[str] = Query(
         None, description="Restrict to tasks at this workflow step key",
     ),
+    q: Optional[str] = Query(None, description="Server-side card search"),
+    parent_only: bool = Query(False, description="Only tasks with linked children"),
+    repo: Optional[str] = Query(None, description="Repository/project facet"),
+    prd_only: bool = Query(False, description="Only PRD/plan-linked tasks"),
+    compact: bool = Query(False, description="Return bounded card previews"),
+    limit_per_column: int = Query(
+        _DASHBOARD_CARD_LIMIT_DEFAULT,
+        ge=1,
+        le=_DASHBOARD_CARD_LIMIT_MAX,
+    ),
+    sort: str = Query("recent", pattern="^(priority|recent)$"),
 ):
     """Return the full board grouped by status column.
 
@@ -716,10 +1104,24 @@ def get_board(
     ``current`` pointer → ``default``).
     """
     board = _resolve_board(board)
+    if compact:
+        return _get_compact_board(
+            board=board,
+            tenant=tenant,
+            assignee=assignee,
+            include_archived=include_archived,
+            query=q,
+            parent_only=parent_only,
+            repo=repo,
+            prd_only=prd_only,
+            limit_per_column=limit_per_column,
+            sort=sort,
+        )
     conn = _conn(board=board)
     try:
         tasks = kanban_db.list_tasks(
             conn,
+            assignee=assignee,
             tenant=tenant,
             include_archived=include_archived,
             workflow_template_id=workflow_template_id,
@@ -2367,7 +2769,21 @@ def list_boards(include_archived: bool = Query(False)):
 
 
 @router.get("/boards/all")
-def get_all_boards():
+def get_all_boards(
+    tenant: Optional[str] = Query(None),
+    assignee: Optional[str] = Query(None),
+    q: Optional[str] = Query(None),
+    parent_only: bool = Query(False),
+    repo: Optional[str] = Query(None),
+    prd_only: bool = Query(False),
+    compact: bool = Query(False),
+    limit_per_column: int = Query(
+        _DASHBOARD_CARD_LIMIT_DEFAULT,
+        ge=1,
+        le=_DASHBOARD_CARD_LIMIT_MAX,
+    ),
+    sort: str = Query("recent", pattern="^(priority|recent)$"),
+):
     """Return a read-only aggregate of every active board.
 
     Task ids are only unique inside a board, so every aggregate card carries
@@ -2381,54 +2797,251 @@ def get_all_boards():
     }
     tenants: set[str] = set()
     assignees: set[str] = set()
+    repositories: set[str] = set()
     board_summaries: list[dict[str, Any]] = []
+    column_totals: dict[str, int] = {column: 0 for column in BOARD_COLUMNS}
 
     for meta in boards:
         slug = str(meta["slug"])
-        payload = get_board(
-            tenant=None,
-            include_archived=False,
-            board=slug,
-            workflow_template_id=None,
-            current_step_key=None,
-        )
+        if compact:
+            board_query = q
+            normalized_query = str(q or "").strip().lower()
+            if normalized_query and normalized_query in (
+                f"{slug} {meta.get('name') or ''}".lower()
+            ):
+                board_query = None
+            payload = _get_compact_board(
+                board=slug,
+                tenant=tenant,
+                assignee=assignee,
+                include_archived=False,
+                query=board_query,
+                parent_only=parent_only,
+                repo=repo,
+                prd_only=prd_only,
+                limit_per_column=limit_per_column,
+                sort=sort,
+                include_diagnostics=False,
+            )
+        else:
+            payload = get_board(
+                tenant=tenant,
+                assignee=None,
+                include_archived=False,
+                board=slug,
+                workflow_template_id=None,
+                current_step_key=None,
+            )
         counts: dict[str, int] = {}
         for column in payload["columns"]:
             name = column["name"]
             tasks = column["tasks"]
-            counts[name] = len(tasks)
+            total = int(column.get("total", len(tasks)))
+            counts[name] = total
+            column_totals[name] = column_totals.get(name, 0) + total
             for task in tasks:
                 task["source_board"] = slug
                 task["source_board_name"] = meta.get("name") or slug
                 columns.setdefault(name, []).append(task)
         tenants.update(payload.get("tenants") or [])
         assignees.update(payload.get("assignees") or [])
+        repositories.update(payload.get("repositories") or [])
         summary = dict(meta)
         summary["counts"] = counts
         summary["total"] = sum(counts.values())
         board_summaries.append(summary)
 
     for tasks in columns.values():
-        tasks.sort(
-            key=lambda task: (
-                -int(task.get("priority") or 0),
-                int(task.get("created_at") or 0),
-                str(task.get("source_board") or ""),
-                str(task.get("id") or ""),
+        if sort == "recent":
+            tasks.sort(
+                key=lambda task: (
+                    -int(task.get("activity_at") or task.get("created_at") or 0),
+                    -int(task.get("priority") or 0),
+                    str(task.get("source_board") or ""),
+                    str(task.get("id") or ""),
+                )
             )
-        )
+        else:
+            tasks.sort(
+                key=lambda task: (
+                    -int(task.get("priority") or 0),
+                    int(task.get("created_at") or 0),
+                    str(task.get("source_board") or ""),
+                    str(task.get("id") or ""),
+                )
+            )
+        if compact:
+            del tasks[limit_per_column:]
 
     return {
         "aggregate": True,
+        "compact": compact,
         "columns": [
-            {"name": name, "tasks": tasks}
+            {
+                "name": name,
+                "tasks": tasks,
+                "total": int(column_totals.get(name, len(tasks))),
+                "limited": int(column_totals.get(name, 0)) > len(tasks),
+            }
             for name, tasks in columns.items()
         ],
         "tenants": sorted(tenants),
         "assignees": sorted(assignees),
+        "repositories": sorted(repositories, key=str.lower),
         "boards": board_summaries,
         "latest_event_id": 0,
+        "limit_per_column": int(limit_per_column) if compact else None,
         "now": int(time.time()),
+    }
+
+
+def _tag_sprint_task(
+    item: dict[str, Any],
+    *,
+    board_slug: str,
+    board_name: str,
+) -> dict[str, Any]:
+    tagged = dict(item)
+    tagged["source_board"] = board_slug
+    tagged["source_board_name"] = board_name
+    return tagged
+
+
+@router.get("/boards/all/sprint")
+def get_all_boards_sprint(
+    days: int = Query(7, ge=1, le=90),
+):
+    """Merge each active board's live Sprint Manager projection on demand."""
+    now = int(time.time())
+    start = now - days * 86400
+    status_counts: dict[str, int] = {}
+    scorecard = {
+        "created": 0,
+        "completed": 0,
+        "flow_delta": 0,
+        "open": 0,
+        "active": 0,
+        "blocked": 0,
+        "ready": 0,
+        "running": 0,
+        "review": 0,
+    }
+    rocks: list[dict[str, Any]] = []
+    issues: list[dict[str, Any]] = []
+    workstreams: list[dict[str, Any]] = []
+    reference_index: dict[str, dict[str, Any]] = {}
+    board_summaries: list[dict[str, Any]] = []
+    errors: list[dict[str, str]] = []
+
+    for meta in kanban_db.list_boards(include_archived=False):
+        slug = str(meta["slug"])
+        name = str(meta.get("name") or slug)
+        try:
+            snapshot = get_sprint_snapshot(days=days, board=slug)
+        except Exception as exc:
+            log.warning("all-boards sprint skipped %s: %s", slug, exc)
+            errors.append({"board": slug, "error": str(exc)})
+            continue
+        board_summaries.append(
+            {
+                "slug": slug,
+                "name": name,
+                "scorecard": snapshot.get("scorecard") or {},
+            }
+        )
+        for status_name, count in (snapshot.get("status_counts") or {}).items():
+            status_counts[status_name] = (
+                status_counts.get(status_name, 0) + int(count or 0)
+            )
+        for metric in scorecard:
+            scorecard[metric] += int(
+                (snapshot.get("scorecard") or {}).get(metric) or 0
+            )
+        rocks.extend(
+            _tag_sprint_task(item, board_slug=slug, board_name=name)
+            for item in (snapshot.get("rocks") or [])
+        )
+        issues.extend(
+            _tag_sprint_task(item, board_slug=slug, board_name=name)
+            for item in (snapshot.get("issues") or [])
+        )
+        for stream in snapshot.get("workstreams") or []:
+            tagged_stream = _tag_sprint_task(
+                stream, board_slug=slug, board_name=name,
+            )
+            tagged_stream["tasks"] = [
+                _tag_sprint_task(task, board_slug=slug, board_name=name)
+                for task in (stream.get("tasks") or [])
+            ]
+            workstreams.append(tagged_stream)
+        for ref in snapshot.get("references") or []:
+            path = str(ref.get("path") or "")
+            if not path:
+                continue
+            entry = reference_index.setdefault(
+                path,
+                {
+                    "path": path,
+                    "kind": ref.get("kind") or "evidence",
+                    "mentions": 0,
+                    "task_ids": [],
+                    "task_titles": [],
+                    "task_source_boards": [],
+                    "statuses": set(),
+                    "latest_at": 0,
+                },
+            )
+            task_ids = list(ref.get("task_ids") or [])
+            task_titles = list(ref.get("task_titles") or [])
+            entry["mentions"] += int(ref.get("mentions") or len(task_ids))
+            entry["task_ids"].extend(task_ids)
+            entry["task_titles"].extend(task_titles)
+            entry["task_source_boards"].extend([slug] * len(task_ids))
+            entry["statuses"].add(str(ref.get("status") or "open"))
+            entry["latest_at"] = max(
+                int(entry["latest_at"]),
+                int(ref.get("latest_at") or 0),
+            )
+
+    def sprint_sort_key(item: dict[str, Any]) -> tuple[int, int, str, str]:
+        return (
+            -int(item.get("priority") or 0),
+            -int(item.get("created_at") or 0),
+            str(item.get("source_board") or ""),
+            str(item.get("id") or ""),
+        )
+
+    rocks.sort(key=sprint_sort_key)
+    issues.sort(key=sprint_sort_key)
+    workstreams.sort(key=sprint_sort_key)
+    references: list[dict[str, Any]] = []
+    for entry in reference_index.values():
+        statuses = set(entry.pop("statuses"))
+        entry["status"] = _reference_status(statuses)
+        entry["task_ids"] = entry["task_ids"][:8]
+        entry["task_titles"] = entry["task_titles"][:8]
+        entry["task_source_boards"] = entry["task_source_boards"][:8]
+        references.append(entry)
+    references.sort(
+        key=lambda item: (
+            0 if item["kind"] == "plan" else 1,
+            -int(item["latest_at"]),
+            -int(item["mentions"]),
+            item["path"],
+        )
+    )
+    return {
+        "aggregate": True,
+        "generated_at": now,
+        "window": {"days": days, "start": start, "end": now},
+        "status_counts": status_counts,
+        "scorecard": scorecard,
+        "rocks": rocks[:24],
+        "issues": issues[:24],
+        "workstreams": workstreams[:64],
+        "references": references[:120],
+        "boards": board_summaries,
+        "errors": errors,
     }
 
 

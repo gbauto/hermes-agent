@@ -567,10 +567,15 @@
 
     const [tenantFilter, setTenantFilter] = useState("");
     const [assigneeFilter, setAssigneeFilter] = useState("");
+    const [repoFilter, setRepoFilter] = useState("");
+    const [parentOnly, setParentOnly] = useState(false);
+    const [prdOnly, setPrdOnly] = useState(false);
     const [includeArchived, setIncludeArchived] = useState(false);
     const [search, setSearch] = useState("");
+    const [debouncedSearch, setDebouncedSearch] = useState("");
     const [laneByProfile, setLaneByProfile] = useState(true);
     const [configApplied, setConfigApplied] = useState(false);
+    const [lastLoadedAt, setLastLoadedAt] = useState(null);
 
     const [selectedTaskId, setSelectedTaskId] = useState(() => taskFromHash());
     const [selectedIds, setSelectedIds] = useState(() => new Set());
@@ -596,6 +601,18 @@
       writeCommandView(nextView);
     }, []);
 
+    useEffect(function () {
+      const normalized = search.trim();
+      if (!normalized) {
+        setDebouncedSearch("");
+        return undefined;
+      }
+      const timer = setTimeout(function () {
+        setDebouncedSearch(normalized);
+      }, 350);
+      return function () { clearTimeout(timer); };
+    }, [search]);
+
     const openTask = useCallback(function (taskId, sourceBoard) {
       if (!taskId) return;
       // Aggregate cards are read-only. Opening one jumps to its owning board,
@@ -610,6 +627,9 @@
         setSearch("");
         setTenantFilter("");
         setAssigneeFilter("");
+        setRepoFilter("");
+        setParentOnly(false);
+        setPrdOnly(false);
         setIncludeArchived(false);
       }
       setSelectedTaskId(taskId);
@@ -644,45 +664,63 @@
 
     // --- fetch full board ---------------------------------------------------
     const loadBoard = useCallback(() => {
-      if (board === ALL_BOARDS) {
-        return SDK.fetchJSON(`${API}/boards/all`)
-          .then(function (data) {
-            setBoardData(data);
-            cursorRef.current = 0;
-            setError(null);
-          })
-          .catch(function (err) {
-            setError(String(err && err.message ? err.message : err));
-          })
-          .finally(function () { setLoading(false); });
-      }
       const qs = new URLSearchParams();
+      qs.set("compact", "true");
+      qs.set("limit_per_column", "100");
+      // Every status/category column is a live activity feed: latest update
+      // first on individual boards and in the cross-board aggregate.
+      qs.set("sort", "recent");
       if (tenantFilter) qs.set("tenant", tenantFilter);
+      if (assigneeFilter) qs.set("assignee", assigneeFilter);
+      if (repoFilter) qs.set("repo", repoFilter);
+      if (parentOnly) qs.set("parent_only", "true");
+      if (prdOnly) qs.set("prd_only", "true");
       if (includeArchived) qs.set("include_archived", "true");
-      const url = qs.toString() ? `${API}/board?${qs}` : `${API}/board`;
+      if (debouncedSearch) qs.set("q", debouncedSearch);
+      const base = board === ALL_BOARDS ? `${API}/boards/all` : `${API}/board`;
+      const url = `${base}?${qs.toString()}`;
       return SDK.fetchJSON(withBoard(url, board))
         .then(function (data) {
           setBoardData(data);
-          cursorRef.current = data.latest_event_id || 0;
+          cursorRef.current = board === ALL_BOARDS ? 0 : (data.latest_event_id || 0);
           setError(null);
+          setLastLoadedAt(Date.now());
         })
         .catch(function (err) {
           setError(String(err && err.message ? err.message : err));
         })
         .finally(function () { setLoading(false); });
-    }, [tenantFilter, includeArchived, board]);
+    }, [
+      tenantFilter,
+      assigneeFilter,
+      repoFilter,
+      parentOnly,
+      prdOnly,
+      includeArchived,
+      debouncedSearch,
+      board,
+    ]);
 
     // --- fetch the live Sprint Manager projection -------------------------
     const loadSprint = useCallback(function () {
       if (board === ALL_BOARDS) {
-        setSprintData(null);
-        setSprintError(null);
-        return Promise.resolve(null);
+        return SDK.fetchJSON(`${API}/boards/all/sprint?days=7`)
+          .then(function (data) {
+            setSprintData(data);
+            setSprintError(null);
+            setLastLoadedAt(Date.now());
+            return data;
+          })
+          .catch(function (err) {
+            setSprintError(parseApiErrorMessage(err));
+            return null;
+          });
       }
       return SDK.fetchJSON(withBoard(`${API}/sprint?days=7`, board))
         .then(function (data) {
           setSprintData(data);
           setSprintError(null);
+          setLastLoadedAt(Date.now());
           return data;
         })
         .catch(function (err) {
@@ -714,7 +752,11 @@
     }, [board]);
 
     useEffect(function () { loadBoardList(); }, [loadBoardList]);
-    useEffect(function () { loadSprint(); }, [loadSprint]);
+    useEffect(function () {
+      if (commandView === "sprint" || commandView === "workstreams") {
+        loadSprint();
+      }
+    }, [loadSprint, commandView]);
 
     const scheduleReload = useCallback(function () {
       if (reloadTimerRef.current) return;
@@ -726,14 +768,31 @@
     }, [loadBoard, loadSprint]);
 
     useEffect(function () {
-      loadBoard();
+      if (board !== ALL_BOARDS || commandView === "board") {
+        loadBoard();
+      }
       return function () {
         if (reloadTimerRef.current) {
           clearTimeout(reloadTimerRef.current);
           reloadTimerRef.current = null;
         }
       };
-    }, [loadBoard]);
+    }, [loadBoard, board, commandView]);
+
+    // All Boards has no single event cursor to subscribe to. Poll the bounded
+    // aggregate so new cards from any board appear without a manual refresh.
+    useEffect(function () {
+      if (board !== ALL_BOARDS) return undefined;
+      let requestInFlight = false;
+      const timer = setInterval(function () {
+        if (requestInFlight || document.visibilityState === "hidden") return;
+        requestInFlight = true;
+        const refresh = commandView === "board" ? loadBoard() : loadSprint();
+        Promise.allSettled([refresh, loadBoardList()])
+          .finally(function () { requestInFlight = false; });
+      }, 10000);
+      return function () { clearInterval(timer); };
+    }, [board, commandView, loadBoard, loadBoardList, loadSprint]);
 
     // --- WebSocket ---------------------------------------------------------
     useEffect(function () {
@@ -805,25 +864,10 @@
       };
     }, [!!boardData, board, scheduleReload]);
 
-    // --- filtering ----------------------------------------------------------
-    const filteredBoard = useMemo(function () {
-      if (!boardData) return null;
-      const q = search.trim().toLowerCase();
-      const filterTask = function (t) {
-        if (tenantFilter && t.tenant !== tenantFilter) return false;
-        if (assigneeFilter && t.assignee !== assigneeFilter) return false;
-        if (q) {
-          const hay = `${t.id} ${t.source_board || ""} ${t.title || ""} ${t.body || ""} ${t.result || ""} ${t.latest_summary || ""} ${t.assignee || ""} ${t.tenant || ""}`.toLowerCase();
-          if (hay.indexOf(q) === -1) return false;
-        }
-        return true;
-      };
-      return Object.assign({}, boardData, {
-        columns: boardData.columns.map(function (col) {
-          return Object.assign({}, col, { tasks: col.tasks.filter(filterTask) });
-        }),
-      });
-    }, [boardData, tenantFilter, assigneeFilter, search]);
+    // Filtering/search are server-side and bounded. This keeps keystrokes O(1)
+    // in the browser even when the underlying SQLite boards contain 100k+
+    // cards; full task bodies still load only when the drawer opens.
+    const filteredBoard = boardData;
 
     // --- actions ------------------------------------------------------------
     const moveTask = useCallback(function (taskId, newStatus) {
@@ -1066,6 +1110,9 @@
       setSearch("");
       setTenantFilter("");
       setAssigneeFilter("");
+      setRepoFilter("");
+      setParentOnly(false);
+      setPrdOnly(false);
       setIncludeArchived(false);
       clearSelected();
     }, [board, clearSelected]);
@@ -1174,15 +1221,19 @@
             return createNewBoard(payload).then(function () { setShowNewBoard(false); });
           },
         }) : null,
-        !isAllBoards ? h(CommandViewSwitcher, {
+        h(CommandViewSwitcher, {
           value: commandView,
           onChange: changeCommandView,
           onRefresh: function () { loadBoard(); loadSprint(); },
-        }) : h("div", { className: "hermes-kanban-all-notice" },
-          h("strong", null, "All boards"),
-          h("span", null, "Read-only overview. Open a card to continue on its source board."),
-        ),
-        !isAllBoards && commandView === "sprint" ? h(SprintCommandCenter, {
+        }),
+        isAllBoards ? h("div", { className: "hermes-kanban-all-notice" },
+          h("strong", null, "All boards - live"),
+          h("span", null,
+            "Read-only aggregate; cards refresh every 10 seconds and full details load on click.",
+            lastLoadedAt ? ` Last read ${timeAgo ? timeAgo(Math.floor(lastLoadedAt / 1000)) : "now"}.` : "",
+          ),
+        ) : null,
+        commandView === "sprint" ? h(SprintCommandCenter, {
           data: sprintData,
           loading: !sprintData && !sprintError,
           error: sprintError,
@@ -1190,7 +1241,7 @@
           onShowWorkstreams: function () { changeCommandView("workstreams"); },
           onShowBoard: function () { changeCommandView("board"); },
         }) : null,
-        !isAllBoards && commandView === "workstreams" ? h(WorkstreamView, {
+        commandView === "workstreams" ? h(WorkstreamView, {
           data: sprintData,
           loading: !sprintData && !sprintError,
           error: sprintError,
@@ -1207,9 +1258,14 @@
             readOnly: isAllBoards,
             tenantFilter, setTenantFilter,
             assigneeFilter, setAssigneeFilter,
+            repoFilter, setRepoFilter,
+            parentOnly, setParentOnly,
+            prdOnly, setPrdOnly,
+            showAggregatePresets: isAllBoards,
             includeArchived, setIncludeArchived,
             laneByProfile, setLaneByProfile,
             search, setSearch,
+            searchPending: search.trim() !== debouncedSearch,
             onNudgeDispatch: function () {
               SDK.fetchJSON(withBoard(`${API}/dispatch?max=8`, board), { method: "POST" })
                 .then(function () { loadBoard(); loadSprint(); })
@@ -1358,9 +1414,10 @@
       h("button", {
         type: "button",
         className: "hermes-kanban-rock-title",
-        onClick: function () { props.onOpenTask(rock.id); },
+        onClick: function () { props.onOpenTask(rock.id, rock.source_board); },
       }, rock.title || rock.id),
       h("div", { className: "hermes-kanban-rock-meta" },
+        rock.source_board_name ? h("span", { className: "hermes-kanban-source-board" }, rock.source_board_name) : null,
         rock.assignee ? h("span", null, rock.assignee) : h("span", null, "Unassigned"),
         rock.tenant ? h("span", null, rock.tenant) : null,
       ),
@@ -1405,9 +1462,9 @@
           issues.slice(0, 8).map(function (issue, index) {
             return h("button", {
               type: "button",
-              key: issue.id,
+              key: `${issue.source_board || ""}:${issue.id}`,
               className: "hermes-kanban-ids-row",
-              onClick: function () { props.onOpenTask(issue.id); },
+              onClick: function () { props.onOpenTask(issue.id, issue.source_board); },
             },
               h("span", { className: "hermes-kanban-ids-index" }, String(index + 1).padStart(2, "0")),
               h("span", { className: "hermes-kanban-ids-copy" },
@@ -1474,6 +1531,7 @@
         : h("div", { className: "hermes-kanban-reference-list" },
           visible.slice(0, 32).map(function (ref) {
             const firstTask = ref.task_ids && ref.task_ids[0];
+            const firstTaskBoard = ref.task_source_boards && ref.task_source_boards[0];
             return h("div", { className: "hermes-kanban-reference-row", key: ref.path },
               h("span", { className: `hermes-kanban-reference-kind hermes-kanban-reference-kind--${ref.kind}` },
                 ref.kind),
@@ -1488,7 +1546,7 @@
                 ref.mentions, ref.mentions === 1 ? " card" : " cards"),
               firstTask ? h(Button, {
                 size: "sm",
-                onClick: function () { props.onOpenTask(firstTask); },
+                onClick: function () { props.onOpenTask(firstTask, firstTaskBoard); },
               }, "Open") : null,
             );
           }),
@@ -1542,7 +1600,11 @@
             ? h("div", { className: "hermes-kanban-sprint-empty" }, "No current rocks were inferred from the live board.")
             : h("div", { className: "hermes-kanban-rock-grid" },
               data.rocks.map(function (rock) {
-                return h(RockCard, { key: rock.id, rock, onOpenTask: props.onOpenTask });
+                return h(RockCard, {
+                  key: `${rock.source_board || ""}:${rock.id}`,
+                  rock,
+                  onOpenTask: props.onOpenTask,
+                });
               }),
             ),
         ),
@@ -1570,16 +1632,17 @@
           "No linked parent/child workstreams are active in this sprint window.")
         : h("div", { className: "hermes-kanban-workstream-grid" },
           workstreams.map(function (stream) {
-            const open = expanded === stream.id;
+            const streamKey = `${stream.source_board || ""}:${stream.id}`;
+            const open = expanded === streamKey;
             const percent = stream.total > 0 ? Math.round((stream.done / stream.total) * 100) : 0;
             return h("article", {
               className: cn("hermes-kanban-workstream", open ? "hermes-kanban-workstream--open" : ""),
-              key: stream.id,
+              key: streamKey,
             },
               h("button", {
                 type: "button",
                 className: "hermes-kanban-workstream-summary",
-                onClick: function () { setExpanded(open ? null : stream.id); },
+                onClick: function () { setExpanded(open ? null : streamKey); },
                 "aria-expanded": open,
               },
                 h("div", { className: "hermes-kanban-workstream-number" }, `${percent}%`),
@@ -1589,6 +1652,7 @@
                     h("strong", null, stream.title || stream.id),
                   ),
                   h("small", null,
+                    stream.source_board_name ? `${stream.source_board_name} - ` : "",
                     stream.assignee || "unassigned",
                     stream.tenant ? ` · ${stream.tenant}` : "",
                     ` · P${stream.priority || 0}`,
@@ -1615,8 +1679,8 @@
                   (stream.tasks || []).map(function (task) {
                     return h("button", {
                       type: "button",
-                      key: task.id,
-                      onClick: function () { props.onOpenTask(task.id); },
+                      key: `${task.source_board || ""}:${task.id}`,
+                      onClick: function () { props.onOpenTask(task.id, task.source_board); },
                     },
                       h("span", { className: statusClass(task.status) }, task.status),
                       h("strong", null, task.title || task.id),
@@ -2539,12 +2603,18 @@
     const { t } = useI18n();
     const tenants = (props.board && props.board.tenants) || [];
     const assignees = (props.board && props.board.assignees) || [];
+    const repositories = (props.board && props.board.repositories) || [];
     return h("div", { className: "flex flex-wrap items-end gap-3" },
       h("div", { className: "flex flex-col gap-1",
-                 title: "Fuzzy-match tasks by id, title, or description. Matches across all columns." },
-        h(Label, { className: "text-xs text-muted-foreground" }, tx(t, "search", "Search")),
+                 title: "Server-side search across ids, titles, descriptions, results, boards, repositories, tenants, and profiles." },
+        h(Label, { className: "text-xs text-muted-foreground" },
+          tx(t, "search", "Search"),
+          props.searchPending
+            ? h("span", { className: "hermes-kanban-search-pending" }, " - waiting")
+            : null,
+        ),
         h(Input, {
-          placeholder: tx(t, "filterCards", "Filter cards…"),
+          placeholder: tx(t, "filterCards", "Search live cards…"),
           value: props.search,
           onChange: function (e) { props.setSearch(e.target.value); },
           className: "w-56 h-8",
@@ -2565,7 +2635,10 @@
       ),
       h("div", { className: "flex flex-col gap-1",
                  title: "Filter by assigned Hermes profile. Profiles are the named agent identities that claim and work on tasks." },
-        h(Label, { className: "text-xs text-muted-foreground" }, tx(t, "assignee", "Assignee")),
+        h(Label, { className: "text-xs text-muted-foreground" },
+          props.showAggregatePresets
+            ? "Agent profile"
+            : tx(t, "assignee", "Assignee")),
         h(Select, Object.assign({
           value: props.assigneeFilter,
           className: "h-8",
@@ -2576,6 +2649,41 @@
           }),
         ),
       ),
+      props.showAggregatePresets ? h("div", {
+        className: "flex flex-col gap-1",
+        title: "Filter by project id or repository derived from the task workspace.",
+      },
+        h(Label, { className: "text-xs text-muted-foreground" }, "Repo"),
+        h(Select, Object.assign({
+          value: props.repoFilter,
+          className: "h-8 min-w-[150px]",
+        }, selectChangeHandler(props.setRepoFilter)),
+          h(SelectOption, { value: "" }, "All repos"),
+          repositories.map(function (repo) {
+            return h(SelectOption, { key: repo, value: repo }, repo);
+          }),
+        ),
+      ) : null,
+      props.showAggregatePresets ? h("button", {
+        type: "button",
+        className: cn(
+          "hermes-kanban-preset",
+          props.parentOnly ? "hermes-kanban-preset--active" : "",
+        ),
+        "aria-pressed": props.parentOnly,
+        onClick: function () { props.setParentOnly(!props.parentOnly); },
+        title: "Only top-level execution cards that own linked child tasks.",
+      }, "Parent tasks only") : null,
+      props.showAggregatePresets ? h("button", {
+        type: "button",
+        className: cn(
+          "hermes-kanban-preset",
+          props.prdOnly ? "hermes-kanban-preset--active" : "",
+        ),
+        "aria-pressed": props.prdOnly,
+        onClick: function () { props.setPrdOnly(!props.prdOnly); },
+        title: "Only cards that mention a PRD or durable plan path.",
+      }, "PRD / plan linked") : null,
       !props.readOnly ? h("label", { className: "flex items-center gap-2 text-xs",
                    title: "Include archived tasks in the board view. Archived tasks are hidden by default." },
         h(Checkbox, {
@@ -2608,6 +2716,9 @@
           props.setSearch("");
           props.setTenantFilter("");
           props.setAssigneeFilter("");
+          props.setRepoFilter("");
+          props.setParentOnly(false);
+          props.setPrdOnly(false);
           props.setIncludeArchived(false);
         },
         size: "sm",
@@ -2898,6 +3009,10 @@
 
     const colHelp = getColumnHelp(t, props.column.name);
     const colLabel = getColumnLabel(t, props.column.name);
+    const visibleCount = props.column.tasks.length;
+    const totalCount = Number.isFinite(props.column.total)
+      ? props.column.total
+      : visibleCount;
 
     return h("div", {
       ref: colRef,
@@ -2926,8 +3041,10 @@
         h("span", { className: "hermes-kanban-column-label" },
           colLabel || props.column.name),
         h("span", { className: "hermes-kanban-column-count",
-                    title: `${props.column.tasks.length} task${props.column.tasks.length === 1 ? "" : "s"} in this column` },
-          props.column.tasks.length),
+                    title: props.column.limited
+                      ? `${visibleCount} most relevant of ${totalCount} matching tasks`
+                      : `${totalCount} task${totalCount === 1 ? "" : "s"} in this column` },
+          props.column.limited ? `${visibleCount}/${totalCount}` : totalCount),
         !props.readOnly ? h("button", {
           type: "button",
           className: "hermes-kanban-column-add",
@@ -2937,6 +3054,10 @@
       ),
       h("div", { className: "hermes-kanban-column-sub" },
         colHelp || ""),
+      props.column.limited ? h("div", {
+        className: "hermes-kanban-column-limit",
+        title: "The browser keeps a bounded card window. Search and presets query the full SQLite board.",
+      }, `Latest ${visibleCount} shown - filters search all ${totalCount}`) : null,
       showCreate && !props.readOnly ? h(InlineCreate, {
         columnName: props.column.name,
         allTasks: props.allTasks,
@@ -3015,6 +3136,7 @@
   function TaskCard(props) {
     const { t: i18n } = useI18n();
     const t = props.task;
+    const lastActivityAt = t.activity_at || t.created_at;
     const cardRef = useRef(null);
 
     useEffect(function () {
@@ -3173,8 +3295,8 @@
                   "↔ ", t.link_counts.parents + t.link_counts.children)
               : null,
             h("span", { className: "hermes-kanban-ago",
-                        title: t.created_at ? `Created ${t.created_at}` : "" },
-              timeAgo ? timeAgo(t.created_at) : ""),
+                        title: lastActivityAt ? `Last updated ${lastActivityAt}` : "" },
+              timeAgo ? timeAgo(lastActivityAt) : ""),
           ),
         ),
       ),

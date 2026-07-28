@@ -2300,6 +2300,152 @@ def test_all_boards_aggregate_tags_every_task_with_its_source(client):
     }
 
 
+def test_compact_all_boards_is_recent_bounded_and_detail_stays_lazy(client):
+    old_body = "search-me " + ("old detail " * 80)
+    old_task = client.post(
+        "/api/plugins/kanban/tasks",
+        json={"title": "older card", "body": old_body},
+    ).json()["task"]
+    new_task = client.post(
+        "/api/plugins/kanban/tasks",
+        json={"title": "new live card", "body": "small"},
+    ).json()["task"]
+    now = int(time.time())
+    conn = kb.connect()
+    try:
+        with kb.write_txn(conn):
+            conn.execute(
+                "UPDATE tasks SET created_at = ? WHERE id = ?",
+                (now - 86400, old_task["id"]),
+            )
+            conn.execute(
+                "UPDATE tasks SET created_at = ? WHERE id = ?",
+                (now - 60, new_task["id"]),
+            )
+            conn.execute(
+                "UPDATE task_events SET created_at = ? WHERE task_id = ?",
+                (now, old_task["id"]),
+            )
+            conn.execute(
+                "UPDATE task_events SET created_at = ? WHERE task_id = ?",
+                (now - 60, new_task["id"]),
+            )
+    finally:
+        conn.close()
+
+    response = client.get(
+        "/api/plugins/kanban/boards/all"
+        "?compact=true&limit_per_column=1&sort=recent"
+    )
+    assert response.status_code == 200, response.text
+    ready = next(
+        column for column in response.json()["columns"]
+        if column["name"] == "ready"
+    )
+    assert ready["total"] == 2
+    assert ready["limited"] is True
+    assert [task["id"] for task in ready["tasks"]] == [old_task["id"]]
+    assert ready["tasks"][0]["activity_at"] == now
+
+    single_board = client.get(
+        "/api/plugins/kanban/board"
+        "?compact=true&limit_per_column=1"
+    )
+    assert single_board.status_code == 200, single_board.text
+    single_ready = next(
+        column for column in single_board.json()["columns"]
+        if column["name"] == "ready"
+    )
+    assert [task["id"] for task in single_ready["tasks"]] == [old_task["id"]]
+
+    searched = client.get(
+        "/api/plugins/kanban/boards/all"
+        "?compact=true&limit_per_column=1&q=search-me"
+    )
+    searched_tasks = [
+        task
+        for column in searched.json()["columns"]
+        for task in column["tasks"]
+    ]
+    assert [task["id"] for task in searched_tasks] == [old_task["id"]]
+    assert len(searched_tasks[0]["body"]) <= 320
+
+    detail = client.get(
+        f"/api/plugins/kanban/tasks/{old_task['id']}"
+    ).json()["task"]
+    assert detail["body"] == old_body
+
+
+def test_compact_all_boards_parent_repo_profile_and_prd_facets(client):
+    parent = client.post(
+        "/api/plugins/kanban/tasks",
+        json={
+            "title": "Hermes dashboard PRD",
+            "body": "Plan: second-brain/plans/live-dashboard-prd.md",
+            "assignee": "builder",
+            "workspace_kind": "dir",
+            "workspace_path": "/Users/greg/repos/hermes-agent",
+        },
+    ).json()["task"]
+    client.post(
+        "/api/plugins/kanban/tasks",
+        json={"title": "child implementation", "parents": [parent["id"]]},
+    )
+
+    response = client.get(
+        "/api/plugins/kanban/boards/all"
+        "?compact=true&parent_only=true&repo=hermes-agent"
+        "&assignee=builder&prd_only=true"
+    )
+    assert response.status_code == 200, response.text
+    tasks = [
+        task
+        for column in response.json()["columns"]
+        for task in column["tasks"]
+    ]
+    assert [task["id"] for task in tasks] == [parent["id"]]
+    assert tasks[0]["is_parent"] is True
+    assert tasks[0]["repo"] == "hermes-agent"
+    assert tasks[0]["has_prd"] is True
+    assert "hermes-agent" in response.json()["repositories"]
+
+
+def test_all_boards_sprint_preserves_source_board_for_workstreams(client):
+    created = client.post(
+        "/api/plugins/kanban/boards",
+        json={"slug": "live-work", "name": "Live Work"},
+    )
+    assert created.status_code == 200, created.text
+    parent = client.post(
+        "/api/plugins/kanban/tasks?board=live-work",
+        json={
+            "title": "Today parent",
+            "body": "Plan: second-brain/plans/today.md",
+            "assignee": "architect",
+            "priority": 90,
+        },
+    ).json()["task"]
+    client.post(
+        "/api/plugins/kanban/tasks?board=live-work",
+        json={"title": "Today child", "parents": [parent["id"]]},
+    )
+
+    response = client.get("/api/plugins/kanban/boards/all/sprint?days=7")
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["aggregate"] is True
+    stream = next(
+        item for item in payload["workstreams"]
+        if item["id"] == parent["id"]
+    )
+    assert stream["source_board"] == "live-work"
+    assert stream["source_board_name"] == "Live Work"
+    assert all(
+        task["source_board"] == "live-work"
+        for task in stream["tasks"]
+    )
+
+
 def test_inbox_supports_decisions_and_dynamic_forms(client):
     created = client.post(
         "/api/plugins/kanban/inbox",
@@ -2456,3 +2602,20 @@ def test_dashboard_exposes_all_boards_and_squash_as_read_only_controls():
     assert "Squash Board into Decisions" in js
     assert "readOnly: isAllBoards" in js
     assert "hermes-kanban-source-board" in js
+    assert "/boards/all/sprint?days=7" in js
+    assert 'qs.set("compact", "true")' in js
+    assert 'qs.set("sort", "recent")' in js
+    assert 'qs.set("parent_only", "true")' in js
+    assert "setDebouncedSearch" in js
+    assert "timeAgo(lastActivityAt)" in js
+    assert "setInterval(function ()" in js
+    assert '!isAllBoards && commandView === "sprint"' not in js
+
+    index_css = (repo_root / "web" / "src" / "index.css").read_text(
+        encoding="utf-8",
+    )
+    fonts_import = "@nous-research/ui/styles/fonts.css"
+    globals_import = "@nous-research/ui/styles/globals.css"
+    assert index_css.index(fonts_import) < index_css.index(globals_import)
+    assert "url('/gb-mark.png')" in index_css
+    assert (repo_root / "web" / "public" / "gb-mark.png").is_file()

@@ -1,4 +1,9 @@
 @import 'tailwindcss';
+/* The Nous design-system variables name the official families, but the
+   actual @font-face registrations live in fonts.css. Keep this before
+   globals.css so Typography's default `font-sans` renders Collapse instead
+   of silently falling back to the browser sans stack. */
+@import '@nous-research/ui/styles/fonts.css';
 @import '@nous-research/ui/styles/globals.css';
 
 /* Scan the published design-system bundle so its utility classes survive
