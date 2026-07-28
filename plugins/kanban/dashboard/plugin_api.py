@@ -2720,12 +2720,19 @@ def respond_to_inbox_item(item_id: str, payload: InboxResponseBody):
 def import_carlos_swipe_report():
     """Import the latest Carlos blocker report without resetting responses."""
 
-    report_path = (
-        inbox_store.inbox_db_path().parents[1]
-        / "artifacts"
+    relative_report = (
+        Path("artifacts")
         / "carlos-blocker-swipe-cards"
         / "latest"
         / "swipe-cards-data.json"
+    )
+    report_candidates = [
+        inbox_store.inbox_db_path().parents[1] / relative_report,
+        Path.home() / ".hermes" / relative_report,
+    ]
+    report_path = next(
+        (candidate for candidate in report_candidates if candidate.is_file()),
+        report_candidates[0],
     )
     if not report_path.is_file():
         raise HTTPException(
