@@ -2306,12 +2306,17 @@ def test_compact_all_boards_is_recent_bounded_and_detail_stays_lazy(client):
         json={"title": "new live card", "body": "small"},
     ).json()["task"]
     now = int(time.time())
+    legacy_completed_at = time.strftime(
+        "%Y-%m-%d %H:%M:%S",
+        time.gmtime(now),
+    )
     conn = kb.connect()
     try:
         with kb.write_txn(conn):
             conn.execute(
-                "UPDATE tasks SET created_at = ? WHERE id = ?",
-                (now - 86400, old_task["id"]),
+                "UPDATE tasks SET created_at = ?, completed_at = ? "
+                "WHERE id = ?",
+                (now - 86400, legacy_completed_at, old_task["id"]),
             )
             conn.execute(
                 "UPDATE tasks SET created_at = ? WHERE id = ?",
@@ -2319,7 +2324,7 @@ def test_compact_all_boards_is_recent_bounded_and_detail_stays_lazy(client):
             )
             conn.execute(
                 "UPDATE task_events SET created_at = ? WHERE task_id = ?",
-                (now, old_task["id"]),
+                (now - 86400, old_task["id"]),
             )
             conn.execute(
                 "UPDATE task_events SET created_at = ? WHERE task_id = ?",

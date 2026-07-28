@@ -42,6 +42,7 @@ import re
 import sqlite3
 import time
 from dataclasses import asdict
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 
@@ -186,6 +187,43 @@ def _task_dict(
     return d
 
 
+def _coerce_timestamp(value: Any) -> int:
+    """Normalize legacy integer, numeric-text, and SQLite datetime values."""
+    if value is None or value == "":
+        return 0
+    if isinstance(value, (int, float)):
+        return int(value)
+    raw = str(value).strip()
+    if not raw:
+        return 0
+    try:
+        return int(float(raw))
+    except (TypeError, ValueError):
+        pass
+    try:
+        parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return int(parsed.timestamp())
+    except (TypeError, ValueError, OverflowError):
+        return 0
+
+
+def _sql_timestamp_expr(column: str) -> str:
+    """SQLite epoch projection for mixed legacy timestamp storage."""
+    text_value = f"TRIM(CAST({column} AS TEXT))"
+    return (
+        "CASE "
+        f"WHEN {column} IS NULL THEN 0 "
+        f"WHEN TYPEOF({column}) IN ('integer', 'real') "
+        f"THEN CAST({column} AS INTEGER) "
+        f"WHEN {text_value} != '' "
+        f"AND {text_value} NOT GLOB '*[^0-9.]*' "
+        f"THEN CAST({column} AS INTEGER) "
+        f"ELSE COALESCE(unixepoch({column}), 0) END"
+    )
+
+
 def _task_activity_at(
     task: kanban_db.Task,
     *,
@@ -193,11 +231,11 @@ def _task_activity_at(
 ) -> int:
     """Best available task activity timestamp, including persisted updates."""
     return max(
-        int(task.created_at or 0),
-        int(task.started_at or 0),
-        int(task.completed_at or 0),
-        int(task.last_heartbeat_at or 0),
-        int(latest_event_at or 0),
+        _coerce_timestamp(task.created_at),
+        _coerce_timestamp(task.started_at),
+        _coerce_timestamp(task.completed_at),
+        _coerce_timestamp(task.last_heartbeat_at),
+        _coerce_timestamp(latest_event_at),
     )
 
 
@@ -347,13 +385,21 @@ def _compact_board_tasks(
         prd_only=prd_only,
     )
     if sort == "recent":
+        activity_parts = [
+            _sql_timestamp_expr("t.created_at"),
+            _sql_timestamp_expr("t.started_at"),
+            _sql_timestamp_expr("t.completed_at"),
+            _sql_timestamp_expr("t.last_heartbeat_at"),
+            (
+                "COALESCE((SELECT MAX("
+                + _sql_timestamp_expr("activity_event.created_at")
+                + ") FROM task_events activity_event "
+                "WHERE activity_event.task_id = t.id), 0)"
+            ),
+        ]
         order_sql = (
-            "MAX(t.created_at, COALESCE(t.started_at, 0), "
-            "COALESCE(t.completed_at, 0), COALESCE(t.last_heartbeat_at, 0), "
-            "COALESCE((SELECT MAX(activity_event.created_at) "
-            "FROM task_events activity_event "
-            "WHERE activity_event.task_id = t.id), 0)) "
-            "DESC, t.priority DESC, t.id DESC"
+            f"MAX({', '.join(activity_parts)}) DESC, "
+            "t.priority DESC, t.id DESC"
         )
     else:
         order_sql = "t.priority DESC, t.created_at ASC, t.id ASC"
@@ -952,9 +998,10 @@ def _get_compact_board(
         if task_ids:
             placeholders = ",".join("?" for _ in task_ids)
             activity_map = {
-                row["task_id"]: int(row["activity_at"])
+                row["task_id"]: _coerce_timestamp(row["activity_at"])
                 for row in conn.execute(
-                    f"SELECT task_id, MAX(created_at) AS activity_at "
+                    f"SELECT task_id, "
+                    f"MAX({_sql_timestamp_expr('created_at')}) AS activity_at "
                     f"FROM task_events WHERE task_id IN ({placeholders}) "
                     f"GROUP BY task_id",
                     task_ids,
