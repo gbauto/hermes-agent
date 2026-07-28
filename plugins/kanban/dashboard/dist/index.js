@@ -242,7 +242,7 @@
   function readCommandView() {
     try {
       const value = window.localStorage.getItem(LS_VIEW_KEY);
-      return ["sprint", "workstreams", "board"].indexOf(value) >= 0 ? value : "sprint";
+      return ["sprint", "data-spine", "workstreams", "board"].indexOf(value) >= 0 ? value : "sprint";
     } catch (_e) { return "sprint"; }
   }
 
@@ -1125,7 +1125,15 @@
           loading: !sprintData && !sprintError,
           error: sprintError,
           onOpenTask: openTask,
+          onShowDataSpine: function () { changeCommandView("data-spine"); },
           onShowWorkstreams: function () { changeCommandView("workstreams"); },
+          onShowBoard: function () { changeCommandView("board"); },
+        }) : null,
+        commandView === "data-spine" ? h(DataSpineView, {
+          data: sprintData,
+          loading: !sprintData && !sprintError,
+          error: sprintError,
+          onOpenTask: openTask,
           onShowBoard: function () { changeCommandView("board"); },
         }) : null,
         commandView === "workstreams" ? h(WorkstreamView, {
@@ -1226,6 +1234,7 @@
   function CommandViewSwitcher(props) {
     const views = [
       { id: "sprint", label: "Sprint", hint: "Rocks, scorecard, IDS, plans, and evidence" },
+      { id: "data-spine", label: "Data Spine", hint: "Supabase lineage, coverage, and freshness" },
       { id: "workstreams", label: "Workstreams", hint: "Parent/child execution rollups" },
       { id: "board", label: "Board", hint: "Native live Kanban cards" },
     ];
@@ -1440,14 +1449,15 @@
     return h("div", { className: "hermes-kanban-sprint" },
       h("header", { className: "hermes-kanban-sprint-hero" },
         h("div", null,
-          h("span", { className: "hermes-kanban-sprint-kicker" }, "Official live Kanban · Sprint Manager"),
+          h("span", { className: "hermes-kanban-sprint-kicker" }, "Board execution · SQLite projection"),
           h("h2", null, "Execution pulse, decisions, and proof"),
           h("p", null,
             `${formatSprintDate(data.window && data.window.start)} — ${formatSprintDate(data.window && data.window.end)}`,
-            " · Derived from native cards and links; no frozen report data.",
+            " · Rocks in this view are inferred from native cards and links.",
           ),
         ),
         h("div", { className: "hermes-kanban-sprint-hero-actions" },
+          h(Button, { size: "sm", onClick: props.onShowDataSpine }, "Open Data Spine"),
           h(Button, { size: "sm", onClick: props.onShowWorkstreams }, "Explore workstreams"),
           h(Button, { size: "sm", onClick: props.onShowBoard }, "Open live board"),
         ),
@@ -1485,6 +1495,257 @@
         h(IDSPanel, { issues: data.issues, onOpenTask: props.onOpenTask }),
       ),
       h(PlanEvidencePanel, { references: data.references, onOpenTask: props.onOpenTask }),
+    );
+  }
+
+  function formatSnapshotDate(value) {
+    if (!value) return "—";
+    try {
+      return new Date(value).toLocaleString(undefined, {
+        month: "short",
+        day: "numeric",
+        year: "numeric",
+        hour: "numeric",
+        minute: "2-digit",
+      });
+    } catch (_e) { return "—"; }
+  }
+
+  function formatSnapshotAge(seconds) {
+    if (seconds == null || Number.isNaN(Number(seconds))) return "unknown age";
+    const value = Number(seconds);
+    if (value < 3600) return `${Math.max(0, Math.round(value / 60))}m old`;
+    if (value < 86400) return `${Math.round(value / 3600)}h old`;
+    return `${Math.round(value / 86400)}d old`;
+  }
+
+  function dataSpineTone(status) {
+    return ["fresh", "aging", "stale", "missing", "invalid", "unknown"].indexOf(status) >= 0
+      ? status
+      : "unknown";
+  }
+
+  function DataSpinePill(props) {
+    const status = dataSpineTone(props.status);
+    return h("span", {
+      className: `hermes-kanban-data-pill hermes-kanban-data-pill--${status}`,
+    }, props.label || status);
+  }
+
+  function DataSpineView(props) {
+    if (!props.data) return h(SprintLoading, { error: props.error });
+    const overlay = props.data.data_spine || {
+      status: "missing",
+      available: false,
+      message: "No database sprint snapshot is attached to this board.",
+      snapshot: null,
+    };
+    const snapshot = overlay.snapshot;
+
+    if (!snapshot) {
+      return h("div", { className: "hermes-kanban-data-spine" },
+        h("header", { className: "hermes-kanban-data-hero" },
+          h("div", null,
+            h("span", { className: "hermes-kanban-sprint-kicker" }, "Canonical planning data · Supabase"),
+            h("h2", null, "Sprint → proof, row by row"),
+            h("p", null,
+              "The native SQLite board remains live while this optional database projection is unavailable."),
+          ),
+          h(DataSpinePill, {
+            status: overlay.status,
+            label: `Snapshot ${overlay.status || "missing"}`,
+          }),
+        ),
+        h("section", {
+          className: `hermes-kanban-data-state hermes-kanban-data-state--${dataSpineTone(overlay.status)}`,
+        },
+          h("strong", null, overlay.status === "invalid"
+            ? "Database snapshot ignored"
+            : "Database snapshot not connected"),
+          h("p", null, overlay.message || "Export sprint-data.json for this board to connect canonical sprint data."),
+          h("code", null, overlay.file || "sprint-data.json"),
+          h(Button, { size: "sm", onClick: props.onShowBoard }, "Open native board"),
+        ),
+      );
+    }
+
+    const sprint = snapshot.sprint || null;
+    const totals = snapshot.totals || {};
+    const freshness = snapshot.freshness || {};
+    const tables = (snapshot.source && snapshot.source.tables) || [];
+    const rocks = snapshot.rocks || [];
+    const warnings = snapshot.warnings || [];
+    const planningStatus = dataSpineTone(freshness.planning_status || "unknown");
+    const chain = [
+      { key: "sprint", label: "Sprint", value: sprint ? 1 : 0, table: "sprint_plans" },
+      { key: "rocks", label: "Rocks", value: Number(totals.rocks || 0), table: "sprint_rocks" },
+      { key: "prds", label: "PRDs", value: Number(totals.prds || 0), table: "prd_artifacts" },
+      { key: "board_tasks", label: "Kanban tasks", value: Number(totals.board_tasks || 0), table: "dispatch_links" },
+      { key: "agent_runs", label: "Agent runs", value: Number(totals.agent_runs || 0), table: "agent_runs" },
+      { key: "traces", label: "Traces", value: Number(totals.traces || 0), table: "langfuse_traces" },
+      { key: "receipts", label: "Receipts", value: Number(totals.receipts || 0), table: "build + host runs" },
+      { key: "commits", label: "Commits", value: Number(totals.commits || 0), table: "github_commits" },
+      { key: "prs", label: "PRs", value: Number(totals.prs || 0), table: "PR receipts" },
+    ];
+    const connectionLabels = {
+      prds: "PRDs",
+      board_tasks: "Tasks",
+      agent_runs: "Runs",
+      traces: "Traces",
+      receipts: "Receipts",
+      commits: "Commits",
+      prs: "PRs",
+    };
+
+    return h("div", { className: "hermes-kanban-data-spine" },
+      h("header", { className: "hermes-kanban-data-hero" },
+        h("div", null,
+          h("span", { className: "hermes-kanban-sprint-kicker" }, "Canonical planning data · Supabase"),
+          h("h2", null, "Sprint → proof, row by row"),
+          h("p", null,
+            sprint
+              ? `${sprint.title || sprint.id} · Week of ${sprint.week_of || "unknown"} · ${sprint.status || "unknown"}`
+              : "No canonical sprint record was returned for this board.",
+          ),
+        ),
+        h("div", { className: "hermes-kanban-data-hero-status" },
+          h(DataSpinePill, {
+            status: overlay.status,
+            label: `Export ${overlay.status} · ${formatSnapshotAge(overlay.age_seconds)}`,
+          }),
+          h(DataSpinePill, {
+            status: planningStatus,
+            label: `Planning rows ${planningStatus}`,
+          }),
+        ),
+      ),
+      planningStatus === "stale" ? h("div", { className: "hermes-kanban-data-warning" },
+        h("strong", null, "The export is current, but the canonical sprint is stale."),
+        h("span", null,
+          ` Planning rows are ${formatSnapshotAge(freshness.planning_age_seconds)}; the board may have moved on without a new sprint record.`),
+      ) : null,
+      h("section", { className: "hermes-kanban-data-panel" },
+        h("div", { className: "hermes-kanban-sprint-panel-head" },
+          h("div", null,
+            h("span", { className: "hermes-kanban-sprint-kicker" }, "End-to-end lineage"),
+            h("h3", null, "Connection chain"),
+          ),
+          h("span", { className: "hermes-kanban-sprint-count" },
+            formatSnapshotDate(snapshot.generated_at)),
+        ),
+        h("div", { className: "hermes-kanban-data-chain" },
+          chain.map(function (node, index) {
+            return h(React.Fragment, { key: node.key },
+              h("div", {
+                className: cn(
+                  "hermes-kanban-data-chain-node",
+                  node.value > 0 ? "is-linked" : "is-gap",
+                ),
+              },
+                h("span", null, node.label),
+                h("strong", null, node.value),
+                h("small", null, node.table),
+              ),
+              index < chain.length - 1
+                ? h("span", { className: "hermes-kanban-data-chain-arrow", "aria-hidden": "true" }, "→")
+                : null,
+            );
+          }),
+        ),
+      ),
+      h("section", { className: "hermes-kanban-data-panel" },
+        h("div", { className: "hermes-kanban-sprint-panel-head" },
+          h("div", null,
+            h("span", { className: "hermes-kanban-sprint-kicker" }, "Database readback"),
+            h("h3", null, "Matched rows by source table"),
+          ),
+          h("span", { className: "hermes-kanban-sprint-count" }, tables.length, " sources"),
+        ),
+        h("div", { className: "hermes-kanban-data-source-table" },
+          h("div", { className: "hermes-kanban-data-source-head" },
+            h("span", null, "Table"),
+            h("span", null, "Role"),
+            h("span", null, "Rows"),
+            h("span", null, "Latest matched row"),
+          ),
+          tables.map(function (table) {
+            const count = Number(table.matched_rows || 0);
+            return h("div", { className: "hermes-kanban-data-source-row", key: table.name },
+              h("code", null, table.name || "unknown"),
+              h("span", null, table.role || "Canonical source"),
+              h("strong", { className: count > 0 ? "has-rows" : "no-rows" }, count),
+              h("time", null, formatSnapshotDate(table.latest_at)),
+            );
+          }),
+        ),
+      ),
+      h("section", { className: "hermes-kanban-data-panel" },
+        h("div", { className: "hermes-kanban-sprint-panel-head" },
+          h("div", null,
+            h("span", { className: "hermes-kanban-sprint-kicker" }, "Rock coverage"),
+            h("h3", null, "Where each commitment reaches the execution spine"),
+          ),
+          h("span", { className: "hermes-kanban-sprint-count" }, rocks.length, " database rocks"),
+        ),
+        rocks.length === 0
+          ? h("div", { className: "hermes-kanban-sprint-empty" }, "No database-backed rocks exist for this sprint.")
+          : h("div", { className: "hermes-kanban-data-rocks" },
+            rocks.map(function (rock) {
+              const connections = rock.connections || {};
+              const taskId = rock.task_ids && rock.task_ids[0];
+              return h("article", { className: "hermes-kanban-data-rock", key: rock.id },
+                h("div", { className: "hermes-kanban-data-rock-head" },
+                  h("div", null,
+                    h("span", { className: statusClass(rock.status) }, rock.status || "unknown"),
+                    h("strong", null, rock.title || rock.id),
+                    h("small", null,
+                      rock.owner_profile || "unowned",
+                      rock.prds && rock.prds.length
+                        ? ` · ${rock.prds.map(function (prd) { return prd.title || prd.id; }).join(", ")}`
+                        : " · no PRD linked",
+                    ),
+                  ),
+                  h("div", { className: "hermes-kanban-data-rock-coverage" },
+                    h("strong", null, `${Number(rock.coverage_percent || 0)}%`),
+                    h("span", null, "lineage coverage"),
+                  ),
+                ),
+                h("div", { className: "hermes-kanban-data-rock-connections" },
+                  Object.keys(connectionLabels).map(function (key) {
+                    const count = Number(connections[key] || 0);
+                    return h("div", {
+                      className: cn(
+                        "hermes-kanban-data-rock-step",
+                        count > 0 ? "is-linked" : "is-gap",
+                      ),
+                      key,
+                    },
+                      h("span", null, connectionLabels[key]),
+                      h("strong", null, count),
+                    );
+                  }),
+                ),
+                h("div", { className: "hermes-kanban-data-rock-foot" },
+                  h("span", null,
+                    rock.missing_connections && rock.missing_connections.length
+                      ? `Missing: ${rock.missing_connections.map(function (key) { return connectionLabels[key] || key; }).join(", ")}`
+                      : "Complete lineage is present for every stage.",
+                  ),
+                  taskId ? h(Button, {
+                    size: "sm",
+                    onClick: function () { props.onOpenTask(taskId); },
+                  }, "Open linked task") : null,
+                ),
+              );
+            }),
+          ),
+      ),
+      warnings.length > 0 ? h("section", { className: "hermes-kanban-data-warnings" },
+        h("strong", null, "Exporter warnings"),
+        warnings.map(function (warning, index) {
+          return h("p", { key: String(index) }, warning);
+        }),
+      ) : null,
     );
   }
 

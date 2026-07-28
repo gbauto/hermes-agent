@@ -42,6 +42,7 @@ import re
 import sqlite3
 import time
 from dataclasses import asdict
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 
@@ -386,6 +387,24 @@ _SPRINT_REFERENCE_RE = re.compile(
     r"[A-Za-z0-9_./-]+\.(?:md|html|json|png|svg|pdf))",
     re.IGNORECASE,
 )
+_SPRINT_DATA_SCHEMA = "hermes-kanban-sprint-data.v1"
+_SPRINT_DATA_FILENAME = "sprint-data.json"
+_SPRINT_DATA_MAX_BYTES = 2 * 1024 * 1024
+_SPRINT_DATA_MAX_AGE_SECONDS = 26 * 60 * 60
+_SPRINT_DATA_TOP_LEVEL_KEYS = {
+    "schema_version",
+    "generated_at",
+    "board",
+    "source",
+    "freshness",
+    "warnings",
+    "sprint",
+    "rocks",
+    "issues",
+    "scorecard_metrics",
+    "task_lineage",
+    "totals",
+}
 
 
 def _epoch(value: Any) -> int:
@@ -401,6 +420,188 @@ def _excerpt(value: Any, limit: int = 180) -> str:
     if len(text) <= limit:
         return text
     return text[: max(0, limit - 1)].rstrip() + "…"
+
+
+def _iso_epoch(value: Any) -> Optional[int]:
+    """Parse an ISO-8601 value into an epoch without accepting loose dates."""
+    if not isinstance(value, str) or not value.strip():
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return int(parsed.astimezone(timezone.utc).timestamp())
+
+
+def _sprint_data_result(
+    status: str,
+    *,
+    message: str,
+    age_seconds: Optional[int] = None,
+    size_bytes: Optional[int] = None,
+    snapshot: Optional[dict[str, Any]] = None,
+) -> dict[str, Any]:
+    return {
+        "status": status,
+        "available": snapshot is not None,
+        "file": _SPRINT_DATA_FILENAME,
+        "schema_version": _SPRINT_DATA_SCHEMA,
+        "max_age_seconds": _SPRINT_DATA_MAX_AGE_SECONDS,
+        "age_seconds": age_seconds,
+        "size_bytes": size_bytes,
+        "message": message,
+        "snapshot": snapshot,
+    }
+
+
+def _validate_sprint_data_payload(
+    payload: Any,
+    *,
+    board: str,
+) -> tuple[Optional[dict[str, Any]], Optional[str]]:
+    """Validate and bound the board-owned database projection.
+
+    The file is a local interchange contract, not a generic extension point.
+    Unknown top-level fields are dropped and collection sizes are bounded so a
+    malformed exporter cannot turn the read-only dashboard endpoint into an
+    unbounded JSON relay.
+    """
+    if not isinstance(payload, dict):
+        return None, "root must be a JSON object"
+    if payload.get("schema_version") != _SPRINT_DATA_SCHEMA:
+        return None, f"schema_version must be {_SPRINT_DATA_SCHEMA!r}"
+    if payload.get("board") != board:
+        return None, f"snapshot board does not match {board!r}"
+    if _iso_epoch(payload.get("generated_at")) is None:
+        return None, "generated_at must be an ISO-8601 timestamp"
+
+    source = payload.get("source")
+    freshness = payload.get("freshness")
+    totals = payload.get("totals")
+    task_lineage = payload.get("task_lineage")
+    if not isinstance(source, dict) or source.get("system") != "supabase":
+        return None, "source.system must be 'supabase'"
+    if not isinstance(source.get("tables"), list) or len(source["tables"]) > 64:
+        return None, "source.tables must be a list with at most 64 entries"
+    if not all(isinstance(item, dict) for item in source["tables"]):
+        return None, "source.tables entries must be objects"
+    if not isinstance(freshness, dict):
+        return None, "freshness must be an object"
+    if not isinstance(totals, dict):
+        return None, "totals must be an object"
+    if not isinstance(task_lineage, dict) or len(task_lineage) > 2000:
+        return None, "task_lineage must be an object with at most 2000 entries"
+
+    collection_limits = {
+        "warnings": 100,
+        "rocks": 100,
+        "issues": 200,
+        "scorecard_metrics": 200,
+    }
+    for key, limit in collection_limits.items():
+        value = payload.get(key)
+        if not isinstance(value, list) or len(value) > limit:
+            return None, f"{key} must be a list with at most {limit} entries"
+    if not all(isinstance(item, str) for item in payload["warnings"]):
+        return None, "warnings entries must be strings"
+    for key in ("rocks", "issues", "scorecard_metrics"):
+        if not all(isinstance(item, dict) for item in payload[key]):
+            return None, f"{key} entries must be objects"
+    if payload.get("sprint") is not None and not isinstance(payload["sprint"], dict):
+        return None, "sprint must be an object or null"
+
+    bounded = {
+        key: payload[key]
+        for key in _SPRINT_DATA_TOP_LEVEL_KEYS
+        if key in payload
+    }
+    return bounded, None
+
+
+def _load_sprint_data_overlay(
+    board: str,
+    *,
+    now: Optional[int] = None,
+) -> dict[str, Any]:
+    """Load the optional board-scoped Supabase projection without failing."""
+    current_time = int(time.time()) if now is None else int(now)
+    path = kanban_db.board_dir(board) / _SPRINT_DATA_FILENAME
+    try:
+        size_bytes = path.stat().st_size
+    except FileNotFoundError:
+        return _sprint_data_result(
+            "missing",
+            message="No database sprint snapshot has been exported for this board.",
+        )
+    except OSError as exc:
+        return _sprint_data_result(
+            "invalid",
+            message=f"Database sprint snapshot is unreadable: {_excerpt(exc, 140)}",
+        )
+
+    if size_bytes > _SPRINT_DATA_MAX_BYTES:
+        return _sprint_data_result(
+            "invalid",
+            size_bytes=size_bytes,
+            message=(
+                "Database sprint snapshot exceeds the "
+                f"{_SPRINT_DATA_MAX_BYTES}-byte safety limit."
+            ),
+        )
+
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        return _sprint_data_result(
+            "invalid",
+            size_bytes=size_bytes,
+            message=f"Database sprint snapshot is invalid: {_excerpt(exc, 140)}",
+        )
+
+    snapshot, error = _validate_sprint_data_payload(payload, board=board)
+    if error or snapshot is None:
+        return _sprint_data_result(
+            "invalid",
+            size_bytes=size_bytes,
+            message=f"Database sprint snapshot was ignored: {error}.",
+        )
+
+    generated_epoch = _iso_epoch(snapshot.get("generated_at"))
+    generated_time = (
+        current_time if generated_epoch is None else int(generated_epoch)
+    )
+    age_seconds = max(0, current_time - generated_time)
+    status = (
+        "fresh"
+        if age_seconds <= _SPRINT_DATA_MAX_AGE_SECONDS
+        else "stale"
+    )
+    message = (
+        "Database sprint snapshot is current."
+        if status == "fresh"
+        else "Database sprint snapshot is stale; refresh the board export."
+    )
+    return _sprint_data_result(
+        status,
+        message=message,
+        age_seconds=age_seconds,
+        size_bytes=size_bytes,
+        snapshot=snapshot,
+    )
+
+
+def _attach_sprint_data_overlay(
+    snapshot: dict[str, Any],
+    *,
+    board: str,
+    now: int,
+) -> dict[str, Any]:
+    """Attach optional canonical data while preserving the SQLite projection."""
+    snapshot["board"] = board
+    snapshot["data_spine"] = _load_sprint_data_overlay(board, now=now)
+    return snapshot
 
 
 def _extract_reference_paths(*values: Any) -> list[dict[str, str]]:
@@ -630,6 +831,15 @@ def _build_sprint_snapshot(
 
     return {
         "generated_at": now,
+        "source": {
+            "kind": "board_projection",
+            "system": "sqlite",
+            "rocks_mode": "inferred_from_open_parent_and_priority_cards",
+            "description": (
+                "Native board execution projection; canonical sprint and rock "
+                "records are supplied separately by data_spine."
+            ),
+        },
         "window": {"days": days, "start": start, "end": now},
         "status_counts": status_counts,
         "scorecard": {
@@ -679,11 +889,17 @@ def get_sprint_snapshot(
                 "SELECT parent_id, child_id FROM task_links"
             ).fetchall()
         ]
-        return _build_sprint_snapshot(
+        snapshot = _build_sprint_snapshot(
             task_rows,
             link_rows,
             now=int(time.time()),
             days=days,
+        )
+        selected_board = board or kanban_db.get_current_board()
+        return _attach_sprint_data_overlay(
+            snapshot,
+            board=selected_board,
+            now=snapshot["generated_at"],
         )
     finally:
         conn.close()
