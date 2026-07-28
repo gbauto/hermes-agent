@@ -2831,6 +2831,7 @@ def get_all_boards(
                 board=slug,
                 workflow_template_id=None,
                 current_step_key=None,
+                compact=False,
             )
         counts: dict[str, int] = {}
         for column in payload["columns"]:

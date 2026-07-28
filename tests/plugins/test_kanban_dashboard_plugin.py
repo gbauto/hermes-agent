@@ -211,21 +211,16 @@ def test_dashboard_select_filters_use_sdk_value_change_handler():
     assert "selectChangeHandler(props.setAssigneeFilter)" in js
 
 
-def test_dashboard_client_side_filtering_includes_tenant_filter():
-    """The rendered board must also filter by tenant.
-
-    The API request includes ``?tenant=...``, but the dashboard also filters the
-    locally cached board for search/assignee changes. Without checking
-    ``tenantFilter`` here, switching tenants can leave stale cards visible until a
-    full reload finishes.
-    """
+def test_dashboard_filters_tenant_and_assignee_server_side():
+    """Large-board facets belong in the bounded API request, not a local scan."""
 
     repo_root = Path(__file__).resolve().parents[2]
     bundle = repo_root / "plugins" / "kanban" / "dashboard" / "dist" / "index.js"
     js = bundle.read_text()
 
-    assert "if (tenantFilter && t.tenant !== tenantFilter) return false;" in js
-    assert "[boardData, tenantFilter, assigneeFilter, search]" in js
+    assert 'if (tenantFilter) qs.set("tenant", tenantFilter);' in js
+    assert 'if (assigneeFilter) qs.set("assignee", assigneeFilter);' in js
+    assert "const filteredBoard = boardData;" in js
 
 
 def test_dashboard_initial_board_uses_backend_current_when_unpinned():
@@ -2213,15 +2208,15 @@ def test_dashboard_requests_default_board_explicitly():
     assert "}, [loadBoardList, switchBoard, board]);" in dist
 
 
-def test_dashboard_search_includes_body_and_result():
-    """Client-side search must match body, result, latest_summary, and summary
-    so full card contents are findable."""
+def test_dashboard_search_is_debounced_and_server_side():
+    """Search must avoid rebuilding a full-card haystack on every keypress."""
     repo_root = Path(__file__).resolve().parents[2]
     dist = (repo_root / "plugins" / "kanban" / "dashboard" / "dist" / "index.js").read_text()
 
-    assert "t.body || \"\"" in dist
-    assert "t.result || \"\"" in dist
-    assert "t.latest_summary || \"\"" in dist
+    assert 'if (debouncedSearch) qs.set("q", debouncedSearch);' in dist
+    assert "setTimeout(function ()" in dist
+    assert "}, 350);" in dist
+    assert "const filteredBoard = boardData;" in dist
 
 
 def test_dashboard_bulk_actions_include_reclaim_first():
