@@ -10,6 +10,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import os
+import sqlite3
 import sys
 import time
 from pathlib import Path
@@ -19,6 +20,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from hermes_cli import kanban_db as kb
+from plugins.kanban.dashboard import inbox_store
 
 
 # ---------------------------------------------------------------------------
@@ -2639,6 +2641,60 @@ def test_squash_board_into_swipe_cards_preserves_source_snapshot(
     assert events[0]["target_type"] == "swipe"
     assert events[0]["items_created"] == 1
     assert events[0]["decisions_created"] == 0
+
+
+def test_inbox_store_migrates_legacy_squash_receipts(kanban_home):
+    path = kanban_home / "inbox" / "inbox.db"
+    path.parent.mkdir(parents=True)
+    legacy = sqlite3.connect(path)
+    legacy.execute(
+        """
+        CREATE TABLE board_squash_events (
+            id TEXT PRIMARY KEY,
+            board_slug TEXT NOT NULL,
+            board_name TEXT,
+            status TEXT NOT NULL,
+            archive_path TEXT,
+            task_total INTEGER NOT NULL DEFAULT 0,
+            outstanding_total INTEGER NOT NULL DEFAULT 0,
+            decisions_created INTEGER NOT NULL DEFAULT 0,
+            board_snapshot_json TEXT NOT NULL DEFAULT '{}',
+            error TEXT,
+            created_at INTEGER NOT NULL,
+            completed_at INTEGER
+        )
+        """
+    )
+    legacy.execute(
+        """
+        INSERT INTO board_squash_events (
+            id, board_slug, status, decisions_created,
+            board_snapshot_json, created_at
+        ) VALUES ('sq_legacy', 'legacy-board', 'completed', 2, '{}', 1)
+        """
+    )
+    legacy.commit()
+    legacy.close()
+
+    migrated = inbox_store.connect(path)
+    try:
+        columns = {
+            row["name"]
+            for row in migrated.execute(
+                "PRAGMA table_info(board_squash_events)"
+            ).fetchall()
+        }
+        row = migrated.execute(
+            "SELECT target_type, items_created, decisions_created "
+            "FROM board_squash_events WHERE id = 'sq_legacy'"
+        ).fetchone()
+    finally:
+        migrated.close()
+
+    assert {"target_type", "items_created"} <= columns
+    assert row["target_type"] == "decisions"
+    assert row["items_created"] == 2
+    assert row["decisions_created"] == 2
 
 
 def test_age_based_swipe_squash_previews_exclusions_and_requires_exact_set(
