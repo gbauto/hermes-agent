@@ -13021,7 +13021,11 @@ def mount_spa(application: FastAPI):
                 css = css.replace(f"url({asset_dir}", f"url({prefix}{asset_dir}")
                 css = css.replace(f"url(\"{asset_dir}", f"url(\"{prefix}{asset_dir}")
                 css = css.replace(f"url('{asset_dir}", f"url('{prefix}{asset_dir}")
-        return Response(content=css, media_type="text/css")
+        return Response(
+            content=css,
+            media_type="text/css",
+            headers={"Cache-Control": "public, max-age=31536000, immutable"},
+        )
 
     application.mount(
         "/assets",
@@ -13051,7 +13055,10 @@ def mount_spa(application: FastAPI):
             and file_path.exists()
             and file_path.is_file()
         ):
-            return FileResponse(file_path)
+            return FileResponse(
+                file_path,
+                headers={"Cache-Control": "public, max-age=3600, must-revalidate"},
+            )
         return _serve_index(prefix)
 
 
