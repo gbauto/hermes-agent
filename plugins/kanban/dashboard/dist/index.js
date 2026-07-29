@@ -1140,15 +1140,19 @@
       });
     }, [board, loadBoardList, switchBoard]);
 
-    const squashBoard = useCallback(function (slug) {
+    const squashBoard = useCallback(function (slug, target) {
       if (!slug || slug === "default" || slug === ALL_BOARDS) return Promise.resolve();
+      const normalizedTarget = target === "swipe" ? "swipe" : "decisions";
       return SDK.fetchJSON(`${API}/boards/${encodeURIComponent(slug)}/squash`, {
         method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ target: normalizedTarget }),
       }).then(function (result) {
-        const created = result && result.decisions_created || 0;
+        const created = result && result.items_created || 0;
+        const label = normalizedTarget === "swipe" ? "swipe card" : "decision";
         window.alert(
           `Board archived. ${created} unresolved item${created === 1 ? "" : "s"} ` +
-          `added to the daily Inbox as decision${created === 1 ? "" : "s"}.`
+          `added to the daily Inbox as ${label}${created === 1 ? "" : "s"}.`
         );
         loadBoardList();
         if (board === slug) switchBoard(ALL_BOARDS);
@@ -1158,6 +1162,72 @@
         throw e;
       });
     }, [board, loadBoardList, switchBoard]);
+
+    const squashEligibleBoards = useCallback(function () {
+      const olderThanDays = 3;
+      return SDK.fetchJSON(
+        `${API}/boards/squash-candidates?older_than_days=${olderThanDays}`
+      ).then(function (preview) {
+        const candidates = preview && preview.candidates || [];
+        if (!candidates.length) {
+          window.alert(
+            "No boards older than 3 days are eligible. Default and agent-expert boards stay excluded."
+          );
+          return null;
+        }
+        const recentCount = preview.counts && preview.counts.recently_active || 0;
+        const outstanding = preview.counts && preview.counts.outstanding_tasks || 0;
+        const previewLines = candidates.slice(0, 20).map(function (candidate) {
+          const age = candidate.age_days == null ? "age unknown" : `${candidate.age_days}d old`;
+          const inactive = candidate.inactive_days == null
+            ? "no activity"
+            : `${candidate.inactive_days}d inactive`;
+          return `- ${candidate.name || candidate.slug} (${age}, ${inactive}, ${candidate.outstanding_total || 0} open)`;
+        });
+        if (candidates.length > previewLines.length) {
+          previewLines.push(`- and ${candidates.length - previewLines.length} more`);
+        }
+        const phrase = `SQUASH ${candidates.length} BOARDS`;
+        const warning = recentCount
+          ? `\n\nWarning: ${recentCount} eligible board${recentCount === 1 ? " was" : "s were"} active within the last 3 days.`
+          : "";
+        const typed = window.prompt(
+          `Prepare ${candidates.length} board${candidates.length === 1 ? "" : "s"} as Swipe Cards?\n\n` +
+          `${outstanding} unresolved task${outstanding === 1 ? "" : "s"} will become Swipe Deck cards. ` +
+          "Each source board will be snapshotted and moved to _archived. " +
+          "Default and agent-expert boards are excluded.\n\n" +
+          previewLines.join("\n") +
+          warning +
+          `\n\nType ${phrase} to continue.`,
+          ""
+        );
+        if (typed !== phrase) return null;
+        return SDK.fetchJSON(`${API}/boards/squash-eligible`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            target: "swipe",
+            older_than_days: olderThanDays,
+            confirm_slugs: preview.candidate_slugs,
+            confirmation: "squash-to-swipe-cards",
+          }),
+        });
+      }).then(function (result) {
+        if (!result) return result;
+        const errors = result.errors || [];
+        window.alert(
+          `${result.boards_squashed || 0} board${result.boards_squashed === 1 ? "" : "s"} archived; ` +
+          `${result.swipe_cards_created || 0} Swipe Deck card${result.swipe_cards_created === 1 ? "" : "s"} created.` +
+          (errors.length ? ` ${errors.length} board${errors.length === 1 ? "" : "s"} failed; review the dashboard log.` : "")
+        );
+        loadBoardList();
+        switchBoard(ALL_BOARDS);
+        return result;
+      }).catch(function (e) {
+        setError("Bulk swipe squash failed: " + parseApiErrorMessage(e));
+        throw e;
+      });
+    }, [loadBoardList, switchBoard]);
 
    const deleteTask = useCallback(function (taskId) {
      if (!window.confirm(tx(t, "trash.confirm", FALLBACK_TRASH.confirm))) return Promise.resolve();
@@ -1214,6 +1284,7 @@
           onNewClick: function () { setShowNewBoard(true); },
           onDeleteBoard: deleteBoard,
           onSquashBoard: squashBoard,
+          onSquashEligibleBoards: squashEligibleBoards,
         }),
         showNewBoard ? h(NewBoardDialog, {
           onCancel: function () { setShowNewBoard(false); },
@@ -2405,6 +2476,7 @@
     const currentName = props.board === ALL_BOARDS
       ? "All boards"
       : (current && current.name ? current.name : props.board);
+    const currentIsAgentExpert = !!(current && current.is_agent_expert);
     const currentTotal = props.board === ALL_BOARDS
       ? totalAcrossAllBoards
       : (current ? current.total : 0);
@@ -2442,6 +2514,14 @@
           className: "h-8",
           title: "Create a new board. Useful when you want an unrelated work stream (different project, different team, isolated scratch area).",
         }, tx(t, "newBoard", "+ New board")),
+        props.board === ALL_BOARDS
+          ? h(Button, {
+            onClick: props.onSquashEligibleBoards,
+            size: "sm",
+            className: "h-8 hermes-kanban-squash-button",
+            title: "Preview and explicitly confirm all 3d+ boards before archiving them into Swipe Deck cards",
+          }, "Prepare 3d+ Boards as Swipe Cards")
+          : null,
         props.board !== "default" && props.board !== ALL_BOARDS
           ? h(Button, {
             onClick: function () {
@@ -2449,12 +2529,26 @@
                 `Squash board '${currentName}' into Decisions?\n\n` +
                 "Hermes will snapshot and archive the board, then turn every " +
                 "unresolved task into a question in the daily Inbox.";
-              if (window.confirm(msg)) props.onSquashBoard(props.board);
+              if (window.confirm(msg)) props.onSquashBoard(props.board, "decisions");
             },
             size: "sm",
             className: "h-8 hermes-kanban-squash-button",
             title: "Snapshot and archive this board, then move unresolved work to Inbox decisions",
           }, "Squash Board into Decisions")
+          : null,
+        props.board !== "default" && props.board !== ALL_BOARDS && !currentIsAgentExpert
+          ? h(Button, {
+            onClick: function () {
+              const msg =
+                `Squash board '${currentName}' into Swipe Cards?\n\n` +
+                "Hermes will snapshot and archive the board, then turn every " +
+                "unresolved task into a Swipe Deck card.";
+              if (window.confirm(msg)) props.onSquashBoard(props.board, "swipe");
+            },
+            size: "sm",
+            className: "h-8 hermes-kanban-squash-button",
+            title: "Snapshot and archive this board, then move unresolved work to Inbox Swipe Cards",
+          }, "Squash Board into Swipe Cards")
           : null,
         props.board !== "default" && props.board !== ALL_BOARDS
           ? h(Button, {

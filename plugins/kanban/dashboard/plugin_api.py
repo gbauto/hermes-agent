@@ -2760,6 +2760,17 @@ class RenameBoardBody(BaseModel):
     color: Optional[str] = None
 
 
+class SquashBoardBody(BaseModel):
+    target: str = "decisions"
+
+
+class SquashEligibleBoardsBody(BaseModel):
+    target: str = "swipe"
+    older_than_days: float = Field(default=3, gt=0, le=3650)
+    confirm_slugs: list[str] = Field(default_factory=list)
+    confirmation: str = ""
+
+
 class InboxItemBody(BaseModel):
     item_type: str = "decision"
     title: str
@@ -2803,6 +2814,195 @@ def _board_counts(slug: str) -> dict[str, int]:
         return {}
 
 
+_SQUASH_TARGET_ITEM_TYPES = {
+    "decisions": "decision",
+    "swipe": "swipe",
+}
+_AGENT_EXPERT_PATTERN = re.compile(
+    r"(?<![a-z0-9])agent[\s_-]+experts?(?![a-z0-9])",
+    re.IGNORECASE,
+)
+
+
+def _normalize_squash_target(target: Optional[str]) -> str:
+    normalized = str(target or "decisions").strip().lower()
+    if normalized not in _SQUASH_TARGET_ITEM_TYPES:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"unsupported squash target {normalized!r}; "
+                f"expected one of {sorted(_SQUASH_TARGET_ITEM_TYPES)}"
+            ),
+        )
+    return normalized
+
+
+def _is_agent_expert_board(meta: dict[str, Any]) -> bool:
+    """Return whether a board is reserved for an agent-expert workflow."""
+
+    for key in ("kind", "board_type", "workflow_type"):
+        value = str(meta.get(key) or "").strip().lower().replace("-", "_")
+        if value in {"agent_expert", "agent_experts"}:
+            return True
+
+    raw_tags = meta.get("tags") or []
+    tags = (
+        [part.strip() for part in raw_tags.split(",")]
+        if isinstance(raw_tags, str)
+        else list(raw_tags) if isinstance(raw_tags, (list, tuple, set)) else []
+    )
+    if any(
+        str(tag).strip().lower().replace("-", "_")
+        in {"agent_expert", "agent_experts"}
+        for tag in tags
+    ):
+        return True
+
+    searchable = " ".join(
+        str(meta.get(key) or "")
+        for key in ("slug", "name", "description")
+    )
+    return bool(_AGENT_EXPERT_PATTERN.search(searchable))
+
+
+def _board_squash_candidate(
+    meta: dict[str, Any],
+    *,
+    older_than_days: float,
+    now: int,
+) -> dict[str, Any]:
+    """Build one non-mutating board-age and activity preview row."""
+
+    slug = str(meta["slug"])
+    counts: dict[str, int] = {}
+    task_created_at = 0
+    activity_at = 0
+    error: Optional[str] = None
+    try:
+        board_conn = kanban_db.connect(board=slug)
+        try:
+            count_rows = board_conn.execute(
+                "SELECT status, COUNT(*) AS n FROM tasks GROUP BY status"
+            ).fetchall()
+            counts = {str(row["status"]): int(row["n"]) for row in count_rows}
+            task_row = board_conn.execute(
+                """
+                SELECT MIN(created_at) AS first_created_at,
+                       MAX(created_at) AS last_created_at,
+                       MAX(started_at) AS last_started_at,
+                       MAX(completed_at) AS last_completed_at
+                FROM tasks
+                """
+            ).fetchone()
+            task_created_at = _epoch(task_row["first_created_at"])
+            activity_candidates = [
+                _epoch(task_row["last_created_at"]),
+                _epoch(task_row["last_started_at"]),
+                _epoch(task_row["last_completed_at"]),
+            ]
+            for table in ("task_events", "task_comments"):
+                row = board_conn.execute(
+                    f"SELECT MAX(created_at) AS ts FROM {table}"
+                ).fetchone()
+                activity_candidates.append(_epoch(row["ts"]))
+            activity_at = max(activity_candidates)
+        finally:
+            board_conn.close()
+    except Exception as exc:
+        log.warning("board squash preview skipped stats for %s: %s", slug, exc)
+        error = str(exc)
+
+    created_at = _epoch(meta.get("created_at")) or task_created_at
+    age_days = (
+        round(max(0, now - created_at) / 86400, 1)
+        if created_at
+        else None
+    )
+    inactive_days = (
+        round(max(0, now - activity_at) / 86400, 1)
+        if activity_at
+        else None
+    )
+    cutoff = now - int(float(older_than_days) * 86400)
+    is_expert = _is_agent_expert_board(meta)
+    exclusion_reason: Optional[str] = None
+    if slug == kanban_db.DEFAULT_BOARD:
+        exclusion_reason = "default_board"
+    elif is_expert:
+        exclusion_reason = "agent_expert_board"
+    elif not created_at:
+        exclusion_reason = "unknown_board_age"
+    elif created_at > cutoff:
+        exclusion_reason = "newer_than_cutoff"
+
+    outstanding_total = sum(
+        count
+        for status_name, count in counts.items()
+        if status_name not in {"done", "archived"}
+    )
+    return {
+        "slug": slug,
+        "name": meta.get("name") or slug,
+        "description": meta.get("description") or "",
+        "created_at": created_at or None,
+        "age_days": age_days,
+        "last_activity_at": activity_at or None,
+        "inactive_days": inactive_days,
+        "active_within_cutoff": bool(activity_at and activity_at > cutoff),
+        "counts": counts,
+        "task_total": sum(counts.values()),
+        "outstanding_total": outstanding_total,
+        "is_agent_expert": is_expert,
+        "eligible": exclusion_reason is None,
+        "exclusion_reason": exclusion_reason,
+        "error": error,
+    }
+
+
+def _get_squash_candidates(
+    *,
+    older_than_days: float,
+    now: Optional[int] = None,
+) -> dict[str, Any]:
+    generated_at = int(now or time.time())
+    rows = [
+        _board_squash_candidate(
+            dict(meta),
+            older_than_days=older_than_days,
+            now=generated_at,
+        )
+        for meta in kanban_db.list_boards(include_archived=False)
+    ]
+    candidates = [row for row in rows if row["eligible"]]
+    candidates.sort(
+        key=lambda row: (
+            int(row.get("created_at") or 0),
+            str(row["slug"]),
+        )
+    )
+    excluded = [row for row in rows if not row["eligible"]]
+    return {
+        "generated_at": generated_at,
+        "older_than_days": float(older_than_days),
+        "cutoff_at": generated_at - int(float(older_than_days) * 86400),
+        "target": "swipe",
+        "candidates": candidates,
+        "candidate_slugs": [row["slug"] for row in candidates],
+        "excluded": excluded,
+        "counts": {
+            "boards_scanned": len(rows),
+            "eligible": len(candidates),
+            "excluded": len(excluded),
+            "recently_active": sum(
+                1 for row in candidates if row["active_within_cutoff"]
+            ),
+            "outstanding_tasks": sum(
+                int(row["outstanding_total"]) for row in candidates
+            ),
+        },
+    }
+
+
 @router.get("/boards")
 def list_boards(include_archived: bool = Query(False)):
     """Return every board on disk with task counts and the active slug."""
@@ -2810,9 +3010,19 @@ def list_boards(include_archived: bool = Query(False)):
     current = kanban_db.get_current_board()
     for b in boards:
         b["is_current"] = (b["slug"] == current)
+        b["is_agent_expert"] = _is_agent_expert_board(b)
         b["counts"] = _board_counts(b["slug"])
         b["total"] = sum(b["counts"].values())
     return {"boards": boards, "current": current}
+
+
+@router.get("/boards/squash-candidates")
+def get_board_squash_candidates(
+    older_than_days: float = Query(3, gt=0, le=3650),
+):
+    """Preview boards eligible for a swipe-card squash without mutating."""
+
+    return _get_squash_candidates(older_than_days=older_than_days)
 
 
 @router.get("/boards/all")
@@ -3143,15 +3353,19 @@ def delete_board(slug: str, delete: bool = Query(False, description="Hard-delete
     return {"result": res, "current": kanban_db.get_current_board()}
 
 
-@router.post("/boards/{slug}/squash")
-def squash_board_into_decisions(slug: str):
-    """Snapshot and archive a board, promoting unresolved work to Inbox.
+def _squash_board(
+    slug: str,
+    *,
+    target: str,
+) -> dict[str, Any]:
+    """Snapshot and archive one board into the selected Inbox card type.
 
-    The operation intentionally creates the durable Inbox decisions before
+    The operation intentionally creates the durable Inbox items before
     moving the board directory. If the archive move fails, the event receipt
     is marked failed and no task data has been destroyed.
     """
 
+    target = _normalize_squash_target(target)
     try:
         normed = kanban_db._normalize_board_slug(slug)
     except ValueError as exc:
@@ -3169,9 +3383,15 @@ def squash_board_into_decisions(slug: str):
             detail=f"board {normed!r} does not exist",
         )
 
+    meta = kanban_db.read_board_metadata(normed)
+    if target == "swipe" and _is_agent_expert_board(meta):
+        raise HTTPException(
+            status_code=400,
+            detail="agent-expert boards are excluded from swipe-card squash",
+        )
+
     board_conn = kanban_db.connect(board=normed)
     try:
-        meta = kanban_db.read_board_metadata(normed)
         tasks = kanban_db.list_tasks(board_conn, include_archived=True)
         task_rows = [asdict(task) for task in tasks]
         outstanding = [
@@ -3180,7 +3400,8 @@ def squash_board_into_decisions(slug: str):
             if task.get("status") not in {"done", "archived"}
         ]
         snapshot = {
-            "schema_version": "hermes-board-squash.v1",
+            "schema_version": "hermes-board-squash.v2",
+            "target": target,
             "board": meta,
             "tasks": task_rows,
             "captured_at": int(time.time()),
@@ -3193,30 +3414,55 @@ def squash_board_into_decisions(slug: str):
         inbox_conn,
         board_slug=normed,
         board_name=meta.get("name"),
+        target_type=target,
         task_total=len(task_rows),
         outstanding_total=len(outstanding),
         board_snapshot=snapshot,
     )
-    decisions = [
+    item_type = _SQUASH_TARGET_ITEM_TYPES[target]
+    choices = (
+        [
+            {"value": "archive", "label": "Archive"},
+            {
+                "value": "snooze_until_tomorrow",
+                "label": "Tomorrow",
+            },
+            {"value": "go", "label": "Go"},
+        ]
+        if target == "swipe"
+        else [
+            {"value": "go", "label": "Move forward"},
+            {"value": "delegate", "label": "Delegate"},
+            {"value": "hold", "label": "Keep for later"},
+            {"value": "archive", "label": "Archive"},
+        ]
+    )
+    items = [
         {
-            "item_type": "decision",
+            "item_type": item_type,
             "title": task.get("title") or task["id"],
             "prompt": (
-                f"What should happen next with this unresolved "
-                f"{meta.get('name') or normed} item?"
+                (
+                    "Swipe to choose the next disposition for this unresolved "
+                    f"{meta.get('name') or normed} item."
+                )
+                if target == "swipe"
+                else (
+                    "What should happen next with this unresolved "
+                    f"{meta.get('name') or normed} item?"
+                )
             ),
             "detail": task.get("body") or task.get("result"),
-            "choices": [
-                {"value": "go", "label": "Move forward"},
-                {"value": "delegate", "label": "Delegate"},
-                {"value": "hold", "label": "Keep for later"},
-                {"value": "archive", "label": "Archive"},
-            ],
+            "choices": choices,
             "source_type": "board_squash",
             "source_ref": event_id,
             "source_board": normed,
             "source_task_id": task["id"],
-            "source_snapshot": task,
+            "source_snapshot": {
+                **task,
+                "squash_target": target,
+                "squash_event_id": event_id,
+            },
             "priority": int(task.get("priority") or 0),
             "assignee": task.get("assignee"),
             "recipient": "greg",
@@ -3224,25 +3470,28 @@ def squash_board_into_decisions(slug: str):
         for task in outstanding
     ]
 
-    decisions_created = 0
+    items_created = 0
     try:
-        result = inbox_store.upsert_items(inbox_conn, decisions)
-        decisions_created = int(result["created"])
+        result = inbox_store.upsert_items(inbox_conn, items)
+        items_created = int(result["created"])
         archive = kanban_db.remove_board(normed, archive=True)
         archive_path = archive.get("new_path")
         inbox_store.finish_squash_event(
             inbox_conn,
             event_id,
             status="completed",
-            decisions_created=decisions_created,
+            items_created=items_created,
             archive_path=archive_path,
         )
         return {
             "event_id": event_id,
             "board": normed,
+            "target": target,
             "task_total": len(task_rows),
             "outstanding_total": len(outstanding),
-            "decisions_created": decisions_created,
+            "items_created": items_created,
+            "decisions_created": items_created if target == "decisions" else 0,
+            "swipe_cards_created": items_created if target == "swipe" else 0,
             "archive": archive,
         }
     except Exception as exc:
@@ -3251,7 +3500,7 @@ def squash_board_into_decisions(slug: str):
             inbox_conn,
             event_id,
             status="failed",
-            decisions_created=decisions_created,
+            items_created=items_created,
             error=str(exc),
         )
         raise HTTPException(
@@ -3260,6 +3509,97 @@ def squash_board_into_decisions(slug: str):
         )
     finally:
         inbox_conn.close()
+
+
+@router.post("/boards/squash-eligible")
+def squash_eligible_boards(payload: SquashEligibleBoardsBody):
+    """Squash the exact confirmed 3d+ candidate set into swipe cards."""
+
+    target = _normalize_squash_target(payload.target)
+    if target != "swipe":
+        raise HTTPException(
+            status_code=400,
+            detail="bulk age-based squash supports only the swipe target",
+        )
+    if payload.confirmation != "squash-to-swipe-cards":
+        raise HTTPException(
+            status_code=400,
+            detail="explicit swipe-card squash confirmation is required",
+        )
+
+    preview = _get_squash_candidates(
+        older_than_days=payload.older_than_days,
+    )
+    expected_slugs = preview["candidate_slugs"]
+    try:
+        confirmed_slugs = [
+            kanban_db._normalize_board_slug(slug)
+            for slug in payload.confirm_slugs
+        ]
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    if any(not slug for slug in confirmed_slugs):
+        raise HTTPException(status_code=400, detail="board slug is required")
+    if len(set(confirmed_slugs)) != len(confirmed_slugs):
+        raise HTTPException(
+            status_code=400,
+            detail="confirm_slugs must not contain duplicates",
+        )
+    if confirmed_slugs != expected_slugs:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "message": (
+                    "eligible boards changed; refresh the preview and "
+                    "confirm the exact current slug list"
+                ),
+                "expected_slugs": expected_slugs,
+                "confirmed_slugs": confirmed_slugs,
+            },
+        )
+
+    results: list[dict[str, Any]] = []
+    errors: list[dict[str, Any]] = []
+    for board_slug in expected_slugs:
+        try:
+            results.append(_squash_board(board_slug, target=target))
+        except HTTPException as exc:
+            errors.append(
+                {
+                    "board": board_slug,
+                    "status_code": exc.status_code,
+                    "error": exc.detail,
+                }
+            )
+        except Exception as exc:
+            log.exception("Bulk swipe squash failed for %s", board_slug)
+            errors.append({"board": board_slug, "error": str(exc)})
+
+    return {
+        "status": "completed" if not errors else "partial",
+        "target": target,
+        "older_than_days": float(payload.older_than_days),
+        "boards_requested": len(expected_slugs),
+        "boards_squashed": len(results),
+        "swipe_cards_created": sum(
+            int(result["swipe_cards_created"]) for result in results
+        ),
+        "results": results,
+        "errors": errors,
+    }
+
+
+@router.post("/boards/{slug}/squash")
+def squash_board_into_inbox(
+    slug: str,
+    payload: Optional[SquashBoardBody] = None,
+):
+    """Squash one board into Decisions (default) or Swipe Cards."""
+
+    target = _normalize_squash_target(
+        payload.target if payload is not None else "decisions"
+    )
+    return _squash_board(slug, target=target)
 
 
 @router.post("/boards/{slug}/switch")

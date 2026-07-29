@@ -119,10 +119,12 @@ def connect(path: Optional[Path] = None) -> sqlite3.Connection:
             id TEXT PRIMARY KEY,
             board_slug TEXT NOT NULL,
             board_name TEXT,
+            target_type TEXT NOT NULL DEFAULT 'decisions',
             status TEXT NOT NULL,
             archive_path TEXT,
             task_total INTEGER NOT NULL DEFAULT 0,
             outstanding_total INTEGER NOT NULL DEFAULT 0,
+            items_created INTEGER NOT NULL DEFAULT 0,
             decisions_created INTEGER NOT NULL DEFAULT 0,
             board_snapshot_json TEXT NOT NULL DEFAULT '{}',
             error TEXT,
@@ -134,6 +136,26 @@ def connect(path: Optional[Path] = None) -> sqlite3.Connection:
             ON board_squash_events(board_slug, created_at DESC);
         """
     )
+    squash_columns = {
+        str(row["name"])
+        for row in conn.execute(
+            "PRAGMA table_info(board_squash_events)"
+        ).fetchall()
+    }
+    if "target_type" not in squash_columns:
+        conn.execute(
+            "ALTER TABLE board_squash_events "
+            "ADD COLUMN target_type TEXT NOT NULL DEFAULT 'decisions'"
+        )
+    if "items_created" not in squash_columns:
+        conn.execute(
+            "ALTER TABLE board_squash_events "
+            "ADD COLUMN items_created INTEGER NOT NULL DEFAULT 0"
+        )
+        conn.execute(
+            "UPDATE board_squash_events "
+            "SET items_created = decisions_created"
+        )
     conn.commit()
     return conn
 
@@ -417,6 +439,7 @@ def create_squash_event(
     *,
     board_slug: str,
     board_name: Optional[str],
+    target_type: str,
     task_total: int,
     outstanding_total: int,
     board_snapshot: Mapping[str, Any],
@@ -427,14 +450,15 @@ def create_squash_event(
         conn.execute(
             """
             INSERT INTO board_squash_events (
-                id, board_slug, board_name, status, task_total,
+                id, board_slug, board_name, target_type, status, task_total,
                 outstanding_total, board_snapshot_json, created_at
-            ) VALUES (?, ?, ?, 'preparing', ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, 'preparing', ?, ?, ?, ?)
             """,
             (
                 event_id,
                 board_slug,
                 board_name,
+                target_type,
                 int(task_total),
                 int(outstanding_total),
                 _json(dict(board_snapshot), {}),
@@ -449,7 +473,7 @@ def finish_squash_event(
     event_id: str,
     *,
     status: str,
-    decisions_created: int,
+    items_created: int,
     archive_path: Optional[str] = None,
     error: Optional[str] = None,
 ) -> None:
@@ -458,13 +482,17 @@ def finish_squash_event(
         conn.execute(
             """
             UPDATE board_squash_events
-            SET status = ?, decisions_created = ?, archive_path = ?,
-                error = ?, completed_at = ?
+            SET status = ?, items_created = ?,
+                decisions_created = CASE
+                    WHEN target_type = 'decisions' THEN ? ELSE 0
+                END,
+                archive_path = ?, error = ?, completed_at = ?
             WHERE id = ?
             """,
             (
                 status,
-                int(decisions_created),
+                int(items_created),
+                int(items_created),
                 archive_path,
                 error,
                 now,
