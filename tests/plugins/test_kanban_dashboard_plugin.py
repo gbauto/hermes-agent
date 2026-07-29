@@ -8,7 +8,9 @@ REST surface without spinning up the whole dashboard.
 from __future__ import annotations
 
 import importlib.util
+import json
 import os
+import sqlite3
 import sys
 import time
 from pathlib import Path
@@ -18,6 +20,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from hermes_cli import kanban_db as kb
+from plugins.kanban.dashboard import inbox_store
 
 
 # ---------------------------------------------------------------------------
@@ -2569,7 +2572,10 @@ def test_squash_board_snapshots_archives_and_creates_decisions(
     result = response.json()
     assert result["task_total"] == 2
     assert result["outstanding_total"] == 1
+    assert result["target"] == "decisions"
+    assert result["items_created"] == 1
     assert result["decisions_created"] == 1
+    assert result["swipe_cards_created"] == 0
     assert not kb.board_exists("finished-sprint")
     assert Path(result["archive"]["new_path"]).is_dir()
     assert str(kanban_home) in result["archive"]["new_path"]
@@ -2583,7 +2589,211 @@ def test_squash_board_snapshots_archives_and_creates_decisions(
 
     events = client.get("/api/plugins/kanban/inbox/squashes").json()["events"]
     assert events[0]["status"] == "completed"
+    assert events[0]["target_type"] == "decisions"
+    assert events[0]["items_created"] == 1
     assert len(events[0]["board_snapshot"]["tasks"]) == 2
+
+
+def test_squash_board_into_swipe_cards_preserves_source_snapshot(
+    client, kanban_home,
+):
+    created = client.post(
+        "/api/plugins/kanban/boards",
+        json={"slug": "review-later", "name": "Review Later"},
+    )
+    assert created.status_code == 200
+    task = client.post(
+        "/api/plugins/kanban/tasks?board=review-later",
+        json={
+            "title": "Choose the next experiment",
+            "body": "Compare the two validated paths.",
+            "assignee": "ops",
+            "priority": 90,
+        },
+    ).json()["task"]
+
+    response = client.post(
+        "/api/plugins/kanban/boards/review-later/squash",
+        json={"target": "swipe"},
+    )
+    assert response.status_code == 200, response.text
+    result = response.json()
+    assert result["target"] == "swipe"
+    assert result["items_created"] == 1
+    assert result["decisions_created"] == 0
+    assert result["swipe_cards_created"] == 1
+    assert not kb.board_exists("review-later")
+
+    inbox = client.get(
+        "/api/plugins/kanban/inbox?status=pending&item_type=swipe"
+    ).json()["items"]
+    assert len(inbox) == 1
+    assert inbox[0]["source_board"] == "review-later"
+    assert inbox[0]["source_task_id"] == task["id"]
+    assert inbox[0]["source_snapshot"]["squash_target"] == "swipe"
+    assert [choice["value"] for choice in inbox[0]["choices"]] == [
+        "archive",
+        "snooze_until_tomorrow",
+        "go",
+    ]
+
+    events = client.get("/api/plugins/kanban/inbox/squashes").json()["events"]
+    assert events[0]["target_type"] == "swipe"
+    assert events[0]["items_created"] == 1
+    assert events[0]["decisions_created"] == 0
+
+
+def test_inbox_store_migrates_legacy_squash_receipts(kanban_home):
+    path = kanban_home / "inbox" / "inbox.db"
+    path.parent.mkdir(parents=True)
+    legacy = sqlite3.connect(path)
+    legacy.execute(
+        """
+        CREATE TABLE board_squash_events (
+            id TEXT PRIMARY KEY,
+            board_slug TEXT NOT NULL,
+            board_name TEXT,
+            status TEXT NOT NULL,
+            archive_path TEXT,
+            task_total INTEGER NOT NULL DEFAULT 0,
+            outstanding_total INTEGER NOT NULL DEFAULT 0,
+            decisions_created INTEGER NOT NULL DEFAULT 0,
+            board_snapshot_json TEXT NOT NULL DEFAULT '{}',
+            error TEXT,
+            created_at INTEGER NOT NULL,
+            completed_at INTEGER
+        )
+        """
+    )
+    legacy.execute(
+        """
+        INSERT INTO board_squash_events (
+            id, board_slug, status, decisions_created,
+            board_snapshot_json, created_at
+        ) VALUES ('sq_legacy', 'legacy-board', 'completed', 2, '{}', 1)
+        """
+    )
+    legacy.commit()
+    legacy.close()
+
+    migrated = inbox_store.connect(path)
+    try:
+        columns = {
+            row["name"]
+            for row in migrated.execute(
+                "PRAGMA table_info(board_squash_events)"
+            ).fetchall()
+        }
+        row = migrated.execute(
+            "SELECT target_type, items_created, decisions_created "
+            "FROM board_squash_events WHERE id = 'sq_legacy'"
+        ).fetchone()
+    finally:
+        migrated.close()
+
+    assert {"target_type", "items_created"} <= columns
+    assert row["target_type"] == "decisions"
+    assert row["items_created"] == 2
+    assert row["decisions_created"] == 2
+
+
+def test_age_based_swipe_squash_previews_exclusions_and_requires_exact_set(
+    client,
+):
+    now = int(time.time())
+    for slug, name in (
+        ("old-project", "Old Project"),
+        ("new-project", "New Project"),
+        ("agent-expert-sales", "Agent Expert Sales"),
+    ):
+        created = client.post(
+            "/api/plugins/kanban/boards",
+            json={"slug": slug, "name": name},
+        )
+        assert created.status_code == 200, created.text
+        task = client.post(
+            f"/api/plugins/kanban/tasks?board={slug}",
+            json={"title": f"{name} task", "assignee": "ops"},
+        )
+        assert task.status_code == 200, task.text
+
+    for slug, created_at in (
+        ("old-project", now - 5 * 86400),
+        ("new-project", now - 86400),
+        ("agent-expert-sales", now - 8 * 86400),
+    ):
+        path = kb.board_metadata_path(slug)
+        metadata = json.loads(path.read_text(encoding="utf-8"))
+        metadata["created_at"] = created_at
+        path.write_text(
+            json.dumps(metadata, indent=2) + "\n",
+            encoding="utf-8",
+        )
+
+    preview_response = client.get(
+        "/api/plugins/kanban/boards/squash-candidates"
+        "?older_than_days=3"
+    )
+    assert preview_response.status_code == 200, preview_response.text
+    preview = preview_response.json()
+    assert preview["candidate_slugs"] == ["old-project"]
+    assert preview["counts"]["eligible"] == 1
+    assert preview["counts"]["recently_active"] == 1
+    exclusions = {
+        row["slug"]: row["exclusion_reason"]
+        for row in preview["excluded"]
+    }
+    assert exclusions["default"] == "default_board"
+    assert exclusions["new-project"] == "newer_than_cutoff"
+    assert exclusions["agent-expert-sales"] == "agent_expert_board"
+
+    stale_confirmation = client.post(
+        "/api/plugins/kanban/boards/squash-eligible",
+        json={
+            "target": "swipe",
+            "older_than_days": 3,
+            "confirm_slugs": ["old-project", "new-project"],
+            "confirmation": "squash-to-swipe-cards",
+        },
+    )
+    assert stale_confirmation.status_code == 409
+    assert kb.board_exists("old-project")
+
+    executed = client.post(
+        "/api/plugins/kanban/boards/squash-eligible",
+        json={
+            "target": "swipe",
+            "older_than_days": 3,
+            "confirm_slugs": preview["candidate_slugs"],
+            "confirmation": "squash-to-swipe-cards",
+        },
+    )
+    assert executed.status_code == 200, executed.text
+    result = executed.json()
+    assert result["status"] == "completed"
+    assert result["boards_squashed"] == 1
+    assert result["swipe_cards_created"] == 1
+    assert not kb.board_exists("old-project")
+    assert kb.board_exists("new-project")
+    assert kb.board_exists("agent-expert-sales")
+
+
+def test_agent_expert_board_rejects_direct_swipe_squash(client):
+    created = client.post(
+        "/api/plugins/kanban/boards",
+        json={
+            "slug": "agent-expert-marketing",
+            "name": "Agent Expert Marketing",
+        },
+    )
+    assert created.status_code == 200
+    response = client.post(
+        "/api/plugins/kanban/boards/agent-expert-marketing/squash",
+        json={"target": "swipe"},
+    )
+    assert response.status_code == 400
+    assert "agent-expert" in response.json()["detail"]
+    assert kb.board_exists("agent-expert-marketing")
 
 
 def test_dashboard_exposes_all_boards_and_squash_as_read_only_controls():
@@ -2600,6 +2810,11 @@ def test_dashboard_exposes_all_boards_and_squash_as_read_only_controls():
     assert 'const ALL_BOARDS = "__all__"' in js
     assert "All boards" in js
     assert "Squash Board into Decisions" in js
+    assert "Squash Board into Swipe Cards" in js
+    assert "Prepare 3d+ Boards as Swipe Cards" in js
+    assert "/boards/squash-candidates?older_than_days=" in js
+    assert "/boards/squash-eligible" in js
+    assert "squash-to-swipe-cards" in js
     assert "readOnly: isAllBoards" in js
     assert "hermes-kanban-source-board" in js
     assert "/boards/all/sprint?days=7" in js

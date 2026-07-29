@@ -41,7 +41,12 @@ def test_fs_list_sorts_and_hides_noise(client, tmp_path):
     assert response.status_code == 200
     entries = response.json()["entries"]
     assert [entry["name"] for entry in entries] == ["a_dir", "a.txt", "b.txt"]
-    assert entries[0] == {"name": "a_dir", "path": str(root / "a_dir"), "isDirectory": True}
+    assert entries[0] == {
+        "name": "a_dir",
+        "path": str(root / "a_dir"),
+        "isDirectory": True,
+        "modifiedAt": pytest.approx((root / "a_dir").stat().st_mtime),
+    }
     assert all(entry["name"] not in {".git", "node_modules"} for entry in entries)
 
 
@@ -54,7 +59,12 @@ def test_fs_list_accepts_relative_paths(client, tmp_path, monkeypatch):
 
     assert response.status_code == 200
     assert response.json()["entries"] == [
-        {"name": "file.txt", "path": str(tmp_path / "rel" / "file.txt"), "isDirectory": False}
+        {
+            "name": "file.txt",
+            "path": str(tmp_path / "rel" / "file.txt"),
+            "isDirectory": False,
+            "modifiedAt": pytest.approx((tmp_path / "rel" / "file.txt").stat().st_mtime),
+        }
     ]
 
 
