@@ -147,6 +147,15 @@ Good heartbeats name progress: `"epoch 12/50, loss 0.31"`, `"scanned 1.2M/2.4M r
 
 Bad heartbeats: `"still working"`, empty notes, sub-second intervals. Every few minutes max; skip entirely for tasks under ~2 minutes.
 
+## Startup/readiness failures
+
+Some failures happen before the worker reaches task logic. Treat these as control-plane readiness problems, not normal task failures:
+
+- `host_readiness_failed` with `check: "profile_skill_import"` means the dispatcher used Hermes's profile-scoped skill resolver before spawn/dry-run and found a missing or ambiguous task-forced skill. Fix the profile/skill source or unblock with an explicit replacement skill; don't retry the task unchanged.
+- Missing built-in `kanban-worker` is intentionally non-fatal because `KANBAN_GUIDANCE` in the system prompt carries the lifecycle contract. The dispatcher should omit that preload when absent instead of crashing every worker with `Unknown skill(s): kanban-worker`.
+- Missing or ambiguous task-forced skills remain fatal readiness failures. They should block without incrementing `consecutive_failures` / worker retry budget and should leave a payload listing `requested_skills`, `missing_required_skills`, and `ambiguous_skills`.
+- Dry-run dispatch must exercise the same resolver path as live dispatch. A dry-run that only checks for `SKILL.md` files is insufficient because it misses profile-scoped and duplicate-name resolver behavior.
+
 ## Retry scenarios
 
 If you open the task and `kanban_show` returns `runs: [...]` with one or more closed runs, you're a retry. The prior runs' `outcome` / `summary` / `error` tell you what didn't work. Don't repeat that path. Typical retry diagnostics:
@@ -154,6 +163,7 @@ If you open the task and `kanban_show` returns `runs: [...]` with one or more cl
 - `outcome: "timed_out"` — the previous attempt hit `max_runtime_seconds`. You may need to chunk the work or shorten it.
 - `outcome: "crashed"` — OOM or segfault. Reduce memory footprint.
 - `outcome: "spawn_failed"` + `error: "..."` — usually a profile config issue (missing credential, bad PATH). Ask the human via `kanban_block` instead of retrying blindly.
+- `outcome: "blocked"` + `host_readiness_failed` / `profile_skill_import` metadata — missing or ambiguous preloaded skill was caught before spawn. Fix profile skill availability or task `skills`; retries should not consume worker failure budget.
 - `outcome: "reclaimed"` + `summary: "task archived..."` — operator archived the task out from under the previous run; you probably shouldn't be running at all, check status carefully.
 - `outcome: "blocked"` — a previous attempt blocked; the unblock comment should be in the thread by now.
 
