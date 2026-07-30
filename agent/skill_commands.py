@@ -5,9 +5,11 @@ can invoke skills via /skill-name commands.
 """
 
 import json
+import contextlib
 import logging
 import os
 import re
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -19,6 +21,124 @@ from agent.skill_preprocessing import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class PreloadedSkillResolution:
+    """Structured, prompt-free result for CLI/dispatcher skill preload checks."""
+
+    requested: list[str] = field(default_factory=list)
+    loaded: list[str] = field(default_factory=list)
+    missing: list[str] = field(default_factory=list)
+    ambiguous: dict[str, list[str]] = field(default_factory=dict)
+    errors: dict[str, str] = field(default_factory=dict)
+
+    @property
+    def ok(self) -> bool:
+        return not self.missing and not self.ambiguous
+
+
+@contextlib.contextmanager
+def _skill_resolution_home(hermes_home: str | Path | None):
+    """Temporarily resolve skills against a target Hermes home in-process."""
+
+    if not hermes_home:
+        yield
+        return
+
+    from hermes_constants import reset_hermes_home_override, set_hermes_home_override
+
+    home = Path(hermes_home)
+    token = set_hermes_home_override(home)
+    old_tool_state = None
+    try:
+        try:
+            import tools.skills_tool as skills_tool
+
+            old_tool_state = (
+                getattr(skills_tool, "HERMES_HOME", None),
+                getattr(skills_tool, "SKILLS_DIR", None),
+            )
+            skills_tool.HERMES_HOME = home
+            skills_tool.SKILLS_DIR = home / "skills"
+        except Exception:
+            old_tool_state = None
+        yield
+    finally:
+        if old_tool_state is not None:
+            try:
+                import tools.skills_tool as skills_tool
+
+                skills_tool.HERMES_HOME, skills_tool.SKILLS_DIR = old_tool_state
+            except Exception:
+                pass
+        reset_hermes_home_override(token)
+
+
+def resolve_preloaded_skills(
+    skill_identifiers: list[str],
+    task_id: str | None = None,
+    hermes_home: str | Path | None = None,
+) -> PreloadedSkillResolution:
+    """Resolve CLI preloaded skills without building prompt text.
+
+    This uses the same ``skill_view``/``_load_skill_payload`` path as
+    :func:`build_preloaded_skills_prompt`, but preserves structured failure
+    causes so dispatchers can fail readiness before spawning a worker.
+    ``hermes_home`` scopes resolution to the target worker profile without
+    reading or printing profile secrets.
+    """
+
+    result = PreloadedSkillResolution()
+    seen: set[str] = set()
+    with _skill_resolution_home(hermes_home):
+        try:
+            from tools.skills_tool import skill_view
+        except Exception as exc:
+            for raw_identifier in skill_identifiers:
+                identifier = (raw_identifier or "").strip()
+                if identifier and identifier not in seen:
+                    seen.add(identifier)
+                    result.requested.append(identifier)
+                    result.missing.append(identifier)
+                    result.errors[identifier] = f"skill resolver unavailable: {exc}"
+            return result
+
+        for raw_identifier in skill_identifiers:
+            identifier = (raw_identifier or "").strip()
+            if not identifier or identifier in seen:
+                continue
+            seen.add(identifier)
+            result.requested.append(identifier)
+
+            loaded = _load_skill_payload(identifier, task_id=task_id)
+            if loaded:
+                _, _, skill_name = loaded
+                result.loaded.append(skill_name)
+                continue
+
+            try:
+                payload = json.loads(skill_view(identifier, task_id=task_id, preprocess=False))
+            except Exception as exc:
+                result.missing.append(identifier)
+                result.errors[identifier] = str(exc)
+                continue
+
+            error = str(payload.get("error") or "") if isinstance(payload, dict) else ""
+            matches = payload.get("matches") if isinstance(payload, dict) else None
+            if isinstance(matches, list) and matches:
+                result.ambiguous[identifier] = [str(m) for m in matches]
+                if error:
+                    result.errors[identifier] = error
+            elif "ambiguous skill" in error.lower():
+                result.ambiguous[identifier] = []
+                result.errors[identifier] = error
+            else:
+                result.missing.append(identifier)
+                if error:
+                    result.errors[identifier] = error
+
+    return result
 
 _skill_commands: Dict[str, Dict[str, Any]] = {}
 _skill_commands_platform: Optional[str] = None

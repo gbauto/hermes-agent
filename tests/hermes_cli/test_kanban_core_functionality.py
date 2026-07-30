@@ -2692,6 +2692,20 @@ def test_build_worker_context_caps_huge_summary(kanban_home):
         conn.close()
 
 
+def _write_spawn_skill(home, rel, name=None):
+    skill_dir = home / "skills" / rel
+    skill_dir.mkdir(parents=True, exist_ok=True)
+    skill_name = name or skill_dir.name
+    (skill_dir / "SKILL.md").write_text(
+        "---\n"
+        f"name: {skill_name}\n"
+        f"description: Test skill {skill_name}.\n"
+        "---\n\n"
+        f"# {skill_name}\n\nTest fixture skill.\n",
+        encoding="utf-8",
+    )
+
+
 def test_default_spawn_auto_loads_kanban_worker_skill(kanban_home, monkeypatch):
     """The dispatcher's _default_spawn must include --skills kanban-worker
     in its argv so every worker loads the skill automatically, even if
@@ -2700,11 +2714,7 @@ def test_default_spawn_auto_loads_kanban_worker_skill(kanban_home, monkeypatch):
     We intercept Popen to capture the argv without actually spawning a
     hermes subprocess (which would hang trying to call an LLM).
     """
-    # Pretend the bundled kanban-worker skill resolves for this isolated
-    # HERMES_HOME — the fixture creates an empty tmpdir without the
-    # devops/kanban-worker tree, and _default_spawn gates the --skills
-    # flag on actual resolvability.
-    monkeypatch.setattr(kb, "_kanban_worker_skill_available", lambda _h: True)
+    _write_spawn_skill(kanban_home, "devops/kanban-worker", name="kanban-worker")
 
     captured = {}
 
@@ -2975,7 +2985,9 @@ def test_create_task_skills_lists_all_toolset_typos(kanban_home):
 def test_default_spawn_appends_per_task_skills(kanban_home, monkeypatch):
     """Dispatcher argv must carry one `--skills X` pair per task skill,
     in addition to the built-in kanban-worker."""
-    monkeypatch.setattr(kb, "_kanban_worker_skill_available", lambda _h: True)
+    _write_spawn_skill(kanban_home, "devops/kanban-worker", name="kanban-worker")
+    _write_spawn_skill(kanban_home, "writing/translation", name="translation")
+    _write_spawn_skill(kanban_home, "github/github-code-review", name="github-code-review")
     captured = {}
 
     class FakeProc:
@@ -3025,7 +3037,8 @@ def test_default_spawn_appends_per_task_skills(kanban_home, monkeypatch):
 
 def test_default_spawn_dedupes_kanban_worker_from_task_skills(kanban_home, monkeypatch):
     """If a task explicitly lists 'kanban-worker', we don't double-pass it."""
-    monkeypatch.setattr(kb, "_kanban_worker_skill_available", lambda _h: True)
+    _write_spawn_skill(kanban_home, "devops/kanban-worker", name="kanban-worker")
+    _write_spawn_skill(kanban_home, "writing/translation", name="translation")
     captured = {}
 
     class FakeProc:

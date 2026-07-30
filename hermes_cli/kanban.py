@@ -2016,6 +2016,10 @@ def _cmd_dispatch(args: argparse.Namespace) -> int:
             "timed_out": res.timed_out,
             "stale": res.stale,
             "auto_blocked": res.auto_blocked,
+            "readiness_failed": [
+                {"task_id": tid, "reason": reason}
+                for (tid, reason) in getattr(res, "readiness_failed", [])
+            ],
             "promoted": res.promoted,
             "spawned": [
                 {"task_id": tid, "assignee": who, "workspace": ws}
@@ -2038,6 +2042,10 @@ def _cmd_dispatch(args: argparse.Namespace) -> int:
     print(f"Auto-blocked: {len(res.auto_blocked)}")
     if res.auto_blocked:
         print(f"  {', '.join(res.auto_blocked)}")
+    readiness_failed = getattr(res, "readiness_failed", [])
+    print(f"Readiness failed: {len(readiness_failed)}")
+    for tid, reason in readiness_failed:
+        print(f"  - {tid}: {reason}")
     print(f"Promoted:     {res.promoted}")
     print(f"Spawned:      {len(res.spawned)}")
     for tid, who, ws in res.spawned:
