@@ -3062,7 +3062,15 @@ def block_task(
     reason: Optional[str] = None,
     expected_run_id: Optional[int] = None,
 ) -> bool:
-    """Transition ``running -> blocked``."""
+    """Transition ``running -> blocked``.
+
+    ``reason`` is persisted on the task row (``last_failure_error``) in
+    addition to the run summary / event payload, so board mirrors and
+    ``kanban show`` surface *why* a card is blocked without joining the
+    run history. Reason-less blocked cards proved untriageable in
+    practice (every blocked card in the 2026-06 sprint window carried an
+    empty reason on the mirror side).
+    """
     with write_txn(conn):
         if expected_run_id is None:
             cur = conn.execute(
@@ -3071,11 +3079,12 @@ def block_task(
                    SET status       = 'blocked',
                        claim_lock   = NULL,
                        claim_expires= NULL,
-                       worker_pid   = NULL
+                       worker_pid   = NULL,
+                       last_failure_error = COALESCE(?, last_failure_error)
                  WHERE id = ?
                    AND status IN ('running', 'ready')
                 """,
-                (task_id,),
+                (reason, task_id),
             )
         else:
             cur = conn.execute(
@@ -3084,12 +3093,13 @@ def block_task(
                    SET status       = 'blocked',
                        claim_lock   = NULL,
                        claim_expires= NULL,
-                       worker_pid   = NULL
+                       worker_pid   = NULL,
+                       last_failure_error = COALESCE(?, last_failure_error)
                  WHERE id = ?
                    AND status IN ('running', 'ready')
                    AND current_run_id = ?
                 """,
-                (task_id, int(expected_run_id)),
+                (reason, task_id, int(expected_run_id)),
             )
         if cur.rowcount != 1:
             return False
@@ -4257,7 +4267,43 @@ def _error_fingerprint(error_text: str) -> str:
     return fp.lower().strip()
 
 
-def detect_crashed_workers(conn: sqlite3.Connection) -> list[str]:
+_ANSI_RE = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]")
+
+
+def _worker_log_tail(
+    task_id: str,
+    board: Optional[str] = None,
+    *,
+    max_chars: int = 400,
+) -> str:
+    """Return a sanitized one-line tail of a task's worker log.
+
+    Used to turn bare ``pid N not alive`` death-notes into actionable
+    errors — the per-task log under ``worker_logs_dir`` usually holds
+    the actual cause (traceback, provider 429, auth failure) that the
+    liveness check can't see. Returns ``""`` when no log exists or on
+    any read error; the death-note must never fail the reaper.
+    """
+    try:
+        log_path = worker_logs_dir(board=board) / f"{task_id}.log"
+        if not log_path.is_file():
+            return ""
+        size = log_path.stat().st_size
+        with open(log_path, "rb") as f:
+            f.seek(max(0, size - 8192))
+            raw = f.read().decode("utf-8", errors="replace")
+        text = _ANSI_RE.sub("", raw)
+        text = " ".join(text.split())
+        return text[-max_chars:].strip()
+    except Exception:
+        return ""
+
+
+def detect_crashed_workers(
+    conn: sqlite3.Connection,
+    *,
+    board: Optional[str] = None,
+) -> list[str]:
     """Reclaim ``running`` tasks whose worker PID is no longer alive.
 
     Appends a ``crashed`` event and drops the task back to ``ready``.
@@ -4324,6 +4370,13 @@ def detect_crashed_workers(conn: sqlite3.Connection) -> list[str]:
                     error_text = f"pid {pid} killed by signal {code}"
                 else:
                     error_text = f"pid {pid} not alive"
+                # Death-note: append the worker-log tail so the error
+                # carries the actual cause, not just the liveness fact.
+                # 8.8k bare "pid N not alive" runs in one sprint window
+                # proved undiagnosable without this.
+                log_tail = _worker_log_tail(row["id"], board)
+                if log_tail:
+                    error_text = f"{error_text} — log tail: {log_tail}"
                 event_kind = "crashed"
                 event_payload = {"pid": pid, "claimer": row["claim_lock"]}
                 if code is not None and kind != "unknown":
@@ -4816,7 +4869,7 @@ def dispatch_once(
     result.stale = detect_stale_running(
         conn, stale_timeout_seconds=stale_timeout_seconds,
     )
-    result.crashed = detect_crashed_workers(conn)
+    result.crashed = detect_crashed_workers(conn, board=board)
     # detect_crashed_workers stashes protocol-violation auto-blocks on
     # itself so the public list-return stays stable. Pull them into the
     # DispatchResult here so telemetry / tests see the trip.
