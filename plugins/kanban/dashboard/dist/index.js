@@ -664,6 +664,7 @@
 
     // --- fetch full board ---------------------------------------------------
     const loadBoard = useCallback(() => {
+      setLoading(true);
       const qs = new URLSearchParams();
       qs.set("compact", "true");
       qs.set("limit_per_column", "100");
@@ -714,7 +715,8 @@
           .catch(function (err) {
             setSprintError(parseApiErrorMessage(err));
             return null;
-          });
+          })
+          .finally(function () { setLoading(false); });
       }
       return SDK.fetchJSON(withBoard(`${API}/sprint?days=7`, board))
         .then(function (data) {
@@ -1256,11 +1258,11 @@
     }, [selectedIds, board, loadBoard, t]);
 
     // --- render -------------------------------------------------------------
-    if (loading && !boardData) {
+    if (commandView === "board" && loading && !boardData) {
       return h("div", { className: "p-8 text-sm text-muted-foreground" },
         tx(t, "loading", "Loading Kanban board…"));
     }
-    if (error && !boardData) {
+    if (commandView === "board" && error && !boardData) {
       return h(Card, null,
         h(CardContent, { className: "p-6" },
           h("div", { className: "text-sm text-destructive" },
@@ -1271,7 +1273,7 @@
         ),
       );
     }
-    if (!filteredBoard) return null;
+    if (!filteredBoard && commandView === "board") return null;
 
     const renderMd = !config || config.render_markdown !== false;
 
@@ -1318,7 +1320,7 @@
           error: sprintError,
           onOpenTask: openTask,
         }) : null,
-        (isAllBoards || commandView === "board") ? h(React.Fragment, null,
+        commandView === "board" ? h(React.Fragment, null,
           !isAllBoards ? h(OrchestrationPanel, null) : null,
           !isAllBoards ? h(AttentionStrip, {
             boardData,
@@ -1373,7 +1375,7 @@
             allTasks: boardData.columns.reduce(function (acc, c) { return acc.concat(c.tasks); }, []),
           }),
         ) : null,
-        selectedTaskId ? h(TaskDrawer, {
+        selectedTaskId && boardData ? h(TaskDrawer, {
           taskId: selectedTaskId,
           boardSlug: board,
           onClose: closeTask,

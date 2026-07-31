@@ -2834,3 +2834,35 @@ def test_dashboard_exposes_all_boards_and_squash_as_read_only_controls():
     assert index_css.index(fonts_import) < index_css.index(globals_import)
     assert "url('/gb-mark.png')" in index_css
     assert (repo_root / "web" / "public" / "gb-mark.png").is_file()
+
+
+def test_dashboard_all_boards_sprint_does_not_wait_for_board_grid():
+    repo_root = Path(__file__).resolve().parents[2]
+    js = (
+        repo_root
+        / "plugins"
+        / "kanban"
+        / "dashboard"
+        / "dist"
+        / "index.js"
+    ).read_text(encoding="utf-8")
+
+    load_sprint_start = js.index("const loadSprint = useCallback")
+    load_sprint_end = js.index(
+        "// --- load list of boards for the switcher",
+        load_sprint_start,
+    )
+    load_sprint = js[load_sprint_start:load_sprint_end]
+    all_boards_end = load_sprint.index(
+        "return SDK.fetchJSON(withBoard",
+    )
+    all_boards_sprint = load_sprint[:all_boards_end]
+
+    assert ".finally(function () { setLoading(false); });" in all_boards_sprint
+    assert 'if (commandView === "board" && loading && !boardData)' in js
+    assert 'if (!filteredBoard && commandView === "board") return null;' in js
+    assert (
+        'commandView === "board" ? h(React.Fragment, null,'
+        in js
+    )
+    assert "selectedTaskId && boardData ? h(TaskDrawer" in js
