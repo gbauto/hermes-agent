@@ -61,10 +61,18 @@ _LOCAL_PATH_RE = re.compile(
     re.IGNORECASE,
 )
 _MEDIA_TAG_RE = re.compile(r"[`\"']?MEDIA:\s*(?P<path>`[^`\n]+`|\"[^\"\n]+\"|'[^'\n]+'|(?:~/|/)\S+)[`\"']?", re.IGNORECASE)
+_URL_RE = re.compile(r"https?://[^\s`'\"<>]+", re.IGNORECASE)
 _SOURCE_FENCE_RE = re.compile(
     r"```\s*(?:json|ya?ml|xml|csv|toml|ini|python|py|javascript|js|typescript|ts|tsx|jsx|bash|sh|zsh|sql)\b.*?```",
     re.IGNORECASE | re.DOTALL,
 )
+_ARTIFACT_URL_DENY_HOST_SUFFIXES = (
+    "drive.google.com",
+    "docs.google.com",
+    "dropbox.com",
+    "box.com",
+)
+_ARTIFACT_URL_EXTENSIONS = _DENIED_EXTENSIONS | {".html", ".htm", ".pdf"}
 
 
 @dataclass(frozen=True)
@@ -122,6 +130,22 @@ def _filename_from_disposition(disposition: str) -> str:
 def _is_netlify_host(hostname: str) -> bool:
     host = (hostname or "").lower().rstrip(".")
     return host.endswith(".netlify.app") or host.endswith(".netlify.com")
+
+
+def _is_known_document_host(hostname: str) -> bool:
+    host = (hostname or "").lower().rstrip(".")
+    return any(host == suffix or host.endswith(f".{suffix}") for suffix in _ARTIFACT_URL_DENY_HOST_SUFFIXES)
+
+
+def _should_redact_artifact_url(url: str) -> bool:
+    parsed = urlparse(url.rstrip(".,);]"))
+    hostname = parsed.hostname or ""
+    ext = Path(parsed.path).suffix.lower()
+    if _is_netlify_host(hostname) and ext in {"", ".html", ".htm"}:
+        return False
+    if _is_known_document_host(hostname):
+        return True
+    return ext in _ARTIFACT_URL_EXTENSIONS
 
 
 def _sniff_local_mime(path: str) -> str:
@@ -186,6 +210,15 @@ def sanitize_telegram_text(text: str) -> tuple[str, list[PolicyDecision]]:
         return "Artifact omitted: publish/verification failed."
 
     cleaned = _SOURCE_FENCE_RE.sub(_replace_source_fence, cleaned)
+
+    def _replace_url(match: re.Match) -> str:
+        url = match.group(0)
+        if not _should_redact_artifact_url(url):
+            return url
+        decisions.append(_deny("denied_artifact_url"))
+        return "Artifact omitted: publish/verification failed."
+
+    cleaned = _URL_RE.sub(_replace_url, cleaned)
 
     def _replace_path(match: re.Match) -> str:
         decisions.append(_deny("denied_local_path"))

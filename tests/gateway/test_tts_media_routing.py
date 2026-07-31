@@ -51,7 +51,7 @@ def _event(thread_id=None):
 
 
 @pytest.mark.asyncio
-async def test_base_adapter_routes_telegram_flac_media_tag_to_document_sender():
+async def test_base_adapter_denies_telegram_flac_document_fallback():
     adapter = _MediaRoutingAdapter()
     event = _event()
     adapter._message_handler = AsyncMock(return_value="MEDIA:/tmp/speech.flac")
@@ -60,16 +60,12 @@ async def test_base_adapter_routes_telegram_flac_media_tag_to_document_sender():
 
     await adapter._process_message_background(event, build_session_key(event.source))
 
-    adapter.send_document.assert_awaited_once_with(
-        chat_id="chat-1",
-        file_path="/tmp/speech.flac",
-        metadata=None,
-    )
+    adapter.send_document.assert_not_awaited()
     adapter.send_voice.assert_not_awaited()
 
 
 @pytest.mark.asyncio
-async def test_base_adapter_routes_non_voice_telegram_ogg_media_tag_to_document_sender():
+async def test_base_adapter_denies_non_voice_telegram_ogg_document_fallback():
     adapter = _MediaRoutingAdapter()
     event = _event()
     adapter._message_handler = AsyncMock(return_value="MEDIA:/tmp/speech.ogg")
@@ -78,11 +74,7 @@ async def test_base_adapter_routes_non_voice_telegram_ogg_media_tag_to_document_
 
     await adapter._process_message_background(event, build_session_key(event.source))
 
-    adapter.send_document.assert_awaited_once_with(
-        chat_id="chat-1",
-        file_path="/tmp/speech.ogg",
-        metadata=None,
-    )
+    adapter.send_document.assert_not_awaited()
     adapter.send_voice.assert_not_awaited()
 
 
@@ -117,7 +109,7 @@ def _fake_runner(thread_meta):
 
 
 @pytest.mark.asyncio
-async def test_streaming_delivery_routes_telegram_flac_media_tag_to_document_sender():
+async def test_streaming_delivery_denies_telegram_flac_document_fallback():
     event = _event(thread_id="topic-1")
     adapter = SimpleNamespace(
         name="test",
@@ -137,16 +129,12 @@ async def test_streaming_delivery_routes_telegram_flac_media_tag_to_document_sen
         adapter,
     )
 
-    adapter.send_document.assert_awaited_once_with(
-        chat_id="chat-1",
-        file_path="/tmp/speech.flac",
-        metadata={"thread_id": "topic-1"},
-    )
+    adapter.send_document.assert_not_awaited()
     adapter.send_voice.assert_not_awaited()
 
 
 @pytest.mark.asyncio
-async def test_streaming_delivery_routes_non_voice_telegram_ogg_media_tag_to_document_sender():
+async def test_streaming_delivery_denies_non_voice_telegram_ogg_document_fallback():
     event = _event(thread_id="topic-1")
     adapter = SimpleNamespace(
         name="test",
@@ -166,11 +154,7 @@ async def test_streaming_delivery_routes_non_voice_telegram_ogg_media_tag_to_doc
         adapter,
     )
 
-    adapter.send_document.assert_awaited_once_with(
-        chat_id="chat-1",
-        file_path="/tmp/speech.ogg",
-        metadata={"thread_id": "topic-1"},
-    )
+    adapter.send_document.assert_not_awaited()
     adapter.send_voice.assert_not_awaited()
 
 

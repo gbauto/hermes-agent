@@ -35,6 +35,21 @@ def test_sanitize_telegram_text_removes_source_dumps():
     assert any(d.reason_code == "denied_source_dump" for d in decisions)
 
 
+def test_sanitize_telegram_text_removes_disallowed_artifact_urls():
+    text = (
+        "Report https://example.com/internal/receipt.md "
+        "Data https://drive.google.com/file/d/abc/view "
+        "Public https://project.netlify.app/report"
+    )
+
+    cleaned, decisions = sanitize_telegram_text(text)
+
+    assert "receipt.md" not in cleaned
+    assert "drive.google.com" not in cleaned
+    assert "https://project.netlify.app/report" in cleaned
+    assert any(d.reason_code == "denied_artifact_url" for d in decisions)
+
+
 def test_classify_local_file_allows_images_and_pdf(tmp_path):
     image = _write(tmp_path / "chart.png", b"\x89PNG\r\n\x1a\nbytes")
     pdf = _write(tmp_path / "report.pdf", b"%PDF-1.7\nbytes")
