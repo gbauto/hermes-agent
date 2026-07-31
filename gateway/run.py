@@ -4955,6 +4955,27 @@ class GatewayRunner:
         if not candidates:
             return
 
+        try:
+            from gateway.config import Platform as _Platform
+            if getattr(adapter, "platform", None) == _Platform.TELEGRAM:
+                from gateway.platforms.artifact_policy import ArtifactCandidate as _ArtifactCandidate
+                from gateway.platforms.artifact_policy import classify_local_file as _classify_local_file
+                _allowed_candidates: list[str] = []
+                for _path in candidates:
+                    _decision = _classify_local_file(_ArtifactCandidate(
+                        source="kanban_artifact",
+                        platform="telegram",
+                        path=_path,
+                    ))
+                    if _decision.allowed and _decision.delivery_kind in {"image", "pdf"}:
+                        _allowed_candidates.append(_decision.safe_path or _path)
+                candidates = _allowed_candidates
+                if not candidates:
+                    return
+        except Exception:
+            logger.warning("kanban notifier: Telegram artifact policy failed closed", exc_info=True)
+            return
+
         _IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".gif", ".webp"}
         _VIDEO_EXTS = {".mp4", ".mov", ".avi", ".mkv", ".webm", ".3gp"}
 

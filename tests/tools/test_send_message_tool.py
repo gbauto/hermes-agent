@@ -916,9 +916,9 @@ class TestSendTelegramThreadIdMapping:
         ])
         _install_telegram_mock(monkeypatch, bot)
 
-        # Create a test file
-        test_file = tmp_path / "doc.txt"
-        test_file.write_text("test content")
+        # Create an allowed PDF file
+        test_file = tmp_path / "doc.pdf"
+        test_file.write_bytes(b"%PDF-1.4\ntest content")
 
         asyncio.run(
             _send_telegram(

@@ -86,6 +86,7 @@ from gateway.platforms.telegram_network import (
     discover_fallback_ips,
     parse_fallback_ip_env,
 )
+from gateway.platforms.artifact_policy import ArtifactCandidate, classify_local_file
 from utils import atomic_replace
 
 _TELEGRAM_IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".gif"}
@@ -3612,6 +3613,13 @@ class TelegramAdapter(BasePlatformAdapter):
         try:
             if not os.path.exists(image_path):
                 return SendResult(success=False, error=self._missing_media_path_error("Image", image_path))
+            policy = classify_local_file(ArtifactCandidate(
+                source="local_path",
+                platform="telegram",
+                path=image_path,
+            ))
+            if not policy.allowed or policy.delivery_kind != "image":
+                return SendResult(success=False, error=policy.public_reason or "Artifact omitted")
 
             _thread = self._metadata_thread_id(metadata)
             reply_to_id = self._reply_to_message_id_for_send(reply_to, metadata, reply_to_mode=self._reply_to_mode)
@@ -3706,6 +3714,16 @@ class TelegramAdapter(BasePlatformAdapter):
         try:
             if not os.path.exists(file_path):
                 return SendResult(success=False, error=self._missing_media_path_error("File", file_path))
+
+            policy = classify_local_file(ArtifactCandidate(
+                source="local_path",
+                platform="telegram",
+                path=file_path,
+                filename=file_name,
+                force_document=True,
+            ))
+            if not policy.allowed or policy.delivery_kind != "pdf":
+                return SendResult(success=False, error=policy.public_reason or "Artifact omitted")
 
             display_name = file_name or os.path.basename(file_path)
             _thread = self._metadata_thread_id(metadata)
