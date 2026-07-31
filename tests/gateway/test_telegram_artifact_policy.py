@@ -63,6 +63,16 @@ def test_classify_local_file_allows_images_and_pdf(tmp_path):
     assert pdf_decision.delivery_kind == "pdf"
 
 
+def test_classify_local_file_denies_disguised_pdf_archive_bytes(tmp_path):
+    disguised = _write(tmp_path / "report.pdf", b"PK\x03\x04not a real pdf")
+
+    decision = classify_local_file(ArtifactCandidate(source="media_tag", platform="telegram", path=str(disguised)))
+
+    assert not decision.allowed
+    assert decision.delivery_kind == "drop"
+    assert decision.reason_code == "denied_mime"
+
+
 def test_classify_local_file_denies_machine_artifacts_and_oversized_files(tmp_path):
     archive = _write(tmp_path / "bundle.zip", b"PK\x03\x04")
     huge_pdf = _write(tmp_path / "huge.pdf", b"%PDF-1.7\n")

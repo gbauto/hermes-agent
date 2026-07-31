@@ -11,7 +11,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Iterable, Literal
 from urllib.parse import urljoin, urlparse
-import mimetypes
 import os
 import re
 
@@ -161,8 +160,10 @@ def _sniff_local_mime(path: str) -> str:
     for magic, mime in _IMAGE_MAGIC.items():
         if head.startswith(magic):
             return mime
-    guessed, _ = mimetypes.guess_type(path)
-    return (guessed or "").lower()
+    # Do not fall back to extension-derived mimetypes for local Telegram
+    # operator artifacts. A disguised archive named report.pdf would otherwise
+    # become application/pdf by suffix alone and reach send_document.
+    return ""
 
 
 def classify_local_file(candidate: ArtifactCandidate) -> PolicyDecision:
@@ -183,13 +184,15 @@ def classify_local_file(candidate: ArtifactCandidate) -> PolicyDecision:
     ext = (Path(candidate.filename or path).suffix or Path(path).suffix).lower()
     if ext in _DENIED_EXTENSIONS:
         return _deny("denied_extension")
-    mime = (candidate.mime_type or _sniff_local_mime(path) or "").split(";", 1)[0].strip().lower()
+    sniffed_mime = (_sniff_local_mime(path) or "").split(";", 1)[0].strip().lower()
+    provided_mime = (candidate.mime_type or "").split(";", 1)[0].strip().lower()
+    mime = provided_mime or sniffed_mime
     if ext in _IMAGE_EXTENSIONS:
         if mime.startswith("image/"):
             return _allow("image", path=path)
         return _deny("denied_mime")
     if ext == ".pdf":
-        if mime == "application/pdf":
+        if sniffed_mime == "application/pdf":
             return _allow("pdf", path=path)
         return _deny("denied_mime")
     return _deny("denied_extension" if ext else "extensionless_local_file")
