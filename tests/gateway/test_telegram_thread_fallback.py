@@ -750,8 +750,8 @@ async def test_send_dm_topic_reply_not_found_retry_drops_thread_id():
 @pytest.mark.parametrize(
     ("method_name", "bot_method_name", "path_kw", "filename", "payload"),
     [
-        ("send_image_file", "send_photo", "image_path", "photo.png", b"png-data"),
-        ("send_document", "send_document", "file_path", "report.txt", b"report-data"),
+        ("send_image_file", "send_photo", "image_path", "photo.png", b"\x89PNG\r\n\x1a\n" + b"png-data"),
+        ("send_document", "send_document", "file_path", "report.pdf", b"%PDF-1.7\nreport-data"),
         ("send_video", "send_video", "video_path", "clip.mp4", b"video-data"),
         ("send_voice", "send_voice", "audio_path", "clip.ogg", b"ogg-data"),
         ("send_voice", "send_audio", "audio_path", "clip.mp3", b"mp3-data"),

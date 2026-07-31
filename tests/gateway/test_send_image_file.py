@@ -133,7 +133,7 @@ class TestTelegramSendImageFile:
     def test_caption_truncated_to_1024(self, adapter, tmp_path):
         """Telegram captions have a 1024 char limit."""
         img = tmp_path / "shot.png"
-        img.write_bytes(b"\x89PNG" + b"\x00" * 50)
+        img.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 50)
 
         mock_msg = MagicMock()
         mock_msg.message_id = 1
@@ -150,7 +150,7 @@ class TestTelegramSendImageFile:
     def test_thread_id_forwarded(self, adapter, tmp_path):
         """metadata thread_id is forwarded as message_thread_id (required for Telegram forum groups)."""
         img = tmp_path / "shot.png"
-        img.write_bytes(b"\x89PNG" + b"\x00" * 50)
+        img.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 50)
 
         mock_msg = MagicMock()
         mock_msg.message_id = 43
