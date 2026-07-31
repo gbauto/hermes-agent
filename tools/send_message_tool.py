@@ -16,6 +16,12 @@ from email.utils import formatdate
 from typing import Dict, Optional
 
 from agent.redact import redact_sensitive_text
+from gateway.platforms.artifact_policy import (
+    ArtifactCandidate,
+    classify_local_file,
+    omitted_notice,
+    sanitize_telegram_text,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -858,6 +864,47 @@ async def _send_telegram(token, chat_id, message, media_files=None, thread_id=No
             bot = Bot(token=token)
         int_chat_id = int(chat_id)
         media_files = media_files or []
+        policy_warnings = []
+        message, text_decisions = sanitize_telegram_text(message)
+        notice = omitted_notice(text_decisions)
+        if notice and notice not in message:
+            message = f"{message}\n{notice}".strip()
+        policy_warnings.extend(d.public_reason for d in text_decisions if not d.allowed and d.public_reason)
+
+        allowed_media = []
+        for media_path, is_voice in media_files:
+            ext = os.path.splitext(media_path)[1].lower()
+            # Voice/audio bubbles are conversational media, not operator report
+            # artifacts; keep native Telegram audio routes working while still
+            # denying document fallback/source artifact uploads.
+            if (ext in _VOICE_EXTS and is_voice) or ext in _TELEGRAM_SEND_AUDIO_EXTS:
+                allowed_media.append((media_path, is_voice))
+                continue
+            decision = classify_local_file(ArtifactCandidate(
+                source="send_message",
+                platform="telegram",
+                path=media_path,
+                force_document=force_document,
+            ))
+            if decision.allowed and decision.delivery_kind in {"image", "pdf"}:
+                allowed_media.append((decision.safe_path or media_path, is_voice))
+            else:
+                policy_warnings.append(decision.public_reason or "Artifact omitted: publish/verification failed.")
+        media_files = allowed_media
+        # Recompute Telegram parse formatting after policy sanitization so raw
+        # MEDIA/local paths removed above cannot leak through formatted text.
+        _has_html = bool(re.search(r'<[a-zA-Z/][^>]*>', message))
+        if _has_html:
+            formatted = message
+            send_parse_mode = ParseMode.HTML
+        else:
+            try:
+                from gateway.platforms.telegram import TelegramAdapter
+                _adapter = TelegramAdapter.__new__(TelegramAdapter)
+                formatted = _adapter.format_message(message)
+            except Exception:
+                formatted = message
+            send_parse_mode = ParseMode.MARKDOWN_V2
         thread_kwargs = {}
         if thread_id is not None:
             # Reuse the gateway adapter's General-topic mapping: in Telegram
@@ -889,7 +936,7 @@ async def _send_telegram(token, chat_id, message, media_files=None, thread_id=No
             text_kwargs["disable_web_page_preview"] = True
 
         last_msg = None
-        warnings = []
+        warnings = list(policy_warnings)
 
         if formatted.strip():
             try:

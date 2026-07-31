@@ -529,7 +529,30 @@ def _send_media_via_adapter(
     """
     from pathlib import Path
 
+    from gateway.config import Platform
     from gateway.platforms.base import should_send_media_as_audio
+
+    route_platform = platform if platform is not None else getattr(adapter, "platform", None)
+    if route_platform == Platform.TELEGRAM:
+        try:
+            from gateway.platforms.artifact_policy import ArtifactCandidate, classify_local_file
+            filtered_media = []
+            for media_path, is_voice in media_files:
+                ext = Path(media_path).suffix.lower()
+                if should_send_media_as_audio(route_platform, ext, is_voice=is_voice):
+                    filtered_media.append((media_path, is_voice))
+                    continue
+                decision = classify_local_file(ArtifactCandidate(
+                    source="cron_media",
+                    platform="telegram",
+                    path=media_path,
+                ))
+                if decision.allowed and decision.delivery_kind in {"image", "pdf"}:
+                    filtered_media.append((decision.safe_path or media_path, is_voice))
+            media_files = filtered_media
+        except Exception:
+            logger.warning("Job '%s': Telegram cron media policy failed closed", job.get("id", "?"), exc_info=True)
+            return
 
     for media_path, _is_voice in media_files:
         try:

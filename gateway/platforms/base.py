@@ -3181,6 +3181,53 @@ class BasePlatformAdapter(ABC):
                 local_files, text_content = self.extract_local_files(text_content)
                 if local_files:
                     logger.info("[%s] extract_local_files found %d file(s) in response", self.name, len(local_files))
+
+                if self.platform == Platform.TELEGRAM:
+                    try:
+                        from gateway.platforms.artifact_policy import (
+                            ArtifactCandidate as _ArtifactCandidate,
+                            classify_local_file as _classify_local_file,
+                            omitted_notice as _omitted_notice,
+                            sanitize_telegram_text as _sanitize_telegram_text,
+                        )
+                        text_content, _text_policy_decisions = _sanitize_telegram_text(text_content)
+                        _policy_decisions = list(_text_policy_decisions)
+                        _allowed_media_files = []
+                        for _media_path, _is_voice in media_files:
+                            _ext = Path(_media_path).suffix.lower()
+                            if (should_send_media_as_audio(self.platform, _ext, is_voice=_is_voice)):
+                                _allowed_media_files.append((_media_path, _is_voice))
+                                continue
+                            _decision = _classify_local_file(_ArtifactCandidate(
+                                source="media_tag",
+                                platform="telegram",
+                                path=_media_path,
+                                force_document=force_document_attachments,
+                            ))
+                            _policy_decisions.append(_decision)
+                            if _decision.allowed and _decision.delivery_kind in {"image", "pdf"}:
+                                _allowed_media_files.append((_decision.safe_path or _media_path, _is_voice))
+                        _allowed_local_files = []
+                        for _file_path in local_files:
+                            _decision = _classify_local_file(_ArtifactCandidate(
+                                source="local_path",
+                                platform="telegram",
+                                path=_file_path,
+                                force_document=force_document_attachments,
+                            ))
+                            _policy_decisions.append(_decision)
+                            if _decision.allowed and _decision.delivery_kind in {"image", "pdf"}:
+                                _allowed_local_files.append(_decision.safe_path or _file_path)
+                        media_files = _allowed_media_files
+                        local_files = _allowed_local_files
+                        _notice = _omitted_notice(_policy_decisions)
+                        if _notice and _notice not in text_content:
+                            text_content = f"{text_content}\n{_notice}".strip()
+                    except Exception:
+                        logger.warning("[%s] Telegram artifact policy filtering failed closed", self.name, exc_info=True)
+                        media_files = []
+                        local_files = []
+                        text_content = f"{text_content}\nArtifact omitted: publish/verification failed.".strip()
                 
                 # Auto-TTS: if voice message, generate audio FIRST (before sending text)
                 # Gated via ``_should_auto_tts_for_chat``: fires when the chat has
