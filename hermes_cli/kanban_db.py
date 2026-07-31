@@ -153,6 +153,106 @@ def _resolve_claim_ttl_seconds(ttl_seconds: Optional[int] = None) -> int:
 # during the launch window.
 DEFAULT_CRASH_GRACE_SECONDS = 30
 
+# Consecutive non-success attempts are retried with exponential backoff before
+# the next spawn. The circuit breaker (``failure_limit`` / per-task
+# ``max_retries``) still decides when the task blocks; this only spaces out the
+# attempts so a crash-looping worker cannot respawn every dispatcher tick.
+DEFAULT_RETRY_BACKOFF_BASE_SECONDS = 60
+DEFAULT_RETRY_BACKOFF_MAX_SECONDS = 15 * 60
+
+
+def _truthy_config_value(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return False
+    return str(value).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _configured_kanban_home_notify_targets() -> list[dict[str, str]]:
+    """Return configured home-channel notification targets."""
+    try:
+        from hermes_cli.config import load_config
+        cfg = load_config() or {}
+    except Exception:
+        return []
+    if not _truthy_config_value((cfg.get("kanban") or {}).get("auto_subscribe_home")):
+        return []
+    targets: list[dict[str, str]] = []
+    seen: set[tuple[str, str, str]] = set()
+
+    def add(platform: str, chat_id: Any, thread_id: Any = "") -> None:
+        platform_s = str(platform or "").strip().lower()
+        chat_s = str(chat_id or "").strip()
+        thread_s = str(thread_id or "").strip()
+        if not platform_s or not chat_s:
+            return
+        if chat_s.startswith("<<") and chat_s.endswith(">>"):
+            return
+        key = (platform_s, chat_s, thread_s)
+        if key in seen:
+            return
+        seen.add(key)
+        targets.append({"platform": platform_s, "chat_id": chat_s, "thread_id": thread_s})
+
+    platforms_cfg = cfg.get("platforms") or {}
+    if isinstance(platforms_cfg, dict):
+        for platform, pcfg in platforms_cfg.items():
+            if not isinstance(pcfg, dict):
+                continue
+            home = pcfg.get("home_channel") or {}
+            if isinstance(home, dict):
+                add(platform, home.get("chat_id"), home.get("thread_id") or "")
+
+    telegram_cfg = cfg.get("telegram") or {}
+    if isinstance(telegram_cfg, dict):
+        add("telegram", telegram_cfg.get("homeChannel") or telegram_cfg.get("home_channel"))
+    return targets
+
+
+def _auto_subscribe_task_notifications(
+    conn: sqlite3.Connection,
+    task_id: str,
+    *,
+    parents: Iterable[str] = (),
+    notifier_profile: Optional[str] = None,
+) -> None:
+    """Best-effort event-notification subscription bootstrap for new tasks."""
+    try:
+        parent_ids = [p for p in parents if p]
+        now = int(time.time())
+        with write_txn(conn):
+            for pid in parent_ids:
+                conn.execute(
+                    """
+                    INSERT OR IGNORE INTO kanban_notify_subs
+                        (task_id, platform, chat_id, thread_id, user_id, notifier_profile, created_at, last_event_id)
+                    SELECT ?, platform, chat_id, thread_id, user_id, notifier_profile, ?, 0
+                      FROM kanban_notify_subs
+                     WHERE task_id = ?
+                    """,
+                    (task_id, now, pid),
+                )
+            for target in _configured_kanban_home_notify_targets():
+                conn.execute(
+                    """
+                    INSERT OR IGNORE INTO kanban_notify_subs
+                        (task_id, platform, chat_id, thread_id, user_id, notifier_profile, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        task_id,
+                        target["platform"],
+                        target["chat_id"],
+                        target.get("thread_id") or "",
+                        None,
+                        notifier_profile,
+                        now,
+                    ),
+                )
+    except Exception:
+        _log.debug("kanban notify auto-subscribe failed for %s", task_id, exc_info=True)
+
 
 # Sentinel exit code a kanban worker uses to signal "I bailed because the
 # provider rate-limited / exhausted quota, not because the task failed."
@@ -2173,7 +2273,14 @@ def create_task(
             (idempotency_key,),
         ).fetchone()
         if row:
-            return row["id"]
+            existing_id = row["id"]
+            _auto_subscribe_task_notifications(
+                conn,
+                existing_id,
+                parents=parents,
+                notifier_profile=created_by,
+            )
+            return existing_id
 
     now = int(time.time())
 
@@ -2280,6 +2387,12 @@ def create_task(
                         "goal_mode": bool(goal_mode) or None,
                     },
                 )
+            _auto_subscribe_task_notifications(
+                conn,
+                task_id,
+                parents=parents,
+                notifier_profile=created_by,
+            )
             return task_id
         except sqlite3.IntegrityError:
             if attempt == 1:
@@ -4914,6 +5027,27 @@ class DispatchResult:
     window just makes the task bounce cheaply until the window clears."""
 
 
+def _parse_task_skills(value: Any) -> list[str]:
+    """Parse the JSON ``tasks.skills`` payload into a clean skill-name list."""
+    if not value:
+        return []
+    try:
+        parsed = json.loads(value) if isinstance(value, str) else value
+    except Exception:
+        return []
+    if not isinstance(parsed, list):
+        return []
+    return [str(skill).strip() for skill in parsed if str(skill).strip()]
+
+
+def _is_resolved_profile_home(path_value: Optional[str]) -> bool:
+    """True for concrete profile homes like ``~/.hermes/profiles/name``."""
+    if not path_value:
+        return False
+    path = Path(str(path_value))
+    return path.exists() and len(path.parts) >= 2 and path.parts[-2] == "profiles"
+
+
 # Bounded registry of recently-reaped worker child exits, populated by the
 # reap loop at the top of ``dispatch_once`` and consulted by
 # ``detect_crashed_workers`` to classify a dead-pid task.
@@ -5848,7 +5982,38 @@ def _clear_failure_counter(conn: sqlite3.Connection, task_id: str) -> None:
 _clear_spawn_failures = _clear_failure_counter
 
 
-def check_respawn_guard(conn: sqlite3.Connection, task_id: str) -> Optional[str]:
+def _retry_backoff_delay_seconds(
+    failures: int,
+    *,
+    base_seconds: Optional[int] = None,
+    max_seconds: Optional[int] = None,
+) -> int:
+    """Return exponential retry delay for a consecutive failure count."""
+    if failures <= 0 or base_seconds is None:
+        return 0
+    base = _positive_int(
+        base_seconds,
+        DEFAULT_RETRY_BACKOFF_BASE_SECONDS,
+        minimum=0,
+    )
+    cap = _positive_int(
+        max_seconds,
+        DEFAULT_RETRY_BACKOFF_MAX_SECONDS,
+        minimum=0,
+    )
+    if base <= 0 or cap <= 0:
+        return 0
+    delay = base * (2 ** max(0, failures - 1))
+    return min(delay, cap)
+
+
+def check_respawn_guard(
+    conn: sqlite3.Connection,
+    task_id: str,
+    *,
+    retry_backoff_base_seconds: Optional[int] = None,
+    retry_backoff_max_seconds: Optional[int] = None,
+) -> Optional[str]:
     """Return a guard reason if ``task_id`` should NOT be re-spawned, else None.
 
     Called per ready task in ``dispatch_once`` before any claim attempt.
@@ -5895,7 +6060,7 @@ def check_respawn_guard(conn: sqlite3.Connection, task_id: str) -> Optional[str]
     genuinely dead (no live PID on this host).
     """
     row = conn.execute(
-        "SELECT last_failure_error FROM tasks WHERE id = ?",
+        "SELECT last_failure_error, consecutive_failures FROM tasks WHERE id = ?",
         (task_id,),
     ).fetchone()
     if row is None:
@@ -5944,7 +6109,29 @@ def check_respawn_guard(conn: sqlite3.Connection, task_id: str) -> Optional[str]
     if err and _RESPAWN_BLOCKER_RE.search(err):
         return "blocker_auth"
 
-    # 3. Completed run within guard window — proof of recent success.
+    # 3. Generic exponential retry backoff for crash/spawn/timeout loops.
+    failures = int(row["consecutive_failures"] or 0)
+    latest_run = conn.execute(
+        "SELECT outcome, ended_at FROM task_runs "
+        "WHERE task_id = ? AND ended_at IS NOT NULL "
+        "ORDER BY ended_at DESC LIMIT 1",
+        (task_id,),
+    ).fetchone()
+    if (
+        failures > 0
+        and latest_run is not None
+        and latest_run["outcome"] in {"spawn_failed", "crashed", "timed_out", "gave_up"}
+    ):
+        delay = _retry_backoff_delay_seconds(
+            failures,
+            base_seconds=retry_backoff_base_seconds,
+            max_seconds=retry_backoff_max_seconds,
+        )
+        ended_at = latest_run["ended_at"]
+        if delay > 0 and ended_at is not None and (now - int(ended_at)) < delay:
+            return "retry_backoff"
+
+    # 4. Completed run within guard window — proof of recent success.
     cutoff = now - _RESPAWN_GUARD_SUCCESS_WINDOW
     if conn.execute(
         "SELECT id FROM task_runs "
@@ -6035,6 +6222,8 @@ def dispatch_once(
     board: Optional[str] = None,
     default_assignee: Optional[str] = None,
     max_in_progress_per_profile: Optional[int] = None,
+    retry_backoff_base_seconds: Optional[int] = None,
+    retry_backoff_max_seconds: Optional[int] = None,
 ) -> DispatchResult:
     """Run one dispatcher tick.
 
@@ -6109,7 +6298,7 @@ def dispatch_once(
         )
 
     ready_rows = conn.execute(
-        "SELECT id, assignee FROM tasks "
+        "SELECT id, assignee, skills FROM tasks "
         "WHERE status = 'ready' AND claim_lock IS NULL "
         "ORDER BY priority DESC, created_at ASC"
     ).fetchall()
@@ -6222,9 +6411,10 @@ def dispatch_once(
         # the task would loop back to ``ready`` on next tick, and we'd
         # burn CPU forever (#kanban-dispatcher-crash-loop 2026-05-05).
         try:
-            from hermes_cli.profiles import profile_exists  # local import: avoids cycle
+            from hermes_cli.profiles import profile_exists, normalize_profile_name  # local import: avoids cycle
         except Exception:
             profile_exists = None  # type: ignore[assignment]
+            normalize_profile_name = lambda name: str(name).strip()  # type: ignore[assignment]
         if profile_exists is not None and not profile_exists(row_assignee):
             # Bucket separately from skipped_unassigned: the operator
             # cannot fix this by assigning a profile (the assignee IS the
@@ -6233,6 +6423,34 @@ def dispatch_once(
             # multi-lane setups where the ready queue is steadily full
             # of human-pulled work.
             result.skipped_nonspawnable.append(row["id"])
+            continue
+        row_skills = _parse_task_skills(row["skills"] if "skills" in row.keys() else None)
+        row_profile_arg = normalize_profile_name(row_assignee)
+        try:
+            from hermes_cli.profiles import resolve_profile_env as _resolve_profile_env
+            row_hermes_home = _resolve_profile_env(row_profile_arg)
+        except Exception:
+            row_hermes_home = os.environ.get("HERMES_HOME")
+        preflight_error = None
+        if _is_resolved_profile_home(row_hermes_home):
+            preflight_error = _worker_skills_preflight_error(
+                row_profile_arg,
+                row_hermes_home,
+                row_skills,
+            )
+        if preflight_error is not None:
+            if dry_run:
+                # Dry-run must catch fatal worker bootstrap errors instead of
+                # reporting the task as spawnable. In live mode the same error
+                # is recorded through the existing spawn-failure path below.
+                result.respawn_guarded.append((row["id"], preflight_error))
+            else:
+                auto = _record_spawn_failure(
+                    conn, row["id"], preflight_error,
+                    failure_limit=failure_limit,
+                )
+                if auto:
+                    result.auto_blocked.append(row["id"])
             continue
         # Per-profile concurrency cap (#21582): even if there's global
         # headroom, refuse to spawn for an assignee that's already at
@@ -6255,7 +6473,12 @@ def dispatch_once(
         # still trips the auto-block circuit breaker after failure_limit
         # consecutive failures, so a persistent auth error eventually
         # blocks via the normal path rather than on first occurrence.
-        guard_reason = check_respawn_guard(conn, row["id"])
+        guard_reason = check_respawn_guard(
+            conn,
+            row["id"],
+            retry_backoff_base_seconds=retry_backoff_base_seconds,
+            retry_backoff_max_seconds=retry_backoff_max_seconds,
+        )
         if guard_reason is not None:
             result.respawn_guarded.append((row["id"], guard_reason))
             # Emit an event so operators can see why the task was
@@ -6610,39 +6833,91 @@ def _resolve_hermes_argv() -> list[str]:
     return _module_hermes_argv()
 
 
-def _kanban_worker_skill_available(hermes_home: Optional[str]) -> bool:
-    """True if the bundled ``kanban-worker`` skill resolves for the home the
-    spawned worker will run under.
+_WORKER_SKILL_RESOLUTION_CACHE: dict[tuple[str, str], tuple[bool, str]] = {}
 
-    The dispatcher injects ``--skills kanban-worker`` into every worker. When
-    the worker activates a profile (``hermes -p <name>``), its ``SKILLS_DIR``
-    becomes ``<profile_home>/skills`` — which on many profiles does NOT contain
-    the bundled skill (it ships in the *default* root home, not every
-    profile-scoped skills dir). Preloading a missing skill is fatal at CLI
-    startup (``ValueError: Unknown skill(s): kanban-worker``), aborting the
-    worker before the agent loop runs. Gate the flag on actual resolvability;
-    the kanban lifecycle contract is still injected via ``KANBAN_GUIDANCE``, so
-    omitting the flag only drops the supplementary pattern library.
+
+def _worker_skill_resolution_error(skill_name: str, hermes_home: Optional[str]) -> str | None:
+    """Return a resolver error if ``skill_name`` cannot be preloaded.
+
+    This intentionally exercises Hermes' real profile-scoped skill resolver
+    instead of doing a shallow ``SKILL.md`` existence check. The failure that
+    prompted this guard was exactly an exists-but-not-loadable state: duplicate
+    profile/local + external skill candidates made ``--skills kanban-worker``
+    fatal at CLI startup, but the old file-exists preflight reported green.
     """
-    from pathlib import Path as _Path
+    skill = (skill_name or "").strip()
+    if not skill:
+        return None
+    home = (hermes_home or str(Path.home() / ".hermes")).strip()
+    cache_key = (home, skill)
+    cached = _WORKER_SKILL_RESOLUTION_CACHE.get(cache_key)
+    if cached is not None:
+        ok, error = cached
+        return None if ok else error
 
-    # An unset HERMES_HOME means the worker falls back to the default root
-    # home (``~/.hermes``), which ships the bundled skill.
-    base = _Path(hermes_home) if hermes_home else (_Path.home() / ".hermes")
-    skills_root = base / "skills"
-    if not skills_root.is_dir():
-        return False
-    # Canonical bundled location first (cheap), then a bounded scan for
-    # profiles that have it nested elsewhere.
-    if (skills_root / "devops" / "kanban-worker" / "SKILL.md").is_file():
-        return True
+    probe = (
+        "import json; "
+        "from tools.skills_tool import skill_view; "
+        "data=json.loads(skill_view(%r, preprocess=False)); "
+        "print(json.dumps({'success': data.get('success'), 'error': data.get('error'), 'name': data.get('name')}))"
+    ) % skill
+    env = dict(os.environ)
+    env["HERMES_HOME"] = home
+    env.setdefault("HERMES_KANBAN_TASK", "skill-preflight")
+    hermes_root = Path(__file__).resolve().parents[1]
+    env["PYTHONPATH"] = str(hermes_root) + os.pathsep + env.get("PYTHONPATH", "")
     try:
-        for skill_md in skills_root.rglob("kanban-worker/SKILL.md"):
-            if skill_md.is_file():
-                return True
-    except OSError:
-        pass
-    return False
+        proc = subprocess.run(
+            [sys.executable, "-c", probe],
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            env=env,
+            timeout=15,
+            check=False,
+        )
+    except Exception as exc:
+        error = f"{skill}: resolver probe failed: {exc}"
+        _WORKER_SKILL_RESOLUTION_CACHE[cache_key] = (False, error)
+        return error
+    output = (proc.stdout or "").strip().splitlines()[-1:] or [""]
+    try:
+        data = json.loads(output[0])
+    except Exception:
+        detail = (proc.stderr or proc.stdout or "").strip()[:500]
+        error = f"{skill}: resolver probe returned invalid output: {detail or 'empty'}"
+        _WORKER_SKILL_RESOLUTION_CACHE[cache_key] = (False, error)
+        return error
+    if proc.returncode == 0 and data.get("success"):
+        _WORKER_SKILL_RESOLUTION_CACHE[cache_key] = (True, "")
+        return None
+    error = f"{skill}: {data.get('error') or (proc.stderr or 'unknown resolver failure').strip()}"
+    _WORKER_SKILL_RESOLUTION_CACHE[cache_key] = (False, error)
+    return error
+
+
+def _worker_skills_preflight_error(
+    profile: str,
+    hermes_home: Optional[str],
+    task_skills: Optional[list[str]] = None,
+) -> str | None:
+    """Validate all skills the dispatcher will force-load before Popen."""
+    required: list[str] = ["kanban-worker"]
+    for skill in task_skills or []:
+        if skill and skill not in required:
+            required.append(skill)
+    errors = [
+        err for skill in required
+        if (err := _worker_skill_resolution_error(skill, hermes_home))
+    ]
+    if not errors:
+        return None
+    return f"skill preflight failed for profile {profile}: " + "; ".join(errors)
+
+
+def _kanban_worker_skill_available(hermes_home: Optional[str]) -> bool:
+    """Backward-compatible boolean wrapper for the real resolver preflight."""
+    return _worker_skill_resolution_error("kanban-worker", hermes_home) is None
 
 
 def _worker_terminal_timeout_env(
@@ -6714,8 +6989,10 @@ def _default_spawn(
     # profile-specific config entirely.  Fixes profile-scoped fallback_providers
     # being invisible to kanban workers.
     from hermes_cli.profiles import resolve_profile_env
+    profile_home_resolved = False
     try:
         env["HERMES_HOME"] = resolve_profile_env(profile_arg)
+        profile_home_resolved = True
     except FileNotFoundError:
         # Profile dir doesn't exist — defer resolution to the CLI's
         # _apply_profile_override() via HERMES_PROFILE (set below).
@@ -6732,6 +7009,15 @@ def _default_spawn(
         env["HERMES_KANBAN_RUN_ID"] = str(task.current_run_id)
     if task.claim_lock:
         env["HERMES_KANBAN_CLAIM_LOCK"] = task.claim_lock
+    skill_preflight_error = None
+    if profile_home_resolved and _is_resolved_profile_home(env.get("HERMES_HOME")):
+        skill_preflight_error = _worker_skills_preflight_error(
+            profile_arg,
+            env.get("HERMES_HOME"),
+            task.skills,
+        )
+    if skill_preflight_error is not None:
+        raise RuntimeError(skill_preflight_error)
     # Goal-loop mode: the worker reads these and wraps its run in the
     # Ralph-style /goal judge loop (see cli.py quiet-mode path). Only set
     # when enabled so non-goal tasks keep a clean env.
@@ -6781,20 +7067,10 @@ def _default_spawn(
     ]
     # Auto-load the kanban-worker skill so every dispatched worker
     # has the pattern library (good summary/metadata shapes, retry
-    # diagnostics, block-reason examples) in its context, even if
-    # the profile hasn't wired it into skills config. The MANDATORY
-    # lifecycle is already in the system prompt via KANBAN_GUIDANCE;
-    # this skill is the deeper reference. Users can point a profile
-    # at a different/additional skill via config if they want —
-    # --skills is additive to the profile's default skill set.
-    #
-    # Only add the flag when the skill actually resolves for the home
-    # the worker runs under: the bundled skill is absent from many
-    # profile-scoped skills dirs, and preloading a missing skill is
-    # fatal at CLI startup. Omitting it is safe — the lifecycle
-    # contract still ships via KANBAN_GUIDANCE.
-    if _kanban_worker_skill_available(env.get("HERMES_HOME")):
-        cmd.extend(["--skills", "kanban-worker"])
+    # diagnostics, block-reason examples) in its context. The preflight
+    # above uses Hermes' real profile-scoped skill resolver and fails
+    # before Popen if this required skill is not loadable.
+    cmd.extend(["--skills", "kanban-worker"])
     # Per-task force-loaded skills. Each name goes in its own
     # `--skills X` pair rather than a single comma-joined arg: the CLI
     # accepts both forms (action='append' + comma-split), but

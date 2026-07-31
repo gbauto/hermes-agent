@@ -2027,6 +2027,11 @@ DEFAULT_CONFIG = {
         # same task/profile (spawn_failed, timed_out, or crashed). Reassignment
         # resets the streak for the new profile.
         "failure_limit": 2,
+        # Exponential backoff between consecutive non-success attempts for the
+        # same task. Attempts still trip the failure_limit/max_retries circuit
+        # breaker; backoff only prevents crash-loop respawns every tick.
+        "retry_backoff_base_seconds": 60,
+        "retry_backoff_max_seconds": 15 * 60,
         # Worker stdout/stderr logs rotate at spawn time. Defaults preserve
         # the historical 2 MiB + one-backup behavior; long-running workers can
         # raise these to keep more early failure evidence.

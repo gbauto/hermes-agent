@@ -150,8 +150,10 @@ def test_kanban_notifier_dedupes_board_slugs_pointing_to_same_db(tmp_path, monke
     asyncio.run(_run_one_notifier_tick(monkeypatch, runner))
 
     assert len(adapter.sent) == 1
-    assert "Kanban" in adapter.sent[0]["text"]
-    assert tid in adapter.sent[0]["text"]
+    text = adapter.sent[0]["text"]
+    assert text.startswith("✅ - 1/1 - notify once - done once - worker - ")
+    assert "source kanban-gateway" not in text
+    assert tid not in text  # compact human-facing format hides raw id when a title exists
 
 
 def test_kanban_notifier_claim_prevents_second_watcher_send(tmp_path, monkeypatch):

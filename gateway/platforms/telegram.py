@@ -1850,6 +1850,31 @@ class TelegramAdapter(BasePlatformAdapter):
         else:  # "first" (default)
             return chunk_index == 0
 
+    def _inline_keyboard_markup_from_metadata(self, metadata: Optional[Dict[str, Any]]):
+        """Build Telegram InlineKeyboardMarkup from generic metadata rows."""
+        if not metadata:
+            return None
+        rows = metadata.get("telegram_inline_keyboard")
+        if not rows:
+            return None
+        keyboard_rows = []
+        for row in rows:
+            buttons = []
+            for item in row or []:
+                if not isinstance(item, dict):
+                    continue
+                text = str(item.get("text") or "")[:64]
+                if not text:
+                    continue
+                if item.get("url"):
+                    buttons.append(InlineKeyboardButton(text, url=str(item["url"])))
+                elif item.get("callback_data"):
+                    data = str(item["callback_data"])[:64]
+                    buttons.append(InlineKeyboardButton(text, callback_data=data))
+            if buttons:
+                keyboard_rows.append(buttons)
+        return InlineKeyboardMarkup(keyboard_rows) if keyboard_rows else None
+
     async def send(
         self,
         chat_id: str,
@@ -1887,6 +1912,7 @@ class TelegramAdapter(BasePlatformAdapter):
             message_ids = []
             thread_id = self._metadata_thread_id(metadata)
             requested_thread_id = self._message_thread_id_for_send(thread_id)
+            reply_markup = self._inline_keyboard_markup_from_metadata(metadata)
             used_thread_fallback = False
             
             try:
@@ -1959,6 +1985,7 @@ class TelegramAdapter(BasePlatformAdapter):
                                 reply_to_message_id=reply_to_id,
                                 **thread_kwargs,
                                 **self._link_preview_kwargs(),
+                                reply_markup=reply_markup if i == 0 else None,
                                 **self._notification_kwargs(metadata),
                             )
                         except Exception as md_error:
@@ -1973,6 +2000,7 @@ class TelegramAdapter(BasePlatformAdapter):
                                     reply_to_message_id=reply_to_id,
                                     **thread_kwargs,
                                     **self._link_preview_kwargs(),
+                                    reply_markup=reply_markup if i == 0 else None,
                                     **self._notification_kwargs(metadata),
                                 )
                             else:
@@ -3245,6 +3273,72 @@ class TelegramAdapter(BasePlatformAdapter):
             # Catch-all (e.g. page counter button "mx:noop")
             await query.answer()
 
+    async def _handle_kanban_blocker_callback(self, query, data: str) -> None:
+        """Resolve blocker notification buttons with normal Telegram ACLs."""
+        query_message = getattr(query, "message", None)
+        query_chat_id = getattr(query_message, "chat_id", None)
+        query_chat = getattr(query_message, "chat", None)
+        query_chat_type = getattr(query_chat, "type", None)
+        query_thread_id = getattr(query_message, "message_thread_id", None)
+        query_user_name = getattr(query.from_user, "first_name", None)
+        caller_id = str(getattr(query.from_user, "id", ""))
+        if not self._is_callback_user_authorized(
+            caller_id,
+            chat_id=query_chat_id,
+            chat_type=str(query_chat_type) if query_chat_type is not None else None,
+            thread_id=str(query_thread_id) if query_thread_id is not None else None,
+            user_name=query_user_name,
+        ):
+            await query.answer(text="⛔ You are not authorized to manage Kanban blockers.")
+            return
+
+        parts = data.split(":", 3)
+        if len(parts) != 4:
+            await query.answer(text="Invalid Kanban action.")
+            return
+        _prefix, action, board, task_id = parts
+        actor = query_user_name or caller_id or "telegram"
+        try:
+            from hermes_cli import kanban_db as _kb
+            conn = _kb.connect(board=board or None)
+            try:
+                if action == "u":
+                    ok = _kb.unblock_task(conn, task_id)
+                    answer = "✅ Kanban task unblocked." if ok else "Task was not blocked."
+                    edit = f"✅ Kanban {task_id} unblocked by {actor}"
+                elif action == "p":
+                    ok, reason = _kb.promote_task(conn, task_id, actor=actor, reason="telegram blocker action")
+                    answer = "🚀 Kanban task promoted." if ok else f"Cannot promote: {reason}"
+                    edit = f"🚀 Kanban {task_id} promoted by {actor}" if ok else f"Kanban {task_id} still blocked: {reason}"
+                elif action == "k":
+                    answer = "⏸ Kept blocked."
+                    edit = f"⏸ Kanban {task_id} kept blocked by {actor}"
+                elif action == "o":
+                    answer = f"Board: {board} / task {task_id}"
+                    edit = None
+                else:
+                    await query.answer(text="Invalid Kanban action.")
+                    return
+            finally:
+                conn.close()
+        except Exception as exc:
+            logger.error("[%s] Kanban blocker callback failed: %s", self.name, exc, exc_info=True)
+            await query.answer(text="Kanban action failed; check gateway logs.")
+            return
+        await query.answer(text=answer)
+        if edit:
+            try:
+                await query.edit_message_text(
+                    text=self.format_message(edit),
+                    parse_mode=ParseMode.MARKDOWN_V2,
+                    reply_markup=None,
+                )
+            except Exception:
+                try:
+                    await query.edit_message_text(text=edit, reply_markup=None)
+                except Exception:
+                    pass
+
     async def _handle_callback_query(
         self, update: "Update", context: "ContextTypes.DEFAULT_TYPE"
     ) -> None:
@@ -3277,6 +3371,11 @@ class TelegramAdapter(BasePlatformAdapter):
                 query_thread_id=query_thread_id,
                 query_user_name=query_user_name,
             )
+            return
+
+        # --- Kanban blocker callbacks (kbb:action:board:task_id) ---
+        if data.startswith("kbb:"):
+            await self._handle_kanban_blocker_callback(query, data)
             return
 
         # --- Kanban proposal callbacks (kbp:p|s:board:task_id) ---

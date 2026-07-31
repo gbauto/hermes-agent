@@ -548,6 +548,52 @@ def test_notify_sub_crud(kanban_home):
         conn.close()
 
 
+def test_create_task_auto_subscribes_configured_home(kanban_home):
+    (kanban_home / "config.yaml").write_text(
+        "kanban:\n"
+        "  auto_subscribe_home: true\n"
+        "telegram:\n"
+        "  homeChannel: '123'\n"
+    )
+    conn = kb.connect()
+    try:
+        tid = kb.create_task(conn, title="x", assignee="w", created_by="router")
+        subs = kb.list_notify_subs(conn, tid)
+        assert len(subs) == 1
+        assert subs[0]["platform"] == "telegram"
+        assert subs[0]["chat_id"] == "123"
+        assert subs[0]["notifier_profile"] == "router"
+    finally:
+        conn.close()
+
+
+def test_create_task_inherits_parent_notify_subscriptions(kanban_home):
+    conn = kb.connect()
+    try:
+        parent = kb.create_task(conn, title="parent", assignee="w")
+        kb.add_notify_sub(
+            conn,
+            task_id=parent,
+            platform="telegram",
+            chat_id="123",
+            notifier_profile="default",
+        )
+        child = kb.create_task(
+            conn,
+            title="child",
+            assignee="w",
+            parents=[parent],
+            created_by="worker",
+        )
+        subs = kb.list_notify_subs(conn, child)
+        assert len(subs) == 1
+        assert subs[0]["platform"] == "telegram"
+        assert subs[0]["chat_id"] == "123"
+        assert subs[0]["notifier_profile"] == "default"
+    finally:
+        conn.close()
+
+
 def test_notify_cursor_advances(kanban_home):
     conn = kb.connect()
     try:

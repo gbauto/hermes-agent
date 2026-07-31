@@ -1559,6 +1559,87 @@ def test_dispatch_spawn_failure_releases_claim(kanban_home, all_assignees_spawna
         assert kb.get_task(conn, t).claim_lock is None
 
 
+def test_dispatch_spawn_failure_uses_exponential_retry_backoff(
+    kanban_home, all_assignees_spawnable, monkeypatch
+):
+    """A failed task must not respawn every dispatcher tick.
+
+    First failure waits base seconds; second failure waits base*2 seconds.
+    The dispatcher keeps retrying the same task row instead of creating a
+    duplicate card.
+    """
+    now = 100_000
+    monkeypatch.setattr(kb.time, "time", lambda: now)
+    spawned_ids: list[str] = []
+
+    def boom(task, workspace):
+        spawned_ids.append(task.id)
+        raise RuntimeError("worker crash-loop")
+
+    with kb.connect() as conn:
+        t = kb.create_task(conn, title="boom", assignee="alice")
+        first = kb.dispatch_once(
+            conn,
+            spawn_fn=boom,
+            failure_limit=3,
+            retry_backoff_base_seconds=60,
+            retry_backoff_max_seconds=600,
+        )
+        assert spawned_ids == [t]
+        assert first.auto_blocked == []
+        assert kb.get_task(conn, t).status == "ready"
+
+        now += 30
+        second = kb.dispatch_once(
+            conn,
+            spawn_fn=boom,
+            failure_limit=3,
+            retry_backoff_base_seconds=60,
+            retry_backoff_max_seconds=600,
+        )
+        assert (t, "retry_backoff") in second.respawn_guarded
+        assert spawned_ids == [t]
+        assert conn.execute("SELECT COUNT(*) FROM tasks").fetchone()[0] == 1
+
+        now += 30
+        third = kb.dispatch_once(
+            conn,
+            spawn_fn=boom,
+            failure_limit=3,
+            retry_backoff_base_seconds=60,
+            retry_backoff_max_seconds=600,
+        )
+        assert spawned_ids == [t, t]
+        assert third.auto_blocked == []
+        assert kb.get_task(conn, t).consecutive_failures == 2
+
+        now += 119
+        fourth = kb.dispatch_once(
+            conn,
+            spawn_fn=boom,
+            failure_limit=3,
+            retry_backoff_base_seconds=60,
+            retry_backoff_max_seconds=600,
+        )
+        assert (t, "retry_backoff") in fourth.respawn_guarded
+        assert spawned_ids == [t, t]
+
+        now += 1
+        final = kb.dispatch_once(
+            conn,
+            spawn_fn=boom,
+            failure_limit=3,
+            retry_backoff_base_seconds=60,
+            retry_backoff_max_seconds=600,
+        )
+        assert spawned_ids == [t, t, t]
+        assert t in final.auto_blocked
+        task = kb.get_task(conn, t)
+        assert task.status == "blocked"
+        assert task.consecutive_failures == 3
+        assert conn.execute("SELECT COUNT(*) FROM tasks").fetchone()[0] == 1
+
+
 def test_dispatch_max_spawn_counts_existing_running_tasks(
     kanban_home, all_assignees_spawnable
 ):

@@ -16,8 +16,13 @@ import os
 import re
 import sqlite3
 import time
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
+try:
+    from zoneinfo import ZoneInfo
+except ImportError:  # pragma: no cover - Python <3.9 fallback not expected here
+    ZoneInfo = None  # type: ignore
 
 # Match the logger run.py uses (logging.getLogger(__name__) where __name__ ==
 # "gateway.run") so extracted log records keep their original logger name.
@@ -239,6 +244,7 @@ class GatewayKanbanWatchersMixin:
                                     "events": events,
                                     "task": task,
                                     "board": slug,
+                                    "notice_context": self._kanban_notice_context(conn, sub["task_id"]),
                                 })
                         finally:
                             conn.close()
@@ -282,37 +288,13 @@ class GatewayKanbanWatchersMixin:
                         who = (task.assignee if task and task.assignee else None)
                         tag = f"@{who} " if who else ""
                         if kind == "completed":
-                            # Prefer the run's summary (the worker's
-                            # intentional human-facing handoff, carried
-                            # in the event payload), then fall back to
-                            # task.result for legacy rows written before
-                            # runs shipped. Auto-completed grouping records
-                            # have no worker run; call that out instead of
-                            # making the parent look like execution finished.
-                            handoff = ""
-                            payload_summary = None
-                            payload_reason = ""
-                            if ev.payload:
-                                if ev.payload.get("summary"):
-                                    payload_summary = str(ev.payload["summary"])
-                                if ev.payload.get("reason"):
-                                    payload_reason = str(ev.payload["reason"])
-                            if payload_summary:
-                                lines = payload_summary.strip().splitlines()
-                                h = lines[0][:200] if lines else payload_summary[:200]
-                                handoff = f"\nSummary: {h}"
-                            elif payload_reason and "grouping record" in payload_reason.lower():
-                                handoff = "\nSummary: grouping record, first child owns execution"
-                            elif task and task.result:
-                                lines = task.result.strip().splitlines()
-                                r = lines[0][:160] if lines else task.result[:160]
-                                handoff = f"\nSummary: {r}"
-                            board_line = self._kanban_board_line(board_slug, sub["task_id"])
-                            board_context = f"\n{board_line}" if board_line else ""
-                            source = f"\n{board_slug or 'default'} · {sub['task_id']} · source kanban-gateway"
-                            msg = (
-                                f"✔ {tag}Kanban {sub['task_id']} done"
-                                f" - {title}{handoff}{board_context}{source}"
+                            msg = self._format_kanban_completed_notification(
+                                sub=sub,
+                                task=task,
+                                event=ev,
+                                board_slug=board_slug,
+                                title=title,
+                                notice_context=d.get("notice_context"),
                             )
                         elif kind == "blocked":
                             msg, blocked_metadata = self._format_kanban_blocked_notification(
@@ -498,6 +480,107 @@ class GatewayKanbanWatchersMixin:
         """Return a Telegram-friendly Board line for every Kanban update."""
         url = self._kanban_board_url(board_slug, task_id)
         return f"Board: {url}" if url else ""
+
+    def _kanban_notice_context(self, conn: sqlite3.Connection, task_id: str) -> dict[str, Any]:
+        """Return parent title + tree progress for compact terminal pings."""
+        current = {
+            str(row[0]): {"id": row[0], "title": row[1], "status": row[2]}
+            for row in conn.execute("SELECT id, title, status FROM tasks")
+        }
+        parents: dict[str, set[str]] = {}
+        children: dict[str, set[str]] = {}
+        try:
+            for parent_id, child_id in conn.execute("SELECT parent_id, child_id FROM task_links"):
+                parents.setdefault(str(child_id), set()).add(str(parent_id))
+                children.setdefault(str(parent_id), set()).add(str(child_id))
+        except sqlite3.OperationalError:
+            pass
+
+        root = str(task_id)
+        seen: set[str] = set()
+        while parents.get(root):
+            if root in seen:
+                break
+            seen.add(root)
+            root = sorted(parents[root])[0]
+
+        tree: set[str] = set()
+        stack = [root]
+        while stack:
+            node = stack.pop()
+            if node in tree:
+                continue
+            tree.add(node)
+            stack.extend(children.get(node) or [])
+        if not tree:
+            tree = {str(task_id)}
+        done_statuses = {"done", "archived", "merged", "complete"}
+        done = sum(1 for member in tree if current.get(member, {}).get("status") in done_statuses)
+        total = max(len(tree), 1)
+        title = current.get(root, {}).get("title") or current.get(str(task_id), {}).get("title") or str(task_id)
+        return {"root_id": root, "parent_title": str(title), "done": done, "total": total}
+
+    def _kanban_pst_stamp(self, value: object = None) -> str:
+        """Render notification time as mm/dd hh:mm PST for Telegram summaries."""
+        dt = None
+        if isinstance(value, datetime):
+            dt = value
+        elif value not in (None, ""):
+            try:
+                dt = datetime.fromtimestamp(float(str(value)))
+            except (TypeError, ValueError):
+                try:
+                    dt = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+                except ValueError:
+                    dt = None
+        if dt is None:
+            dt = datetime.now()
+        if ZoneInfo is not None:
+            if dt.tzinfo is None:
+                dt = dt.astimezone()
+            dt = dt.astimezone(ZoneInfo("America/Los_Angeles"))
+        return dt.strftime("%m/%d %H:%M PST")
+
+    def _format_kanban_completed_notification(
+        self,
+        *,
+        sub: dict,
+        task,
+        event,
+        board_slug: Optional[str],
+        title: str,
+        notice_context: Optional[dict[str, Any]],
+    ) -> str:
+        """Greg compact format: emoji - x/x - parent title - summary - profile - mm/dd hh:mm PST."""
+        payload_summary = ""
+        payload_reason = ""
+        if getattr(event, "payload", None):
+            if event.payload.get("summary"):
+                payload_summary = str(event.payload["summary"])
+            if event.payload.get("reason"):
+                payload_reason = str(event.payload["reason"])
+        if payload_summary:
+            summary = (payload_summary.strip().splitlines() or [payload_summary])[0][:200]
+        elif payload_reason and "grouping record" in payload_reason.lower():
+            summary = "grouping record, first child owns execution"
+        elif task and getattr(task, "result", None):
+            result = str(task.result)
+            summary = (result.strip().splitlines() or [result])[0][:160]
+        else:
+            summary = "no summary recorded"
+        ctx = notice_context or {}
+        done = int(ctx.get("done") or 1)
+        total = int(ctx.get("total") or 1)
+        parent_title = str(ctx.get("parent_title") or title or sub.get("task_id") or "untitled parent task")
+        profile = str(getattr(task, "assignee", None) or "unassigned")
+        completed_at = getattr(task, "completed_at", None) if task is not None else None
+        line = (
+            f"✅ - {done}/{max(total, 1)} - {parent_title} - {summary} - "
+            f"{profile} - {self._kanban_pst_stamp(completed_at)}"
+        )
+        board_line = self._kanban_board_line(board_slug, sub["task_id"])
+        board_context = f"\n{board_line}" if board_line else ""
+        return line + board_context
 
     def _kanban_blocked_issue(self, task, event, board_slug: Optional[str] = None) -> str:
         """Return a plain-English blocker/root cause for the Issue line."""
@@ -866,6 +949,243 @@ class GatewayKanbanWatchersMixin:
                 return url
         return ""
 
+    def _kanban_artifact_manifest_items(self, path: str) -> list[Any]:
+        """Return artifact entries declared by a task-specific JSON manifest."""
+        import json as _json
+
+        try:
+            with open(os.path.expanduser(path), "r", encoding="utf-8") as f:
+                data = _json.load(f)
+        except Exception as exc:
+            logger.debug("kanban notifier: cannot read artifact manifest %s: %s", path, exc)
+            return []
+        if isinstance(data, list):
+            return data
+        if not isinstance(data, dict):
+            return []
+        entries: list[Any] = []
+        for key in ("artifacts", "deliverables", "outputs", "files", "urls"):
+            value = data.get(key)
+            if isinstance(value, list):
+                entries.extend(value)
+        for key in ("public_url", "url", "receipt_url"):
+            value = data.get(key)
+            if isinstance(value, str) and value.startswith(("http://", "https://")):
+                entries.append({"url": value, "kind": "public_url"})
+        return entries
+
+    def _collect_kanban_artifacts(
+        self,
+        *,
+        adapter,
+        event_payload: Optional[dict],
+        task,
+    ) -> tuple[list[str], list[str]]:
+        """Collect task-specific native upload paths and public links.
+
+        Explicit completion-event artifacts are authoritative. When present,
+        summary/result prose is never scanned; missing explicit paths are logged
+        and skipped instead of being replaced by unrelated existing files.
+        Legacy prose extraction is only used when no explicit artifact list was
+        recorded, and then it is gated to files owned by the task workspace and
+        newer than task creation.
+        """
+        from pathlib import Path as _Path
+        from gateway.platforms.base import BasePlatformAdapter
+
+        explicit_items: list[Any] = []
+        if isinstance(event_payload, dict):
+            raw = event_payload.get("artifacts")
+            if isinstance(raw, (list, tuple)):
+                explicit_items.extend(raw)
+            elif isinstance(raw, str):
+                explicit_items.append(raw)
+
+        authoritative = bool(explicit_items)
+        candidates: list[dict[str, Any]] = []
+
+        def _as_candidate(item: Any, *, explicit: bool) -> Optional[dict[str, Any]]:
+            if isinstance(item, str):
+                value = item.strip()
+                if not value:
+                    return None
+                if value.startswith(("http://", "https://")):
+                    return {"url": value, "explicit": explicit, "kind": "public_url"}
+                return {"path": value, "explicit": explicit}
+            if isinstance(item, dict):
+                path = item.get("path") or item.get("file") or item.get("file_path")
+                url = item.get("url") or item.get("href") or item.get("public_url")
+                out: dict[str, Any] = {"explicit": explicit}
+                for key in (
+                    "producer_task_id", "producer_id", "task_id", "reused_input",
+                    "input", "kind", "sha256", "hash", "role", "created_at",
+                ):
+                    if key in item:
+                        out[key] = item[key]
+                if isinstance(url, str) and url.startswith(("http://", "https://")):
+                    out["url"] = url.strip()
+                    return out
+                if isinstance(path, str) and path.strip():
+                    out["path"] = path.strip()
+                    return out
+            return None
+
+        for item in explicit_items:
+            cand = _as_candidate(item, explicit=True)
+            if not cand:
+                continue
+            candidates.append(cand)
+            path = cand.get("path")
+            if (
+                isinstance(path, str)
+                and _Path(os.path.expanduser(path)).suffix.lower() == ".json"
+                and os.path.isfile(os.path.expanduser(path))
+            ):
+                for manifest_item in self._kanban_artifact_manifest_items(path):
+                    manifest_cand = _as_candidate(manifest_item, explicit=True)
+                    if manifest_cand:
+                        manifest_cand.setdefault(
+                            "producer_task_id",
+                            cand.get("producer_task_id") or cand.get("task_id"),
+                        )
+                        candidates.append(manifest_cand)
+
+        if not authoritative:
+            if isinstance(event_payload, dict):
+                summary = event_payload.get("summary")
+                if isinstance(summary, str) and summary:
+                    paths, _ = adapter.extract_local_files(summary)
+                    candidates.extend({"path": p, "explicit": False} for p in paths)
+            if task is not None and getattr(task, "result", None):
+                paths, _ = adapter.extract_local_files(str(task.result))
+                candidates.extend({"path": p, "explicit": False} for p in paths)
+
+        task_id = str(getattr(task, "id", "") or "")
+        created_at = int(getattr(task, "created_at", 0) or 0)
+        workspace = getattr(task, "workspace_path", None)
+        workspace_resolved: Optional[_Path] = None
+        if workspace:
+            try:
+                workspace_resolved = _Path(os.path.expanduser(str(workspace))).resolve(strict=False)
+            except Exception:
+                workspace_resolved = None
+
+        descendant_ids: set[str] = set()
+        if isinstance(event_payload, dict):
+            for key in ("verified_cards", "descendant_task_ids", "producer_task_ids"):
+                value = event_payload.get(key)
+                if isinstance(value, (list, tuple, set)):
+                    descendant_ids.update(str(v) for v in value if v)
+        if task_id:
+            descendant_ids.add(task_id)
+
+        def _owned(path: str, cand: dict[str, Any]) -> bool:
+            if cand.get("explicit"):
+                return True
+            producer = cand.get("producer_task_id") or cand.get("producer_id") or cand.get("task_id")
+            if producer and str(producer) in descendant_ids:
+                return True
+            try:
+                resolved = _Path(os.path.expanduser(path)).resolve(strict=False)
+            except Exception:
+                return False
+            if workspace_resolved is not None:
+                try:
+                    resolved.relative_to(workspace_resolved)
+                    return True
+                except ValueError:
+                    return False
+            return False
+
+        def _too_old(path: str, cand: dict[str, Any]) -> bool:
+            if cand.get("explicit"):
+                return False
+            if cand.get("reused_input") or cand.get("input"):
+                return True
+            if not created_at:
+                return False
+            try:
+                return int(os.path.getmtime(os.path.expanduser(path))) < created_at
+            except OSError:
+                return True
+
+        def _rank(value: str) -> tuple[int, str]:
+            hay = value.lower()
+            if any(s in hay for s in ("prd", "plan")):
+                bucket = 0
+            elif any(s in hay for s in ("receipt", "implementation")):
+                bucket = 1
+            elif hay.endswith((".html", ".htm")) or "report" in hay:
+                bucket = 2
+            elif value.startswith(("http://", "https://")):
+                bucket = 3
+            elif "manifest" in hay:
+                bucket = 4
+            elif any(s in hay for s in ("validation", "evidence", "smoke")):
+                bucket = 5
+            else:
+                bucket = 6
+            return bucket, value
+
+        valid_paths: list[str] = []
+        valid_urls: list[str] = []
+        seen_paths: set[str] = set()
+        seen_urls: set[str] = set()
+        seen_hashes: set[str] = set()
+        seen_basenames: set[str] = set()
+
+        for cand in candidates:
+            url = cand.get("url")
+            if isinstance(url, str):
+                key = url.strip()
+                if not key or key in seen_urls:
+                    continue
+                digest = cand.get("sha256") or cand.get("hash")
+                if digest and str(digest) in seen_hashes:
+                    continue
+                if digest:
+                    seen_hashes.add(str(digest))
+                seen_urls.add(key)
+                valid_urls.append(key)
+                continue
+
+            path = cand.get("path")
+            if not isinstance(path, str) or not path.strip():
+                continue
+            expanded = os.path.expanduser(path.strip())
+            if not os.path.isfile(expanded):
+                logger.debug("kanban notifier: explicit artifact missing, skipped: %s", expanded)
+                continue
+            if not _owned(expanded, cand):
+                logger.debug("kanban notifier: artifact failed ownership check: %s", expanded)
+                continue
+            if _too_old(expanded, cand):
+                logger.debug("kanban notifier: artifact failed age/input check: %s", expanded)
+                continue
+            try:
+                resolved = str(_Path(expanded).resolve(strict=False))
+            except Exception:
+                resolved = expanded
+            digest = cand.get("sha256") or cand.get("hash")
+            basename = _Path(resolved).name
+            if resolved in seen_paths:
+                continue
+            if digest and str(digest) in seen_hashes:
+                continue
+            if basename and basename in seen_basenames:
+                continue
+            seen_paths.add(resolved)
+            if digest:
+                seen_hashes.add(str(digest))
+            if basename:
+                seen_basenames.add(basename)
+            valid_paths.append(expanded)
+
+        filtered_paths = BasePlatformAdapter.filter_local_delivery_paths(valid_paths)
+        filtered_paths = sorted(filtered_paths, key=lambda p: _rank(p))
+        valid_urls = sorted(valid_urls, key=lambda u: _rank(u))
+        return filtered_paths, valid_urls
+
     async def _deliver_kanban_artifacts(
         self,
         *,
@@ -875,79 +1195,34 @@ class GatewayKanbanWatchersMixin:
         event_payload: Optional[dict],
         task,
     ) -> None:
-        """Deliver artifact files referenced by a completed kanban task.
+        """Deliver task-specific artifacts for a completed kanban task.
 
-        Workers passing ``kanban_complete(artifacts=[...])`` ship absolute
-        file paths through the completion event. Non-HTML artifacts keep the
-        native upload behavior. HTML artifacts are converted to hosted
-        Netlify/GBAutomation links and sent as text, because raw HTML uploads in
-        Telegram are noisy and unusable for normal users. Set
-        ``HERMES_KANBAN_HTML_ARTIFACT_DEBUG_UPLOAD=1`` for an explicit
-        debug/admin fallback upload when no hosted URL can be resolved.
-
-        Sources scanned, in priority order:
-          1. ``event_payload['artifacts']`` (explicit list — preferred)
-          2. ``event_payload['summary']`` (truncated first line)
-          3. ``task.result`` (legacy fallback)
-
-        Files are deduplicated, missing files are silently skipped (the
-        path may have been mentioned for reference only), and delivery
-        errors are logged but do not break the notifier loop.
+        Explicit completion artifacts are authoritative. HTML artifacts are
+        converted to hosted links when possible; non-HTML artifacts keep native
+        upload behavior. Legacy prose-discovered paths are only considered when
+        no explicit artifact list exists and pass ownership/age gates.
         """
         from pathlib import Path as _Path
+        from urllib.parse import quote as _quote
 
-        candidates: list[str] = []
-        seen: set[str] = set()
-
-        def _add(path: str) -> None:
-            if not path:
-                return
-            expanded = os.path.expanduser(path)
-            if expanded in seen:
-                return
-            if not os.path.isfile(expanded):
-                return
-            seen.add(expanded)
-            candidates.append(expanded)
-
-        # 1. Explicit artifacts list in payload.
-        if isinstance(event_payload, dict):
-            raw = event_payload.get("artifacts")
-            if isinstance(raw, (list, tuple)):
-                for item in raw:
-                    if isinstance(item, str):
-                        _add(item)
-
-            # 2. Paths embedded in the payload summary.
-            summary = event_payload.get("summary")
-            if isinstance(summary, str) and summary:
-                paths, _ = adapter.extract_local_files(summary)
-                for p in paths:
-                    _add(p)
-
-        # 3. Legacy: paths embedded in task.result.
-        if task is not None and getattr(task, "result", None):
-            result_text = str(task.result)
-            paths, _ = adapter.extract_local_files(result_text)
-            for p in paths:
-                _add(p)
-
-        if not candidates:
-            return
-
-        from gateway.platforms.base import BasePlatformAdapter
-        candidates = BasePlatformAdapter.filter_local_delivery_paths(candidates)
-        if not candidates:
+        candidates, artifact_links = self._collect_kanban_artifacts(
+            adapter=adapter,
+            event_payload=event_payload,
+            task=task,
+        )
+        if not candidates and not artifact_links:
             return
 
         _IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".gif", ".webp"}
         _VIDEO_EXTS = {".mp4", ".mov", ".avi", ".mkv", ".webm", ".3gp"}
         _HTML_EXTS = {".html", ".htm"}
 
-        from urllib.parse import quote as _quote
+        for url in artifact_links[:5]:
+            try:
+                await adapter.send(chat_id, f"📎 Artifact link: {url}", metadata=metadata)
+            except Exception as exc:
+                logger.warning("kanban notifier: artifact link send (%s) failed: %s", url, exc)
 
-        # HTML is a special user-facing path: send a hosted URL, not a raw
-        # document upload, unless an operator explicitly opts into debug upload.
         html_paths = [p for p in candidates if _Path(p).suffix.lower() in _HTML_EXTS]
         upload_candidates: list[str] = []
         debug_html_upload = os.environ.get(
@@ -978,38 +1253,25 @@ class GatewayKanbanWatchersMixin:
         non_html_candidates = [p for p in candidates if _Path(p).suffix.lower() not in _HTML_EXTS]
         upload_candidates.extend(non_html_candidates)
 
-        # Partition images so they ride a single send_multiple_images call
-        # on platforms that support batch image uploads (Signal/Slack RPCs).
         image_paths = [p for p in upload_candidates if _Path(p).suffix.lower() in _IMAGE_EXTS]
         other_paths = [p for p in upload_candidates if _Path(p).suffix.lower() not in _IMAGE_EXTS]
 
         if image_paths:
             try:
                 batch = [(f"file://{_quote(p)}", "") for p in image_paths]
-                await adapter.send_multiple_images(
-                    chat_id=chat_id, images=batch, metadata=metadata,
-                )
+                await adapter.send_multiple_images(chat_id=chat_id, images=batch, metadata=metadata)
             except Exception as exc:
-                logger.warning(
-                    "kanban notifier: image batch upload failed: %s", exc,
-                )
+                logger.warning("kanban notifier: image batch upload failed: %s", exc)
 
         for path in other_paths:
             ext = _Path(path).suffix.lower()
             try:
                 if ext in _VIDEO_EXTS:
-                    await adapter.send_video(
-                        chat_id=chat_id, video_path=path, metadata=metadata,
-                    )
+                    await adapter.send_video(chat_id=chat_id, video_path=path, metadata=metadata)
                 else:
-                    await adapter.send_document(
-                        chat_id=chat_id, file_path=path, metadata=metadata,
-                    )
+                    await adapter.send_document(chat_id=chat_id, file_path=path, metadata=metadata)
             except Exception as exc:
-                logger.warning(
-                    "kanban notifier: artifact upload (%s) failed: %s",
-                    path, exc,
-                )
+                logger.warning("kanban notifier: artifact upload (%s) failed: %s", path, exc)
 
     async def _kanban_dispatcher_watcher(self) -> None:
         """Embedded kanban dispatcher — one tick every `dispatch_interval_seconds`.
@@ -1118,6 +1380,38 @@ class GatewayKanbanWatchersMixin:
                 _kb.DEFAULT_FAILURE_LIMIT,
             )
             failure_limit = _kb.DEFAULT_FAILURE_LIMIT
+
+        raw_retry_backoff_base = kanban_cfg.get(
+            "retry_backoff_base_seconds",
+            _kb.DEFAULT_RETRY_BACKOFF_BASE_SECONDS,
+        )
+        try:
+            retry_backoff_base_seconds = int(raw_retry_backoff_base)
+        except (TypeError, ValueError):
+            logger.warning(
+                "kanban dispatcher: invalid kanban.retry_backoff_base_seconds=%r; using default %d",
+                raw_retry_backoff_base,
+                _kb.DEFAULT_RETRY_BACKOFF_BASE_SECONDS,
+            )
+            retry_backoff_base_seconds = _kb.DEFAULT_RETRY_BACKOFF_BASE_SECONDS
+        if retry_backoff_base_seconds < 0:
+            retry_backoff_base_seconds = _kb.DEFAULT_RETRY_BACKOFF_BASE_SECONDS
+
+        raw_retry_backoff_max = kanban_cfg.get(
+            "retry_backoff_max_seconds",
+            _kb.DEFAULT_RETRY_BACKOFF_MAX_SECONDS,
+        )
+        try:
+            retry_backoff_max_seconds = int(raw_retry_backoff_max)
+        except (TypeError, ValueError):
+            logger.warning(
+                "kanban dispatcher: invalid kanban.retry_backoff_max_seconds=%r; using default %d",
+                raw_retry_backoff_max,
+                _kb.DEFAULT_RETRY_BACKOFF_MAX_SECONDS,
+            )
+            retry_backoff_max_seconds = _kb.DEFAULT_RETRY_BACKOFF_MAX_SECONDS
+        if retry_backoff_max_seconds < 0:
+            retry_backoff_max_seconds = _kb.DEFAULT_RETRY_BACKOFF_MAX_SECONDS
 
         # Read stale_timeout_seconds — 0 disables stale detection.
         raw_stale = kanban_cfg.get("dispatch_stale_timeout_seconds", 0)
@@ -1267,6 +1561,8 @@ class GatewayKanbanWatchersMixin:
                     stale_timeout_seconds=stale_timeout_seconds,
                     default_assignee=default_assignee,
                     max_in_progress_per_profile=max_in_progress_per_profile,
+                    retry_backoff_base_seconds=retry_backoff_base_seconds,
+                    retry_backoff_max_seconds=retry_backoff_max_seconds,
                 )
             except sqlite3.DatabaseError as exc:
                 if _is_corrupt_board_db_error(exc):
