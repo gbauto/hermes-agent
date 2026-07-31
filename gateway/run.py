@@ -5154,6 +5154,27 @@ class GatewayRunner:
         if not candidates:
             return
 
+        try:
+            from gateway.config import Platform as _Platform
+            if getattr(adapter, "platform", None) == _Platform.TELEGRAM:
+                from gateway.platforms.artifact_policy import ArtifactCandidate as _ArtifactCandidate
+                from gateway.platforms.artifact_policy import classify_local_file as _classify_local_file
+                _allowed_candidates: list[str] = []
+                for _path in candidates:
+                    _decision = _classify_local_file(_ArtifactCandidate(
+                        source="kanban_artifact",
+                        platform="telegram",
+                        path=_path,
+                    ))
+                    if _decision.allowed and _decision.delivery_kind in {"image", "pdf"}:
+                        _allowed_candidates.append(_decision.safe_path or _path)
+                candidates = _allowed_candidates
+                if not candidates:
+                    return
+        except Exception:
+            logger.warning("kanban notifier: Telegram artifact policy failed closed", exc_info=True)
+            return
+
         _IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".gif", ".webp"}
         _VIDEO_EXTS = {".mp4", ".mov", ".avi", ".mkv", ".webm", ".3gp"}
 
@@ -11368,6 +11389,41 @@ class GatewayRunner:
             _thread_meta = self._thread_metadata_for_source(event.source, self._reply_anchor_for_event(event))
 
             from gateway.platforms.base import should_send_media_as_audio
+
+            if event.source.platform == Platform.TELEGRAM:
+                try:
+                    from gateway.platforms.artifact_policy import ArtifactCandidate as _ArtifactCandidate
+                    from gateway.platforms.artifact_policy import classify_local_file as _classify_local_file
+                    _allowed_media_files = []
+                    for _media_path, _is_voice in media_files:
+                        _ext = Path(_media_path).suffix.lower()
+                        if should_send_media_as_audio(event.source.platform, _ext, is_voice=_is_voice):
+                            _allowed_media_files.append((_media_path, _is_voice))
+                            continue
+                        _decision = _classify_local_file(_ArtifactCandidate(
+                            source="media_tag",
+                            platform="telegram",
+                            path=_media_path,
+                            force_document=force_document_attachments,
+                        ))
+                        if _decision.allowed and _decision.delivery_kind in {"image", "pdf"}:
+                            _allowed_media_files.append((_decision.safe_path or _media_path, _is_voice))
+                    _allowed_local_files = []
+                    for _file_path in local_files:
+                        _decision = _classify_local_file(_ArtifactCandidate(
+                            source="local_path",
+                            platform="telegram",
+                            path=_file_path,
+                            force_document=force_document_attachments,
+                        ))
+                        if _decision.allowed and _decision.delivery_kind in {"image", "pdf"}:
+                            _allowed_local_files.append(_decision.safe_path or _file_path)
+                    media_files = _allowed_media_files
+                    local_files = _allowed_local_files
+                except Exception:
+                    logger.warning("[%s] Post-stream Telegram artifact policy failed closed", adapter.name, exc_info=True)
+                    media_files = []
+                    local_files = []
 
             _VIDEO_EXTS = {'.mp4', '.mov', '.avi', '.mkv', '.webm', '.3gp'}
             _IMAGE_EXTS = {'.jpg', '.jpeg', '.png', '.webp', '.gif'}
