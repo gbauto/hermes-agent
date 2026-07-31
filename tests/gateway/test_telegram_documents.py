@@ -510,8 +510,8 @@ class TestSendVoice:
         return adapter
 
     @pytest.mark.asyncio
-    async def test_flac_falls_back_to_document(self, connected_adapter, tmp_path):
-        """Telegram sendAudio does not accept FLAC — must fall back to sendDocument."""
+    async def test_flac_document_fallback_is_denied_by_operator_policy(self, connected_adapter, tmp_path):
+        """FLAC cannot bypass the Telegram operator artifact allowlist as a document."""
         audio_file = tmp_path / "clip.flac"
         audio_file.write_bytes(b"fLaC" + b"\x00" * 32)
 
@@ -527,15 +527,15 @@ class TestSendVoice:
             caption="Audio",
         )
 
-        assert result.success is True
-        assert result.message_id == "101"
-        connected_adapter._bot.send_document.assert_awaited_once()
+        assert result.success is False
+        assert "Artifact omitted" in result.error
+        connected_adapter._bot.send_document.assert_not_awaited()
         connected_adapter._bot.send_audio.assert_not_awaited()
         connected_adapter._bot.send_voice.assert_not_awaited()
 
     @pytest.mark.asyncio
-    async def test_wav_falls_back_to_document(self, connected_adapter, tmp_path):
-        """Telegram sendAudio does not accept WAV — must fall back to sendDocument."""
+    async def test_wav_document_fallback_is_denied_by_operator_policy(self, connected_adapter, tmp_path):
+        """WAV cannot bypass the Telegram operator artifact allowlist as a document."""
         audio_file = tmp_path / "clip.wav"
         audio_file.write_bytes(b"RIFF" + b"\x00" * 32)
 
@@ -550,8 +550,9 @@ class TestSendVoice:
             audio_path=str(audio_file),
         )
 
-        assert result.success is True
-        connected_adapter._bot.send_document.assert_awaited_once()
+        assert result.success is False
+        assert "Artifact omitted" in result.error
+        connected_adapter._bot.send_document.assert_not_awaited()
         connected_adapter._bot.send_audio.assert_not_awaited()
 
     @pytest.mark.asyncio
@@ -616,8 +617,8 @@ class TestSendDocument:
         assert call_kwargs["caption"] == "Here's the report"
 
     @pytest.mark.asyncio
-    async def test_send_document_custom_filename(self, connected_adapter, tmp_path):
-        """The file_name parameter overrides the basename for display."""
+    async def test_send_document_denies_csv_even_with_custom_filename(self, connected_adapter, tmp_path):
+        """Custom filenames cannot make source/data files eligible for upload."""
         test_file = tmp_path / "doc_abc123_ugly.csv"
         test_file.write_bytes(b"a,b,c\n1,2,3")
 
@@ -631,9 +632,9 @@ class TestSendDocument:
             file_name="clean_data.csv",
         )
 
-        assert result.success is True
-        call_kwargs = connected_adapter._bot.send_document.call_args[1]
-        assert call_kwargs["filename"] == "clean_data.csv"
+        assert result.success is False
+        assert "Artifact omitted" in result.error
+        connected_adapter._bot.send_document.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_send_document_file_not_found(self, connected_adapter):
@@ -686,9 +687,9 @@ class TestSendDocument:
 
     @pytest.mark.asyncio
     async def test_send_document_caption_truncated(self, connected_adapter, tmp_path):
-        """Captions longer than 1024 chars are truncated."""
-        test_file = tmp_path / "data.json"
-        test_file.write_bytes(b"{}")
+        """Captions longer than 1024 chars are truncated for allowed PDFs."""
+        test_file = tmp_path / "data.pdf"
+        test_file.write_bytes(b"%PDF-1.4\n{}")
 
         mock_msg = MagicMock()
         mock_msg.message_id = 101
@@ -708,7 +709,7 @@ class TestSendDocument:
     async def test_send_document_api_error_falls_back(self, connected_adapter, tmp_path):
         """If Telegram API raises, falls back to base class text message."""
         test_file = tmp_path / "file.pdf"
-        test_file.write_bytes(b"data")
+        test_file.write_bytes(b"%PDF-1.4\ndata")
 
         connected_adapter._bot.send_document = AsyncMock(
             side_effect=RuntimeError("Telegram API error")
@@ -731,9 +732,9 @@ class TestSendDocument:
 
     @pytest.mark.asyncio
     async def test_send_document_reply_to(self, connected_adapter, tmp_path):
-        """reply_to parameter is forwarded as reply_to_message_id."""
-        test_file = tmp_path / "spec.md"
-        test_file.write_bytes(b"# Spec")
+        """reply_to parameter is forwarded as reply_to_message_id for allowed PDFs."""
+        test_file = tmp_path / "spec.pdf"
+        test_file.write_bytes(b"%PDF-1.4\nSpec")
 
         mock_msg = MagicMock()
         mock_msg.message_id = 102
