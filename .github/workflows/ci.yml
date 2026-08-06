@@ -5,6 +5,9 @@ name: CI
 # deploy-site, Docker publish, PyPI publish, and release/signing write paths.
 # This workflow does not run on release or tag events and defaults to read-only
 # token permissions; jobs opt into the narrow extra permissions they require.
+# Catalog reusable workflow calls are blocked for this public fork because the
+# host catalog lives in private gbauto/gbautomation. Keep the blocker visible
+# while preserving the Hermes-specific local CI/release boundaries.
 
 on:
   push:
@@ -34,6 +37,25 @@ env:
   PYTHON_VERSION: '3.11'
 
 jobs:
+
+  catalog-canary-access-blocker:
+    name: Catalog Canary / blocked by private host access
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Explain blocked catalog reusable workflow access
+        run: |
+          cat <<'EOF'
+          Catalog canary migration blocker:
+          - Caller repo gbauto/hermes-agent is public.
+          - Host repo gbauto/gbautomation is private.
+          - GitHub rejects reusable workflow calls from this public repo to the private host, even when host Actions access is set to organization.
+          - Direct tests failed for both @2d94ba2ca5d25036b4b3b2941b2eb4f2d5b99266 and @main with: workflow was not found.
+          - Hermes-specific CI/release/write-path boundaries remain local and unchanged.
+          EOF
+
+
   changes:
     name: Workflow inventory and change routing
     runs-on: ubuntu-latest
