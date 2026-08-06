@@ -366,6 +366,90 @@ def test_unblock_scheduled_rechecks_parent_gate(kanban_home):
         assert kb.get_task(conn, child).status == "ready"
 
 
+def test_ci_wait_block_request_is_scheduled_not_human_blocked(kanban_home):
+    """Queued/in-progress CI is a machine wait, not a Greg approval gate."""
+    with kb.connect() as conn:
+        t = kb.create_task(conn, title="pr waiting", assignee="builder")
+        kb.claim_task(conn, t, claimer="host:worker")
+
+        assert kb.block_task(conn, t, reason="CI queued for PR #891: test-suite is in_progress") is True
+
+        task = kb.get_task(conn, t)
+        assert task.status == "scheduled"
+        events = kb.list_events(conn, t)
+        assert not any(e.kind == "blocked" for e in events)
+        scheduled = [e for e in events if e.kind == "scheduled"][-1]
+        assert scheduled.payload["reason"] == "CI queued for PR #891: test-suite is in_progress"
+        assert scheduled.payload["waiting_on"] == "ci"
+        assert scheduled.payload["human_gate"] is False
+
+        assert kb.unblock_task(conn, t) is True
+        assert kb.get_task(conn, t).status == "ready"
+
+
+def test_routine_review_block_request_auto_resumes_without_human_gate(kanban_home):
+    """Generic review-required after code/tests is a validator handoff, not a terminal blocker."""
+    with kb.connect() as conn:
+        t = kb.create_task(conn, title="ordinary code handoff", assignee="builder")
+        kb.claim_task(conn, t, claimer="host:worker")
+
+        assert kb.block_task(
+            conn,
+            t,
+            reason="review-required: code changed, tests pass, PR ready for ordinary review",
+        ) is True
+
+        task = kb.get_task(conn, t)
+        assert task.status == "ready"
+        events = kb.list_events(conn, t)
+        assert not any(e.kind == "blocked" for e in events)
+        repaired = [e for e in events if e.kind == "false_blocker_repaired"][-1]
+        assert repaired.payload["classification"] == "routine_handoff"
+        assert repaired.payload["human_gate"] is False
+
+
+def test_ci_failure_blocker_requires_exact_failing_check_evidence(kanban_home):
+    with kb.connect() as conn:
+        vague = kb.create_task(conn, title="vague ci", assignee="builder")
+        kb.claim_task(conn, vague, claimer="host:worker")
+        assert kb.block_task(conn, vague, reason="CI failed, needs human approval") is True
+        assert kb.get_task(conn, vague).status == "scheduled"
+        assert not any(e.kind == "blocked" for e in kb.list_events(conn, vague))
+
+        exact = kb.create_task(conn, title="exact ci", assignee="builder")
+        kb.claim_task(conn, exact, claimer="host:worker")
+        assert kb.block_task(
+            conn,
+            exact,
+            reason="CI failed: check=unit-tests conclusion=failure url=https://github.com/acme/repo/actions/runs/123",
+        ) is True
+        assert kb.get_task(conn, exact).status == "blocked"
+        blocked = [e for e in kb.list_events(conn, exact) if e.kind == "blocked"][-1]
+        assert blocked.payload["failing_check"] == "unit-tests"
+        assert blocked.payload["human_gate"] is False
+
+
+def test_repair_false_human_blockers_is_idempotent(kanban_home):
+    with kb.connect() as conn:
+        ci = kb.create_task(conn, title="old ci blocked", assignee="builder")
+        kb.claim_task(conn, ci, claimer="host:worker")
+        assert kb.block_task(conn, ci, reason="need human input") is True
+        conn.execute("UPDATE task_events SET payload = ? WHERE task_id = ? AND kind = 'blocked'", ('{"reason": "CI queued for PR #891"}', ci))
+
+        material = kb.create_task(conn, title="material", assignee="builder")
+        kb.claim_task(conn, material, claimer="host:worker")
+        assert kb.block_task(conn, material, reason="legal approval required before external publication") is True
+
+        receipt = kb.repair_false_human_blockers(conn)
+        assert receipt["repaired"] == 1
+        assert receipt["scheduled_waiting_on_ci"] == 1
+        assert kb.get_task(conn, ci).status == "scheduled"
+        assert kb.get_task(conn, material).status == "blocked"
+
+        second = kb.repair_false_human_blockers(conn)
+        assert second["repaired"] == 0
+
+
 def test_stale_claim_reclaimed(kanban_home, monkeypatch):
     import signal
     import hermes_cli.kanban_db as _kb
