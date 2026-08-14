@@ -99,6 +99,35 @@ def test_ambiguous_forced_skill_fails_readiness(
     assert "ambiguous skill" in res.readiness_failed[0][1]
 
 
+def test_qualified_forced_skill_preserves_requested_identifier(
+    kanban_home, all_assignees_spawnable
+):
+    """A qualified duplicate must reach the worker argv exactly as selected."""
+
+    _write_skill(kanban_home, "alpha/dupe-skill", name="dupe-skill")
+    _write_skill(kanban_home, "beta/dupe-skill", name="dupe-skill")
+
+    with kb.connect() as conn:
+        task_id = kb.create_task(
+            conn,
+            title="qualified duplicate skill",
+            assignee="builder",
+            skills=["alpha/dupe-skill"],
+        )
+        task = kb.get_task(conn, task_id)
+
+    assert task is not None
+    argv_skills, payload = kb._worker_skill_preflight(
+        task,
+        profile_arg="builder",
+        hermes_home=str(kanban_home),
+    )
+
+    assert argv_skills == ["alpha/dupe-skill"]
+    assert payload["loaded_skills"] == ["dupe-skill"]
+    assert payload["ambiguous_skills"] == {}
+
+
 def test_live_readiness_failure_blocks_without_retry_budget(
     kanban_home, all_assignees_spawnable
 ):
