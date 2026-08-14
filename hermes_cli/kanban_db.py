@@ -2088,11 +2088,10 @@ def _has_sticky_block(conn: sqlite3.Connection, task_id: str) -> bool:
 
     A ``blocked`` status can come from two very different sources:
 
-    * **Worker- or operator-initiated** — a worker called
-      ``kanban_block(reason="review-required: ...")`` (or somebody ran
-      ``hermes kanban block <id>``).  This is a deliberate handoff that
-      should stay blocked until an operator unblocks it.  The block tool
-      emits a ``"blocked"`` event row in ``task_events``.
+    * **Material worker/operator gate** — a worker called
+      ``kanban_block(reason="approval required: ...")`` or supplied another
+      material human-gate reason. This stays blocked until an operator
+      unblocks it and emits a ``"blocked"`` event row in ``task_events``.
 
     * **Circuit-breaker** — ``_record_task_failure`` tripped after
       repeated crashes / spawn failures / timeouts.  This emits
@@ -2129,9 +2128,9 @@ def recompute_ready(conn: sqlite3.Connection) -> int:
     ``blocked`` tasks are also considered for promotion (so a task
     blocked purely by a parent dependency unblocks itself when the
     parent completes), *except* when the most recent block event was a
-    worker-initiated ``kanban_block`` — those stay blocked until an
+    material human-gate ``kanban_block`` — those stay blocked until an
     explicit ``kanban_unblock`` (#28712).  Without that guard, a
-    ``review-required`` handoff would auto-respawn, the fresh worker
+    material approval handoff would auto-respawn, the fresh worker
     would find nothing to do, exit cleanly, get recorded as a protocol
     violation, and the cycle would repeat indefinitely.
     """
@@ -3897,6 +3896,12 @@ class DispatchResult:
     Reasons: ``"blocker_auth"`` (quota/auth error — also auto-blocked),
     ``"recent_success"`` (completed run within guard window),
     ``"active_pr"`` (GitHub PR URL in a recent comment)."""
+    readiness_failed: list[tuple[str, str]] = field(default_factory=list)
+    """Tasks blocked or skipped by host/profile readiness preflight.
+
+    These are pre-spawn control-plane failures, such as missing or ambiguous
+    forced skills, so they do not consume the worker retry budget.
+    """
 
 
 # Bounded registry of recently-reaped worker child exits, populated by the
@@ -5064,10 +5069,39 @@ def dispatch_once(
                     )
             continue
         if dry_run:
+            task_for_preflight = get_task(conn, row["id"])
+            if task_for_preflight is not None:
+                from hermes_cli.profiles import normalize_profile_name
+
+                profile_arg = normalize_profile_name(
+                    task_for_preflight.assignee or row["assignee"]
+                )
+                try:
+                    _worker_skill_preflight(
+                        task_for_preflight,
+                        profile_arg=profile_arg,
+                        hermes_home=_worker_profile_home(profile_arg),
+                    )
+                except WorkerSkillReadinessError as exc:
+                    result.readiness_failed.append((row["id"], str(exc)))
+                    continue
             result.spawned.append((row["id"], row["assignee"], ""))
             continue
         claimed = claim_task(conn, row["id"], ttl_seconds=ttl_seconds)
         if claimed is None:
+            continue
+        from hermes_cli.profiles import normalize_profile_name
+
+        profile_arg = normalize_profile_name(claimed.assignee or "")
+        try:
+            _worker_skill_preflight(
+                claimed,
+                profile_arg=profile_arg,
+                hermes_home=_worker_profile_home(profile_arg),
+            )
+        except WorkerSkillReadinessError as exc:
+            _record_host_readiness_failure(conn, claimed.id, str(exc), exc.payload)
+            result.readiness_failed.append((claimed.id, str(exc)))
             continue
         try:
             workspace = resolve_workspace(claimed, board=board)
@@ -5106,6 +5140,9 @@ def dispatch_once(
             # complete_task).
             result.spawned.append((claimed.id, claimed.assignee or "", str(workspace)))
             spawned += 1
+        except WorkerSkillReadinessError as exc:
+            _record_host_readiness_failure(conn, claimed.id, str(exc), exc.payload)
+            result.readiness_failed.append((claimed.id, str(exc)))
         except Exception as exc:
             auto = _record_spawn_failure(
                 conn, claimed.id, str(exc),
@@ -5142,10 +5179,41 @@ def dispatch_once(
             result.skipped_nonspawnable.append(row["id"])
             continue
         if dry_run:
+            task_for_preflight = get_task(conn, row["id"])
+            if task_for_preflight is not None:
+                task_for_preflight.skills = ["sdlc-review"]
+                from hermes_cli.profiles import normalize_profile_name
+
+                profile_arg = normalize_profile_name(
+                    task_for_preflight.assignee or row["assignee"]
+                )
+                try:
+                    _worker_skill_preflight(
+                        task_for_preflight,
+                        profile_arg=profile_arg,
+                        hermes_home=_worker_profile_home(profile_arg),
+                    )
+                except WorkerSkillReadinessError as exc:
+                    result.readiness_failed.append((row["id"], str(exc)))
+                    continue
             result.spawned.append((row["id"], row["assignee"], ""))
             continue
         claimed = claim_review_task(conn, row["id"], ttl_seconds=ttl_seconds)
         if claimed is None:
+            continue
+        claimed.skills = ["sdlc-review"]
+        from hermes_cli.profiles import normalize_profile_name
+
+        profile_arg = normalize_profile_name(claimed.assignee or "")
+        try:
+            _worker_skill_preflight(
+                claimed,
+                profile_arg=profile_arg,
+                hermes_home=_worker_profile_home(profile_arg),
+            )
+        except WorkerSkillReadinessError as exc:
+            _record_host_readiness_failure(conn, claimed.id, str(exc), exc.payload)
+            result.readiness_failed.append((claimed.id, str(exc)))
             continue
         try:
             workspace = resolve_workspace(claimed, board=board)
@@ -5159,12 +5227,8 @@ def dispatch_once(
             continue
         # Persist the resolved workspace path so the worker can cd there.
         set_workspace_path(conn, claimed.id, str(workspace))
-        # Force-load sdlc-review skill for review agents.  The
-        # _default_spawn function already auto-loads kanban-worker, and
-        # appends task.skills via --skills.  Setting task.skills here
-        # means the review agent gets both kanban-worker (lifecycle)
-        # and sdlc-review (review logic: AC verification, merge, etc.).
-        claimed.skills = ["sdlc-review"]
+        # Force-loaded sdlc-review was preflighted above and is preserved on
+        # claimed.skills for _default_spawn argv construction.
         _spawn = spawn_fn if spawn_fn is not None else _default_spawn
         try:
             import inspect
@@ -5180,6 +5244,9 @@ def dispatch_once(
                 _set_worker_pid(conn, claimed.id, int(pid))
             result.spawned.append((claimed.id, claimed.assignee or "", str(workspace)))
             spawned += 1
+        except WorkerSkillReadinessError as exc:
+            _record_host_readiness_failure(conn, claimed.id, str(exc), exc.payload)
+            result.readiness_failed.append((claimed.id, str(exc)))
         except Exception as exc:
             auto = _record_spawn_failure(
                 conn, claimed.id, str(exc),
@@ -5388,39 +5455,154 @@ def _resolve_hermes_argv() -> list[str]:
     return _module_hermes_argv()
 
 
-def _kanban_worker_skill_available(hermes_home: Optional[str]) -> bool:
-    """True if the bundled ``kanban-worker`` skill resolves for the home the
-    spawned worker will run under.
+class WorkerSkillReadinessError(RuntimeError):
+    """Raised when a worker would fail CLI --skills preload before task logic."""
 
-    The dispatcher injects ``--skills kanban-worker`` into every worker. When
-    the worker activates a profile (``hermes -p <name>``), its ``SKILLS_DIR``
-    becomes ``<profile_home>/skills`` — which on many profiles does NOT contain
-    the bundled skill (it ships in the *default* root home, not every
-    profile-scoped skills dir). Preloading a missing skill is fatal at CLI
-    startup (``ValueError: Unknown skill(s): kanban-worker``), aborting the
-    worker before the agent loop runs. Gate the flag on actual resolvability;
-    the kanban lifecycle contract is still injected via ``KANBAN_GUIDANCE``, so
-    omitting the flag only drops the supplementary pattern library.
-    """
-    from pathlib import Path as _Path
+    def __init__(self, message: str, payload: dict[str, Any]):
+        super().__init__(message)
+        self.payload = payload
 
-    # An unset HERMES_HOME means the worker falls back to the default root
-    # home (``~/.hermes``), which ships the bundled skill.
-    base = _Path(hermes_home) if hermes_home else (_Path.home() / ".hermes")
-    skills_root = base / "skills"
-    if not skills_root.is_dir():
-        return False
-    # Canonical bundled location first (cheap), then a bounded scan for
-    # profiles that have it nested elsewhere.
-    if (skills_root / "devops" / "kanban-worker" / "SKILL.md").is_file():
-        return True
+
+def _worker_profile_home(profile_arg: str) -> Optional[str]:
+    """Return the HERMES_HOME the worker profile will use, if resolvable."""
+
+    from hermes_cli.profiles import resolve_profile_env
+
     try:
-        for skill_md in skills_root.rglob("kanban-worker/SKILL.md"):
-            if skill_md.is_file():
-                return True
-    except OSError:
-        pass
-    return False
+        return resolve_profile_env(profile_arg)
+    except FileNotFoundError:
+        return os.environ.get("HERMES_HOME")
+
+
+def _worker_skill_preflight(
+    task: Task,
+    *,
+    profile_arg: str,
+    hermes_home: Optional[str],
+) -> tuple[list[str], dict[str, Any]]:
+    """Resolve profile-scoped worker skills before starting a subprocess.
+
+    Built-in worker skills are best effort because their essential behavior is
+    also injected by the control plane. Skills explicitly forced on a task are
+    mandatory. Ambiguous names fail closed because the CLI must not guess.
+    """
+
+    optional_skills = {"kanban-worker", "sdlc-review"}
+    requested: list[str] = ["kanban-worker"]
+    task_skills = [
+        str(skill).strip()
+        for skill in (task.skills or [])
+        if str(skill).strip()
+    ]
+    forced = [skill for skill in task_skills if skill not in optional_skills]
+    for skill in task_skills:
+        if skill not in requested:
+            requested.append(skill)
+
+    from agent.skill_commands import resolve_preloaded_skills
+
+    resolved = resolve_preloaded_skills(
+        requested,
+        task_id=task.id,
+        hermes_home=hermes_home,
+    )
+    loaded_names = set(resolved.loaded)
+    forced_set = set(forced)
+    missing_forced = [
+        skill for skill in resolved.missing if skill in forced_set
+    ]
+    ambiguous_all = dict(resolved.ambiguous)
+    ambiguous = {
+        skill: matches
+        for skill, matches in ambiguous_all.items()
+        if skill in forced_set
+    }
+
+    payload: dict[str, Any] = {
+        "check": "profile_skill_import",
+        "profile": profile_arg,
+        "task_id": task.id,
+        "hermes_home": hermes_home,
+        "requested_skills": resolved.requested,
+        "loaded_skills": resolved.loaded,
+        "missing_skills": list(resolved.missing),
+        "missing_required_skills": missing_forced,
+        "ambiguous_skills": ambiguous_all,
+        "errors": dict(resolved.errors),
+        "builtin_kanban_worker_loaded": "kanban-worker" in loaded_names,
+    }
+
+    if missing_forced or ambiguous:
+        parts = []
+        if missing_forced:
+            parts.append("missing required skill(s): " + ", ".join(missing_forced))
+        if ambiguous:
+            parts.append("ambiguous skill(s): " + ", ".join(sorted(ambiguous)))
+        raise WorkerSkillReadinessError(
+            "worker skill readiness failed: " + "; ".join(parts),
+            payload,
+        )
+
+    argv_skills: list[str] = []
+    if "kanban-worker" in loaded_names:
+        argv_skills.append("kanban-worker")
+    unresolved = (
+        set(resolved.missing)
+        | set(ambiguous_all)
+        | set(resolved.errors)
+    )
+    for skill in task_skills:
+        # Keep the operator-requested identifier. The resolver may report a
+        # canonical frontmatter name that differs from a qualified path or
+        # alias, but the CLI needs the original identifier to make that same
+        # unambiguous selection.
+        if skill != "kanban-worker" and skill not in unresolved:
+            argv_skills.append(skill)
+    payload["argv_skills"] = list(argv_skills)
+    return argv_skills, payload
+
+
+def _record_host_readiness_failure(
+    conn: sqlite3.Connection,
+    task_id: str,
+    error: str,
+    payload: dict[str, Any],
+) -> None:
+    """Block a pre-spawn host/profile readiness failure without retrying."""
+
+    safe_error = error[:500]
+    safe_payload = dict(payload)
+    safe_payload["error"] = safe_error
+    with write_txn(conn):
+        conn.execute(
+            "UPDATE tasks SET status = 'blocked', claim_lock = NULL, "
+            "claim_expires = NULL, worker_pid = NULL, "
+            "last_failure_error = ? "
+            "WHERE id = ? AND status IN ('running', 'ready')",
+            (safe_error, task_id),
+        )
+        run_id = _end_run(
+            conn,
+            task_id,
+            outcome="blocked",
+            status="blocked",
+            summary=safe_error,
+            metadata=safe_payload,
+        )
+        _append_event(
+            conn,
+            task_id,
+            "host_readiness_failed",
+            safe_payload,
+            run_id=run_id,
+        )
+        _append_event(
+            conn,
+            task_id,
+            "blocked",
+            {"reason": safe_error},
+            run_id=run_id,
+        )
 
 
 def _worker_terminal_timeout_env(
@@ -5542,6 +5724,12 @@ def _default_spawn(
     env["HERMES_PROFILE"] = profile_arg
     env.update(_worker_observability_env(task, board=board))
 
+    argv_skills, _skill_preflight_payload = _worker_skill_preflight(
+        task,
+        profile_arg=profile_arg,
+        hermes_home=env.get("HERMES_HOME"),
+    )
+
     cmd = [
         *_resolve_hermes_argv(),
         "-p", profile_arg,
@@ -5551,33 +5739,11 @@ def _default_spawn(
         # profile-local worker sessions still register configured hooks.
         "--accept-hooks",
     ]
-    # Auto-load the kanban-worker skill so every dispatched worker
-    # has the pattern library (good summary/metadata shapes, retry
-    # diagnostics, block-reason examples) in its context, even if
-    # the profile hasn't wired it into skills config. The MANDATORY
-    # lifecycle is already in the system prompt via KANBAN_GUIDANCE;
-    # this skill is the deeper reference. Users can point a profile
-    # at a different/additional skill via config if they want —
-    # --skills is additive to the profile's default skill set.
-    #
-    # Only add the flag when the skill actually resolves for the home
-    # the worker runs under: the bundled skill is absent from many
-    # profile-scoped skills dirs, and preloading a missing skill is
-    # fatal at CLI startup. Omitting it is safe — the lifecycle
-    # contract still ships via KANBAN_GUIDANCE.
-    if _kanban_worker_skill_available(env.get("HERMES_HOME")):
-        cmd.extend(["--skills", "kanban-worker"])
-    # Per-task force-loaded skills. Each name goes in its own
-    # `--skills X` pair rather than a single comma-joined arg: the CLI
-    # accepts both forms (action='append' + comma-split), but
-    # per-name pairs are easier to read in `ps` output and avoid any
-    # quoting ambiguity if a skill name ever contains unusual chars.
-    # Dedupe against the built-in so we don't double-load kanban-worker
-    # if a task author asks for it explicitly.
-    if task.skills:
-        for sk in task.skills:
-            if sk and sk != "kanban-worker":
-                cmd.extend(["--skills", sk])
+    # Add only skills already resolved against this profile home. Built-ins
+    # are optional because their lifecycle contract is also injected, while
+    # task-forced skills fail during preflight before this subprocess starts.
+    for skill in argv_skills:
+        cmd.extend(["--skills", skill])
     if task.model_override:
         cmd.extend(["-m", task.model_override])
     cmd.extend([
