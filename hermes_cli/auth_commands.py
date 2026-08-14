@@ -86,6 +86,14 @@ def _normalize_provider(provider: str) -> str:
     return normalized
 
 
+def _reject_shared_consumer_mutation(provider: str, action: str) -> None:
+    if auth_mod._profile_requests_shared_provider(provider):
+        raise SystemExit(
+            f"Cannot {action} shared {provider} credentials from a named profile. "
+            "Manage the credential once from the default Hermes root."
+        )
+
+
 def _provider_base_url(provider: str) -> str:
     if provider == "openrouter":
         return OPENROUTER_BASE_URL
@@ -162,6 +170,7 @@ def _format_exhausted_status(entry) -> str:
 
 def auth_add_command(args) -> None:
     provider = _normalize_provider(getattr(args, "provider", ""))
+    _reject_shared_consumer_mutation(provider, "add")
     if provider not in PROVIDER_REGISTRY and provider != "openrouter" and not provider.startswith(CUSTOM_POOL_PREFIX):
         raise SystemExit(f"Unknown provider: {provider}")
 
@@ -458,6 +467,7 @@ def auth_list_command(args) -> None:
 
 def auth_remove_command(args) -> None:
     provider = _normalize_provider(getattr(args, "provider", ""))
+    _reject_shared_consumer_mutation(provider, "remove")
     target = getattr(args, "target", None)
     if target is None:
         target = getattr(args, "index", None)
@@ -496,6 +506,7 @@ def auth_remove_command(args) -> None:
 
 def auth_reset_command(args) -> None:
     provider = _normalize_provider(getattr(args, "provider", ""))
+    _reject_shared_consumer_mutation(provider, "reset")
     pool = load_pool(provider)
     count = pool.reset_statuses()
     print(f"Reset status on {count} {provider} credentials")
@@ -522,7 +533,29 @@ def auth_status_command(args) -> None:
 
 
 def auth_logout_command(args) -> None:
-    auth_mod.logout_command(SimpleNamespace(provider=getattr(args, "provider", None)))
+    provider = _normalize_provider(getattr(args, "provider", ""))
+    _reject_shared_consumer_mutation(provider, "log out")
+    auth_mod.logout_command(SimpleNamespace(provider=provider))
+
+
+def auth_use_shared_command(args) -> None:
+    provider = _normalize_provider(getattr(args, "provider", ""))
+    if not bool(getattr(args, "yes", False)):
+        raise SystemExit(
+            "This changes the profile auth boundary. Re-run with --yes after review."
+        )
+    enabled = not bool(getattr(args, "no_shared", False))
+    try:
+        result = auth_mod.use_shared_provider_auth(provider, enabled=enabled)
+    except ValueError as exc:
+        raise SystemExit(str(exc)) from exc
+    if enabled:
+        action = "removed" if result["local_shadow_removed"] else "already absent"
+        print(f"{provider}: using default Hermes root auth owner")
+        print(f"  profile-local shadow: {action}")
+    else:
+        print(f"{provider}: shared auth disabled for this profile")
+        print("  no local credential was restored")
 
 
 def auth_spotify_command(args) -> None:
@@ -789,6 +822,9 @@ def auth_command(args) -> None:
         return
     if action == "logout":
         auth_logout_command(args)
+        return
+    if action == "use-shared":
+        auth_use_shared_command(args)
         return
     if action == "spotify":
         auth_spotify_command(args)
