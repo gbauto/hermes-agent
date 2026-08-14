@@ -3893,9 +3893,14 @@ class DispatchResult:
     respawn_guarded: list[tuple[str, str]] = field(default_factory=list)
     """Tasks skipped by the respawn guard, as ``(task_id, reason)`` pairs.
 
-    Reasons: ``"blocker_auth"`` (quota/auth error — also auto-blocked),
-    ``"recent_success"`` (completed run within guard window),
-    ``"active_pr"`` (GitHub PR URL in a recent comment)."""
+    Built-in reasons are ``"blocker_auth"`` (quota/auth error),
+    ``"recent_success"`` (completed run within guard window), and
+    ``"active_pr"`` (GitHub PR URL in a recent comment). Consumers should
+    pass the reason through verbatim so future guard diagnostics remain
+    operator-visible."""
+    rate_limited: list[str] = field(default_factory=list)
+    """Compatibility bucket for dispatchers that distinguish provider
+    cooldowns from other respawn-guard reasons."""
     readiness_failed: list[tuple[str, str]] = field(default_factory=list)
     """Tasks blocked or skipped by host/profile readiness preflight.
 

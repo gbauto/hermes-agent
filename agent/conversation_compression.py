@@ -301,9 +301,17 @@ def compress_context(
         f"{approx_tokens:,}" if approx_tokens else "unknown", agent.model,
         focus_topic,
     )
-    agent._emit_status(
-        "🗜️ Compacting context — summarizing earlier conversation so I can continue..."
-    )
+    # Keep the progress marker in logs and the CLI only. Gateway lifecycle
+    # status is delivered as a chat message, so emitting this for every
+    # automatic compression can spam long-running Telegram sessions.
+    try:
+        if getattr(agent, "platform", "") == "cli":
+            agent._vprint(
+                f"{getattr(agent, 'log_prefix', '')}🗜️ Compacting context — summarizing earlier conversation so I can continue...",
+                force=True,
+            )
+    except Exception:
+        pass
 
     # Notify external memory provider before compression discards context
     if agent._memory_manager:
