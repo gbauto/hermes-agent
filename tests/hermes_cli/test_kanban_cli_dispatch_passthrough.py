@@ -8,6 +8,7 @@ operator footgun that only manifests in long-running setups.
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import sys
 import tempfile
@@ -114,6 +115,48 @@ def test_cli_invalid_max_in_progress_silently_disables(isolated_kanban_home, mon
             f"invalid max_in_progress={bad_val!r} should fall through to None, "
             f"got {captured.get('max_in_progress')!r}"
         )
+
+
+def test_cli_dispatch_json_includes_deferred_spawn_diagnostics(isolated_kanban_home, monkeypatch, capsys):
+    """Dry-run JSON must explain why ready work did not spawn.
+
+    Operators use `hermes kanban dispatch --dry-run --json` when the gateway
+    warns about a stuck dispatcher. The JSON needs the same deferred-spawn
+    buckets as DispatchResult, especially respawn_guarded preflight failures.
+    """
+    from hermes_cli import kanban as kb_cli
+    from hermes_cli import kanban_db
+
+    def fake_dispatch_once(conn, **kwargs):
+        return kanban_db.DispatchResult(
+            respawn_guarded=[
+                ("t_preflight", "skill preflight failed: missing tactical-agentic-coder"),
+                ("t_backoff", "retry_backoff"),
+                ("t_cooldown", "rate_limit_cooldown"),
+            ],
+            rate_limited=["t_quota"],
+            skipped_per_profile_capped=[("t_busy", "tac-builder", 2)],
+        )
+
+    monkeypatch.setattr("hermes_cli.config.load_config", lambda: {"kanban": {}})
+    monkeypatch.setattr(kanban_db, "dispatch_once", fake_dispatch_once)
+
+    args = argparse.Namespace(dry_run=True, max=None, failure_limit=2, json=True)
+    assert kb_cli._cmd_dispatch(args) == 0
+    payload = json.loads(capsys.readouterr().out)
+
+    assert payload["respawn_guarded"] == [
+        {
+            "task_id": "t_preflight",
+            "reason": "skill preflight failed: missing tactical-agentic-coder",
+        },
+        {"task_id": "t_backoff", "reason": "retry_backoff"},
+        {"task_id": "t_cooldown", "reason": "rate_limit_cooldown"},
+    ]
+    assert payload["rate_limited"] == ["t_quota"]
+    assert payload["skipped_per_profile_capped"] == [
+        {"task_id": "t_busy", "assignee": "tac-builder", "current": 2}
+    ]
 
 
 def test_kanban_swarm_uses_existing_humanizer_skill():

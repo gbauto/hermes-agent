@@ -5017,9 +5017,11 @@ class DispatchResult:
     respawn_guarded: list[tuple[str, str]] = field(default_factory=list)
     """Tasks skipped by the respawn guard, as ``(task_id, reason)`` pairs.
 
-    Reasons: ``"blocker_auth"`` (quota/auth error — also auto-blocked),
-    ``"recent_success"`` (completed run within guard window),
-    ``"active_pr"`` (GitHub PR URL in a recent comment)."""
+    Reasons include ``"blocker_auth"`` (quota/auth error),
+    ``"rate_limit_cooldown"`` (provider quota cooldown),
+    ``"retry_backoff"`` (exponential retry delay), ``"recent_success"``
+    (completed run within guard window), ``"active_pr"`` (GitHub PR URL in
+    a recent comment), or a concrete worker preflight error string."""
     rate_limited: list[str] = field(default_factory=list)
     """Task ids whose workers bailed on a provider rate-limit / quota wall
     (EX_TEMPFAIL sentinel exit) and were released back to ``ready`` WITHOUT

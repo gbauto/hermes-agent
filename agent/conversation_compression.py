@@ -324,9 +324,19 @@ def compress_context(
         f"{approx_tokens:,}" if approx_tokens else "unknown", agent.model,
         focus_topic,
     )
-    agent._emit_status(
-        "🗜️ Compacting context — summarizing earlier conversation so I can continue..."
-    )
+    # Keep the progress marker in logs/CLI only.  Gateway lifecycle status is
+    # delivered as a chat message, so emitting this on every automatic
+    # compression can spam Telegram while a long session stays near the
+    # threshold.  Warnings below still use _emit_warning(); successful
+    # compression still runs and rotates the session normally.
+    try:
+        if getattr(agent, "platform", "") == "cli":
+            agent._vprint(
+                f"{getattr(agent, 'log_prefix', '')}🗜️ Compacting context — summarizing earlier conversation so I can continue...",
+                force=True,
+            )
+    except Exception:
+        pass
 
     # ── Compression lock ────────────────────────────────────────────────
     # Atomic, state.db-backed lock per session_id.  Without this, two
