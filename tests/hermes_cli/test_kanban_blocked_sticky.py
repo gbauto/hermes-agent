@@ -2,8 +2,8 @@
 worker-initiated ``kanban_block`` (sticky blocks), but must keep
 auto-recovering circuit-breaker blocks.
 
-The bug: when a worker called ``kanban_block(reason="review-required:
-...")`` to hand off to a human, the dispatcher's ``recompute_ready``
+The bug: when a worker called ``kanban_block(reason="approval required:
+...")`` for a material human gate, the dispatcher's ``recompute_ready``
 would promote the task back to ``ready`` on the next tick.  The fresh
 worker found nothing to do (work already applied), exited cleanly, and
 got recorded as a ``protocol_violation`` → ``gave_up`` → promote → loop
@@ -11,7 +11,7 @@ until manual intervention.
 
 These tests pin down:
 
-* Worker / operator-initiated blocks are sticky and survive
+* Material worker/operator human-gate blocks are sticky and survive
   ``recompute_ready``.
 * Circuit-breaker blocks (``gave_up`` event, status flipped via
   ``_record_task_failure``) still auto-recover — the original intent
@@ -63,7 +63,7 @@ def test_worker_block_is_not_auto_promoted_by_recompute_ready(kanban_home: Path)
         kb.claim_task(conn, tid)
         assert kb.block_task(
             conn, tid,
-            reason="review-required: please verify ACL change",
+            reason="approval required: please verify ACL change",
             expected_run_id=kb.get_task(conn, tid).current_run_id,
         )
         assert kb.get_task(conn, tid).status == "blocked"
@@ -89,7 +89,7 @@ def test_worker_block_on_child_with_done_parents_is_still_sticky(kanban_home: Pa
         kb.claim_task(conn, child)
         kb.block_task(
             conn, child,
-            reason="review-required: child needs sign-off",
+            reason="human decision: child needs sign-off",
             expected_run_id=kb.get_task(conn, child).current_run_id,
         )
         assert kb.get_task(conn, child).status == "blocked"
@@ -174,7 +174,7 @@ def test_unblock_clears_sticky_state_and_lets_block_recover(kanban_home: Path) -
         kb.claim_task(conn, tid)
         kb.block_task(
             conn, tid,
-            reason="review-required: ...",
+            reason="approval required: ...",
             expected_run_id=kb.get_task(conn, tid).current_run_id,
         )
         assert kb.unblock_task(conn, tid)
@@ -225,7 +225,7 @@ def test_protocol_violation_loop_is_broken(kanban_home: Path) -> None:
         kb.claim_task(conn, tid)
         kb.block_task(
             conn, tid,
-            reason="review-required: human eyes please",
+            reason="approval required: human eyes please",
             expected_run_id=kb.get_task(conn, tid).current_run_id,
         )
         assert kb.get_task(conn, tid).status == "blocked"
