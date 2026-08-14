@@ -503,6 +503,16 @@ def _ensure_hermes_home_managed(home: Path):
 DEFAULT_CONFIG = {
     "model": "",
     "providers": {},
+    "auth": {
+        # Provider ids listed here use the default Hermes root auth.json as
+        # their single mutable owner, even when a named profile is active.
+        # This is opt-in because OAuth refresh tokens are account-scoped and
+        # must never cross a client/profile boundary by implicit fallback.
+        "shared_providers": [],
+        # Owner-controlled allowlist. A named profile must also opt in via
+        # shared_providers; neither side can authorize sharing alone.
+        "shared_provider_consumers": {},
+    },
     "fallback_providers": [],
     "credential_pool_strategies": {},
     "toolsets": ["hermes-cli"],

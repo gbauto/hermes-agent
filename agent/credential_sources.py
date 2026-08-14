@@ -291,13 +291,13 @@ def _remove_xai_oauth_loopback_pkce(provider: str, removed) -> RemovalResult:
 
 
 def _remove_codex_device_code(provider: str, removed) -> RemovalResult:
-    """Codex tokens live in TWO places: our auth store AND ~/.codex/auth.json.
+    """Remove Hermes-owned Codex state without touching Codex CLI auth.
 
-    refresh_codex_oauth_pure() writes both every time, so clearing only
-    the Hermes auth store is not enough — _seed_from_singletons() would
-    re-import from ~/.codex/auth.json on the next load_pool() call and
-    the removal would be instantly undone.  We suppress instead of
-    deleting Codex CLI's file, so the Codex CLI itself keeps working.
+    Hermes never writes ``~/.codex/auth.json`` during refresh and does not
+    re-import it during pool load. The one-time interactive login path may
+    offer an explicit import, after which Hermes owns its independent state.
+    Suppression prevents the Hermes singleton from re-seeding a removed pool
+    entry; the Codex CLI file remains untouched.
 
     The canonical source name in ``_seed_from_singletons`` is
     ``"device_code"`` (no prefix).  Entries may show up in the pool as
