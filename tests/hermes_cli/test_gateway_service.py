@@ -37,6 +37,55 @@ class TestUserSystemdPrivateSocketPreflight:
         assert calls == ["env"]
 
 
+class TestLaunchdPlistNormalization:
+    def test_launchd_plist_comparison_ignores_formatting_only_drift(self, tmp_path, monkeypatch):
+        expected = """<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>ai.hermes.gateway</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/repo/venv/bin/python</string>
+        <string>gateway</string>
+        <string>run</string>
+    </array>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/generated/path</string>
+        <key>HERMES_HOME</key>
+        <string>/Users/greg/.hermes</string>
+    </dict>
+</dict>
+</plist>
+"""
+        installed = """<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict><key>Label</key><string>ai.hermes.gateway</string><key>ProgramArguments</key><array><string>/repo/venv/bin/python</string><string>gateway</string><string>run</string></array><key>EnvironmentVariables</key><dict><key>PATH</key><string>/live/path</string><key>HERMES_HOME</key><string>/Users/greg/.hermes</string></dict></dict></plist>
+"""
+        plist_path = tmp_path / "ai.hermes.gateway.plist"
+        plist_path.write_text(installed, encoding="utf-8")
+
+        monkeypatch.setattr(gateway_cli, "get_launchd_plist_path", lambda: plist_path)
+        monkeypatch.setattr(gateway_cli, "generate_launchd_plist", lambda: expected)
+
+        assert gateway_cli.launchd_plist_is_current() is True
+
+    def test_launchd_plist_comparison_preserves_real_argument_drift(self):
+        good = """<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict><key>ProgramArguments</key><array><string>/repo/venv/bin/python</string><string>gateway</string><string>run</string></array></dict></plist>
+"""
+        bad = good.replace("/repo/venv/bin/python", "/old/venv/bin/python")
+
+        assert (
+            gateway_cli._normalize_launchd_plist_for_comparison(good)
+            != gateway_cli._normalize_launchd_plist_for_comparison(bad)
+        )
+
+
 class TestSystemdServiceRefresh:
     def test_systemd_install_repairs_outdated_unit_without_force(self, tmp_path, monkeypatch):
         unit_path = tmp_path / "hermes-gateway.service"

@@ -2027,6 +2027,19 @@ def _cmd_dispatch(args: argparse.Namespace) -> int:
             ],
             "skipped_unassigned": res.skipped_unassigned,
             "skipped_nonspawnable": res.skipped_nonspawnable,
+            "skipped_per_profile_capped": [
+                {"task_id": tid, "assignee": who, "current": current}
+                for (tid, who, current) in res.skipped_per_profile_capped
+            ],
+            "respawn_guarded": [
+                {"task_id": tid, "reason": reason}
+                for (tid, reason) in res.respawn_guarded
+            ],
+            "rate_limited": res.rate_limited,
+            "auto_assigned_default": [
+                {"task_id": tid, "assignee": who}
+                for (tid, who) in res.auto_assigned_default
+            ],
         }, indent=2))
         return 0
     print(f"Reclaimed:    {res.reclaimed}")
@@ -2058,6 +2071,20 @@ def _cmd_dispatch(args: argparse.Namespace) -> int:
             f"Skipped (non-spawnable assignee — terminal lane, OK): "
             f"{', '.join(res.skipped_nonspawnable)}"
         )
+    if res.skipped_per_profile_capped:
+        for tid, who, current in res.skipped_per_profile_capped:
+            print(f"Deferred (profile cap: {who} has {current} active): {tid}")
+    if res.respawn_guarded:
+        for tid, reason in res.respawn_guarded:
+            print(f"Deferred (respawn guard: {reason}): {tid}")
+    if res.rate_limited:
+        print(
+            "Deferred (provider rate-limited, cooldown pending): "
+            f"{', '.join(res.rate_limited)}"
+        )
+    if res.auto_assigned_default:
+        for tid, who in res.auto_assigned_default:
+            print(f"Auto-assigned default profile ({who}): {tid}")
     return 0
 
 

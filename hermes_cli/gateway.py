@@ -2257,16 +2257,33 @@ def _normalize_launchd_plist_for_comparison(text: str) -> str:
     invoking shell so user-installed tools remain reachable under launchd.
     That makes raw text comparison unstable across shells, so ignore the PATH
     payload when deciding whether the installed plist is stale.
+
+    Plist XML formatting is not semantic. Compare a canonical plist
+    representation so indentation-only differences do not make
+    ``hermes gateway status --deep`` report a stale service definition. If
+    parsing fails, fall back to the historical text normalizer plus PATH
+    masking so malformed files are still compared conservatively.
     """
+    import copy
+    import plistlib
     import re
 
-    normalized = _normalize_service_definition(text)
-    return re.sub(
-        r'(<key>PATH</key>\s*<string>)(.*?)(</string>)',
-        r'\1__HERMES_PATH__\3',
-        normalized,
-        flags=re.S,
-    )
+    try:
+        payload = plistlib.loads(text.encode("utf-8"))
+        if isinstance(payload, dict):
+            payload = copy.deepcopy(payload)
+            env = payload.get("EnvironmentVariables")
+            if isinstance(env, dict) and "PATH" in env:
+                env["PATH"] = "__HERMES_PATH__"
+        return plistlib.dumps(payload, sort_keys=True).decode("utf-8")
+    except Exception:
+        normalized = _normalize_service_definition(text)
+        return re.sub(
+            r'(<key>PATH</key>\s*<string>)(.*?)(</string>)',
+            r'\1__HERMES_PATH__\3',
+            normalized,
+            flags=re.S,
+        )
 
 
 def systemd_unit_is_current(system: bool = False) -> bool:
