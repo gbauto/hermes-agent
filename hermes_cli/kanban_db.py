@@ -2950,8 +2950,21 @@ def _cleanup_workspace(conn: sqlite3.Connection, task_id: str) -> None:
         if kind != "scratch" or not path:
             return
         import shutil
-        wp = Path(path)
-        if wp.is_dir():
+        raw_wp = Path(path).expanduser()
+        wp = raw_wp.resolve(strict=False)
+        root = workspaces_root().expanduser().resolve(strict=False)
+        # Scratch cleanup is destructive, so require the exact canonical
+        # per-task directory.  Legacy or malformed rows may point at the
+        # shared workspaces root (or another arbitrary directory); deleting
+        # either would remove other tasks' data.  Refuse cleanup unless the
+        # resolved path is precisely <workspaces_root>/<task_id>.
+        if raw_wp.is_symlink() or wp.parent != root or wp.name != task_id:
+            _log.warning(
+                "Refusing unsafe scratch workspace cleanup for %s: %s",
+                task_id,
+                wp,
+            )
+        elif wp.is_dir():
             shutil.rmtree(wp, ignore_errors=True)
             _log.debug("Removed scratch workspace: %s", wp)
         # Also kill the tmux session for the worker that owned this task,

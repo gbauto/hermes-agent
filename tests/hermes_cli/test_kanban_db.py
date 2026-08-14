@@ -755,6 +755,99 @@ def test_complete_records_result(kanban_home):
     assert task.completed_at is not None
 
 
+def test_complete_removes_only_canonical_task_scratch_workspace(kanban_home):
+    with kb.connect() as conn:
+        task_id = kb.create_task(conn, title="owned scratch")
+        task = kb.get_task(conn, task_id)
+        workspace = kb.resolve_workspace(task)
+        kb.set_workspace_path(conn, task_id, workspace)
+        (workspace / "scratch.txt").write_text("ephemeral", encoding="utf-8")
+
+        assert kb.complete_task(conn, task_id)
+
+    assert not workspace.exists()
+    assert kb.workspaces_root().is_dir()
+
+
+def test_complete_refuses_to_delete_shared_workspaces_root(kanban_home):
+    root = kb.workspaces_root()
+    survivor = root / "another-task" / "receipt.txt"
+    survivor.parent.mkdir(parents=True)
+    survivor.write_text("keep", encoding="utf-8")
+
+    with kb.connect() as conn:
+        task_id = kb.create_task(
+            conn,
+            title="malformed shared scratch",
+            workspace_kind="scratch",
+            workspace_path=str(root),
+        )
+
+        assert kb.complete_task(conn, task_id)
+
+    assert survivor.read_text(encoding="utf-8") == "keep"
+
+
+def test_complete_refuses_to_delete_noncanonical_scratch_path(
+    kanban_home, tmp_path
+):
+    outside = tmp_path / "shared-external-scratch"
+    marker = outside / "receipt.txt"
+    outside.mkdir()
+    marker.write_text("keep", encoding="utf-8")
+
+    with kb.connect() as conn:
+        task_id = kb.create_task(
+            conn,
+            title="external scratch",
+            workspace_kind="scratch",
+            workspace_path=str(outside),
+        )
+
+        assert kb.complete_task(conn, task_id)
+
+    assert marker.read_text(encoding="utf-8") == "keep"
+
+
+def test_complete_refuses_symlinked_task_scratch_workspace(kanban_home, tmp_path):
+    outside = tmp_path / "external-target"
+    marker = outside / "receipt.txt"
+    outside.mkdir()
+    marker.write_text("keep", encoding="utf-8")
+
+    with kb.connect() as conn:
+        task_id = kb.create_task(conn, title="symlink scratch")
+        workspace = kb.workspaces_root() / task_id
+        workspace.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            workspace.symlink_to(outside, target_is_directory=True)
+        except OSError:
+            pytest.skip("directory symlinks are unavailable in this environment")
+        kb.set_workspace_path(conn, task_id, workspace)
+
+        assert kb.complete_task(conn, task_id)
+
+    assert workspace.is_symlink()
+    assert marker.read_text(encoding="utf-8") == "keep"
+
+
+def test_complete_honors_pinned_workspaces_root(kanban_home, tmp_path, monkeypatch):
+    pinned = tmp_path / "pinned-workspaces"
+    monkeypatch.setenv("HERMES_KANBAN_WORKSPACES_ROOT", str(pinned))
+
+    with kb.connect() as conn:
+        task_id = kb.create_task(conn, title="pinned owned scratch")
+        workspace = pinned / task_id
+        workspace.mkdir(parents=True)
+        (workspace / "scratch.txt").write_text("ephemeral", encoding="utf-8")
+        kb.set_workspace_path(conn, task_id, workspace)
+
+        assert kb.complete_task(conn, task_id)
+
+    assert not workspace.exists()
+    assert pinned.is_dir()
+
+
 def test_block_then_unblock(kanban_home):
     with kb.connect() as conn:
         t = kb.create_task(conn, title="x", assignee="a")
