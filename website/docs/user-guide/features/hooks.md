@@ -714,6 +714,8 @@ def my_callback(session_id: str, completed: bool, interrupted: bool,
 
 **Use cases:** Flushing buffers, closing connections, persisting session state, logging session duration, cleanup of resources initialized in `on_session_start`.
 
+For a ready-made facts-only second-brain reference writer, see [Session Cleanup Hook](./session-cleanup-hook.md). It consumes this event's shell-hook JSON payload, reads `state.db` metadata, and writes sanitized stubs without exporting raw transcripts.
+
 **Example — flush and cleanup:**
 
 ```python
