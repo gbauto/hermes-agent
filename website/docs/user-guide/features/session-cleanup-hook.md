@@ -134,10 +134,14 @@ The helper proposes this hook entry for each profile:
 ```yaml
 hooks:
   on_session_end:
-    - command: "python3 <repo>/scripts/hermes_session_cleanup_stub.py --json"
+    - command: "<absolute-Hermes-Python> <repo>/scripts/hermes_session_cleanup_stub.py --json"
       timeout: 30
 hooks_auto_accept: true
 ```
+
+The helper persists the exact Python executable that ran it rather than a
+bare `python3` command. This is required on native Windows Hermes installs,
+which provide `python.exe` but may not provide a `python3` alias.
 
 Live writes require an explicit flag:
 
