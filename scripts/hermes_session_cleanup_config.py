@@ -6,6 +6,8 @@ import argparse
 import json
 import os
 import shlex
+import subprocess
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -44,7 +46,13 @@ def discover_profile_configs(hermes_home: Path) -> list[Path]:
 
 def hook_command(repo_root: Path) -> str:
     script = repo_root.expanduser().resolve() / "scripts" / "hermes_session_cleanup_stub.py"
-    return f"python3 {shlex.quote(str(script))} --json"
+    # The hook runner uses shell=False and parses this into argv. Persist the
+    # exact interpreter running the rollout helper: native Windows Hermes
+    # installs expose python.exe but do not necessarily provide python3.
+    interpreter = Path(sys.executable).expanduser().resolve()
+    if os.name == "nt":
+        return subprocess.list2cmdline([str(interpreter), str(script), "--json"])
+    return f"{shlex.quote(str(interpreter))} {shlex.quote(str(script))} --json"
 
 
 def load_config(path: Path) -> dict[str, Any]:

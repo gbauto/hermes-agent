@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import shlex
 import sys
 from pathlib import Path
 
@@ -9,6 +10,16 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from scripts import hermes_session_cleanup_config as config
+
+
+def split_windows_command(line: str) -> list[str]:
+    tokens = shlex.split(line, posix=False)
+    return [
+        token[1:-1]
+        if len(token) >= 2 and token[0] == token[-1] and token[0] in ("'", '"')
+        else token
+        for token in tokens
+    ]
 
 
 def write_profile(home: Path, name: str, text: str = "model:\n  provider: openrouter\n") -> Path:
@@ -32,7 +43,10 @@ def test_dry_run_discovers_profiles_and_does_not_write(tmp_path, capsys):
     assert receipt["mode"] == "dry_run"
     assert receipt["profile_config_count"] == 2
     assert receipt["changed_count"] == 2
-    assert "hermes_session_cleanup_stub.py --json" in receipt["command"]
+    command_argv = split_windows_command(receipt["command"])
+    assert command_argv[0] == str(Path(sys.executable).resolve())
+    assert command_argv[1].endswith("hermes_session_cleanup_stub.py")
+    assert command_argv[2] == "--json"
     assert profile_a.read_text() == original_a
     assert profile_b.read_text() == original_b
 
@@ -60,11 +74,10 @@ def test_existing_hook_is_unchanged(tmp_path, capsys):
     home = tmp_path / "hermes"
     repo = tmp_path / "repo"
     command = config.hook_command(repo)
-    write_profile(
-        home,
-        "alpha",
-        "hooks:\n  on_session_end:\n    - command: \"%s\"\n      timeout: 30\nhooks_auto_accept: true\n" % command.replace('"', '\\"'),
-    )
+    write_profile(home, "alpha", config.dump_config({
+        "hooks": {"on_session_end": [{"command": command, "timeout": 30}]},
+        "hooks_auto_accept": True,
+    }))
 
     config.main(["--hermes-home", str(home), "--repo-root", str(repo), "--json"])
     receipt = json.loads(capsys.readouterr().out)
