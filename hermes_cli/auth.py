@@ -68,6 +68,7 @@ except Exception:
 
 AUTH_STORE_VERSION = 1
 AUTH_LOCK_TIMEOUT_SECONDS = 15.0
+SHAREABLE_AUTH_PROVIDERS = frozenset({"openai-codex"})
 
 # Nous Portal defaults
 DEFAULT_NOUS_PORTAL_URL = "https://portal.nousresearch.com"
@@ -798,15 +799,118 @@ def _oauth_trace(event: str, *, sequence_id: Optional[str] = None, **fields: Any
 # Auth Store — persistence layer for ~/.hermes/auth.json
 # =============================================================================
 
-def _auth_file_path() -> Path:
+def _configured_shared_auth_providers() -> frozenset[str]:
+    """Return the explicitly configured provider ids with one global owner."""
+    try:
+        raw = read_raw_config()
+    except Exception:
+        return frozenset()
+    auth_config = raw.get("auth") if isinstance(raw, dict) else None
+    configured = auth_config.get("shared_providers") if isinstance(auth_config, dict) else None
+    if not isinstance(configured, list):
+        return frozenset()
+    return frozenset(
+        normalized
+        for value in configured
+        if (normalized := str(value or "").strip().lower()) in SHAREABLE_AUTH_PROVIDERS
+    )
+
+
+def _active_profile_id() -> Optional[str]:
+    """Return the named profile id, or None for the default/custom root."""
+    profile_home = get_hermes_home()
+    if profile_home.parent.name != "profiles":
+        return None
+    profile_id = profile_home.name.strip()
+    return profile_id or None
+
+
+def _root_shared_provider_consumers(provider_id: str) -> frozenset[str]:
+    """Read the default owner's exact profile allowlist for one provider."""
+    try:
+        from hermes_constants import get_default_hermes_root
+
+        config_path = get_default_hermes_root() / "config.yaml"
+        raw = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
+    except (OSError, ValueError, TypeError, yaml.YAMLError):
+        return frozenset()
+    auth_config = raw.get("auth") if isinstance(raw, dict) else None
+    consumers = (
+        auth_config.get("shared_provider_consumers")
+        if isinstance(auth_config, dict)
+        else None
+    )
+    allowed = consumers.get(provider_id) if isinstance(consumers, dict) else None
+    if not isinstance(allowed, list):
+        return frozenset()
+    return frozenset(
+        value.strip()
+        for value in allowed
+        if isinstance(value, str) and value.strip()
+    )
+
+
+def _root_authorizes_shared_provider(provider_id: str) -> bool:
+    """Whether the default owner authorizes this exact named profile."""
+    normalized = str(provider_id or "").strip().lower()
+    profile_id = _active_profile_id()
+    return bool(
+        profile_id
+        and profile_id in _root_shared_provider_consumers(normalized)
+    )
+
+
+def _profile_requests_shared_provider(provider_id: Optional[str]) -> bool:
+    """Whether this named profile has an explicit shared-provider binding."""
+    normalized = str(provider_id or "").strip().lower()
+    return bool(
+        normalized
+        and _global_auth_file_path() is not None
+        and normalized in _configured_shared_auth_providers()
+    )
+
+
+def _shared_provider_binding_denied(provider_id: Optional[str]) -> bool:
+    """Whether a named profile requests sharing that its owner denies."""
+    normalized = str(provider_id or "").strip().lower()
+    return bool(
+        _profile_requests_shared_provider(normalized)
+        and not _root_authorizes_shared_provider(normalized)
+    )
+
+
+def _provider_uses_shared_auth_store(provider_id: Optional[str]) -> bool:
+    """Whether consumer opt-in and root-owner policy both authorize sharing."""
+    normalized = str(provider_id or "").strip().lower()
+    return bool(
+        normalized
+        and normalized in _configured_shared_auth_providers()
+        and _root_authorizes_shared_provider(normalized)
+        and _global_auth_file_path() is not None
+    )
+
+
+def _auth_file_path(provider_id: Optional[str] = None) -> Path:
     path = get_hermes_home() / "auth.json"
+    if _provider_uses_shared_auth_store(provider_id):
+        shared_path = _global_auth_file_path()
+        if shared_path is not None:
+            path = shared_path
     # Seat belt: if pytest is running and HERMES_HOME resolves to the real
     # user's auth store, refuse rather than silently corrupt it. This catches
     # tests that forgot to monkeypatch HERMES_HOME, tests invoked without the
     # hermetic conftest, or sandbox escapes via threads/subprocesses. In
     # production (no PYTEST_CURRENT_TEST) this is a single dict lookup.
     if os.environ.get("PYTEST_CURRENT_TEST"):
-        real_home_auth = (Path.home() / ".hermes" / "auth.json").resolve(strict=False)
+        if _provider_uses_shared_auth_store(provider_id):
+            real_home = os.environ.get("HOME") or os.environ.get("USERPROFILE")
+            real_home_auth = (
+                Path(real_home).expanduser() / ".hermes" / "auth.json"
+                if real_home
+                else Path.home() / ".hermes" / "auth.json"
+            ).resolve(strict=False)
+        else:
+            real_home_auth = (Path.home() / ".hermes" / "auth.json").resolve(strict=False)
         try:
             resolved = path.resolve(strict=False)
         except Exception:
@@ -887,11 +991,12 @@ def _load_global_auth_store() -> Dict[str, Any]:
         return {}
 
 
-def _auth_lock_path() -> Path:
-    return _auth_file_path().with_suffix(".lock")
+def _auth_lock_path(provider_id: Optional[str] = None) -> Path:
+    return _auth_file_path(provider_id).with_suffix(".lock")
 
 
 _auth_lock_holder = threading.local()
+_shared_auth_lock_holder = threading.local()
 
 
 @contextmanager
@@ -903,38 +1008,79 @@ def _file_lock(
 ):
     """Cross-process advisory flock helper.
 
-    Reentrant per-thread via ``holder.depth``. Falls back to a depth-only
+    Reentrant per-thread and resolved lock path. Falls back to a depth-only
     guard when neither ``fcntl`` nor ``msvcrt`` is available (rare).
-    Callers supply their own ``threading.local`` so independent locks
-    (e.g. profile auth.json vs shared Nous store) don't share reentrancy
-    state — that would let one lock's reentrant acquisition silently skip
-    the other's kernel-level flock.
+    Callers supply their own ``threading.local`` to keep lock families
+    independent; keying the depth by path prevents an acquisition for one
+    shared provider from silently skipping another provider's file lock.
     """
-    if getattr(holder, "depth", 0) > 0:
-        holder.depth += 1
+    try:
+        lock_key = str(lock_path.resolve(strict=False))
+    except Exception:
+        lock_key = str(lock_path)
+    depths = getattr(holder, "depths", None)
+    if not isinstance(depths, dict):
+        depths = {}
+        holder.depths = depths
+
+    if depths.get(lock_key, 0) > 0:
+        depths[lock_key] += 1
         try:
             yield
         finally:
-            holder.depth -= 1
+            depths[lock_key] -= 1
+            if depths[lock_key] == 0:
+                depths.pop(lock_key, None)
         return
 
     lock_path.parent.mkdir(parents=True, exist_ok=True)
 
     if fcntl is None and msvcrt is None:
-        holder.depth = 1
+        depths[lock_key] = 1
         try:
             yield
         finally:
-            holder.depth = 0
+            depths.pop(lock_key, None)
         return
 
-    # On Windows, msvcrt.locking needs the file to have content and the
-    # file pointer at position 0. Ensure the lock file has at least 1 byte.
-    if msvcrt and (not lock_path.exists() or lock_path.stat().st_size == 0):
-        lock_path.write_text(" ", encoding="utf-8")
+    deadline = time.monotonic() + max(1.0, timeout_seconds)
 
-    with lock_path.open("r+" if msvcrt else "a+", encoding="utf-8") as lock_file:
-        deadline = time.monotonic() + max(1.0, timeout_seconds)
+    # On Windows, msvcrt.locking needs the file to contain at least one byte.
+    # Use non-truncating os.open so two first-time callers cannot race through
+    # Path.write_text(), which opens with a sharing mode that may reject the
+    # second thread before it reaches the retry loop.
+    if msvcrt:
+        while True:
+            try:
+                fd = os.open(
+                    str(lock_path),
+                    os.O_RDWR | os.O_CREAT,
+                    stat.S_IRUSR | stat.S_IWUSR,
+                )
+                try:
+                    if os.fstat(fd).st_size == 0:
+                        os.write(fd, b" ")
+                finally:
+                    os.close(fd)
+                break
+            except (BlockingIOError, OSError, PermissionError):
+                if time.monotonic() >= deadline:
+                    raise TimeoutError(timeout_message)
+                time.sleep(0.05)
+
+    while True:
+        try:
+            lock_file = lock_path.open(
+                "r+" if msvcrt else "a+",
+                encoding="utf-8",
+            )
+            break
+        except (BlockingIOError, OSError, PermissionError):
+            if time.monotonic() >= deadline:
+                raise TimeoutError(timeout_message)
+            time.sleep(0.05)
+
+    try:
         while True:
             try:
                 if fcntl:
@@ -948,11 +1094,11 @@ def _file_lock(
                     raise TimeoutError(timeout_message)
                 time.sleep(0.05)
 
-        holder.depth = 1
+        depths[lock_key] = 1
         try:
             yield
         finally:
-            holder.depth = 0
+            depths.pop(lock_key, None)
             if fcntl:
                 try:
                     fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
@@ -964,10 +1110,15 @@ def _file_lock(
                     msvcrt.locking(lock_file.fileno(), msvcrt.LK_UNLCK, 1)
                 except (OSError, IOError):
                     pass
+    finally:
+        lock_file.close()
 
 
 @contextmanager
-def _auth_store_lock(timeout_seconds: float = AUTH_LOCK_TIMEOUT_SECONDS):
+def _auth_store_lock(
+    timeout_seconds: float = AUTH_LOCK_TIMEOUT_SECONDS,
+    provider_id: Optional[str] = None,
+):
     """Cross-process advisory lock for auth.json reads+writes.  Reentrant.
 
     Lock ordering invariant: when this lock is held together with
@@ -976,17 +1127,27 @@ def _auth_store_lock(timeout_seconds: float = AUTH_LOCK_TIMEOUT_SECONDS):
     refresh paths follow this order; violating it risks deadlock
     against a concurrent import on the shared store.
     """
+    shared = _provider_uses_shared_auth_store(provider_id)
     with _file_lock(
-        _auth_lock_path(),
-        _auth_lock_holder,
+        _auth_lock_path(provider_id),
+        _shared_auth_lock_holder if shared else _auth_lock_holder,
         timeout_seconds,
         "Timed out waiting for auth store lock",
     ):
         yield
 
 
-def _load_auth_store(auth_file: Optional[Path] = None) -> Dict[str, Any]:
-    auth_file = auth_file or _auth_file_path()
+def _load_auth_store(
+    auth_file: Optional[Path] = None,
+    *,
+    provider_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    if provider_id and _shared_provider_binding_denied(provider_id):
+        # Fail closed after owner revocation. A requested shared binding must
+        # never fall back to a stale profile-local shadow; the operator must
+        # explicitly remove the binding before local auth can be used again.
+        return {"version": AUTH_STORE_VERSION, "providers": {}}
+    auth_file = auth_file or _auth_file_path(provider_id)
     if not auth_file.exists():
         return {"version": AUTH_STORE_VERSION, "providers": {}}
 
@@ -1025,8 +1186,18 @@ def _load_auth_store(auth_file: Optional[Path] = None) -> Dict[str, Any]:
     return {"version": AUTH_STORE_VERSION, "providers": {}}
 
 
-def _save_auth_store(auth_store: Dict[str, Any]) -> Path:
-    auth_file = _auth_file_path()
+def _save_auth_store(
+    auth_store: Dict[str, Any],
+    *,
+    provider_id: Optional[str] = None,
+) -> Path:
+    if provider_id and _shared_provider_binding_denied(provider_id):
+        profile_id = _active_profile_id() or "unknown"
+        raise PermissionError(
+            f"Default Hermes root does not authorize profile {profile_id!r} "
+            f"to share {provider_id}"
+        )
+    auth_file = _auth_file_path(provider_id)
     auth_file.parent.mkdir(parents=True, exist_ok=True)
     # Tighten parent dir to 0o700 so siblings can't traverse to creds.
     # No-op on Windows (POSIX mode bits not enforced); ignore failures.
@@ -1122,20 +1293,21 @@ def get_auth_provider_display_name(provider_id: str) -> str:
 def read_credential_pool(provider_id: Optional[str] = None) -> Dict[str, Any]:
     """Return the persisted credential pool, or one provider slice.
 
-    In profile mode, the profile's credential pool is authoritative. If a
-    provider has no entries in the profile, entries from the global-root
-    ``auth.json`` are used as a read-only fallback — so workers spawned in a
-    profile can see providers that were only authenticated at global scope.
+    In profile mode, the profile's credential pool is authoritative for most
+    providers. Providers explicitly listed in ``auth.shared_providers`` use
+    the default-root ``auth.json`` as their single mutable owner. Other
+    providers may retain the legacy read-only global fallback.
 
     Profile entries always win: the global fallback only applies per-provider
     when the profile has zero entries for that provider. Once the user runs
     ``hermes auth add <provider>`` inside the profile, profile entries
     fully shadow global for that provider on the next read.
 
-    Writes always go to the profile (``write_credential_pool`` is unchanged).
-    See issue #18594 follow-up.
+    Writes for a configured shared provider go to its default-root owner;
+    other writes remain profile-local. See issue #18594 follow-up.
     """
-    auth_store = _load_auth_store()
+    normalized_provider = str(provider_id or "").strip().lower() or None
+    auth_store = _load_auth_store(provider_id=normalized_provider)
     pool = auth_store.get("credential_pool")
     if not isinstance(pool, dict):
         pool = {}
@@ -1148,53 +1320,74 @@ def read_credential_pool(provider_id: Optional[str] = None) -> Dict[str, Any]:
 
     if provider_id is None:
         merged = dict(pool)
+        configured_shared = _configured_shared_auth_providers()
+        shared_providers = frozenset(
+            provider
+            for provider in configured_shared
+            if _provider_uses_shared_auth_store(provider)
+        )
+        for denied_provider in configured_shared - shared_providers:
+            merged.pop(denied_provider, None)
         for gp_key, gp_entries in global_pool.items():
             if not isinstance(gp_entries, list) or not gp_entries:
+                continue
+            if gp_key in shared_providers:
+                merged[gp_key] = list(gp_entries)
+                continue
+            if gp_key in SHAREABLE_AUTH_PROVIDERS:
                 continue
             # Per-provider shadowing: profile wins whenever it has ANY entries.
             existing = merged.get(gp_key)
             if isinstance(existing, list) and existing:
                 continue
             merged[gp_key] = list(gp_entries)
+        for shared_provider in shared_providers:
+            if not global_pool.get(shared_provider):
+                merged.pop(shared_provider, None)
         return merged
 
-    provider_entries = pool.get(provider_id)
+    provider_entries = pool.get(normalized_provider)
     if isinstance(provider_entries, list) and provider_entries:
         return list(provider_entries)
     # Profile has no entries for this provider — fall back to global.
-    global_entries = global_pool.get(provider_id)
+    if normalized_provider in SHAREABLE_AUTH_PROVIDERS:
+        return []
+    global_entries = global_pool.get(normalized_provider)
     return list(global_entries) if isinstance(global_entries, list) else []
 
 
 def write_credential_pool(provider_id: str, entries: List[Dict[str, Any]]) -> Path:
     """Persist one provider's credential pool under auth.json."""
-    with _auth_store_lock():
-        auth_store = _load_auth_store()
+    normalized_provider = str(provider_id or "").strip().lower()
+    with _auth_store_lock(provider_id=normalized_provider):
+        auth_store = _load_auth_store(provider_id=normalized_provider)
         pool = auth_store.get("credential_pool")
         if not isinstance(pool, dict):
             pool = {}
             auth_store["credential_pool"] = pool
-        pool[provider_id] = list(entries)
-        return _save_auth_store(auth_store)
+        pool[normalized_provider] = list(entries)
+        return _save_auth_store(auth_store, provider_id=normalized_provider)
 
 
 def suppress_credential_source(provider_id: str, source: str) -> None:
     """Mark a credential source as suppressed so it won't be re-seeded."""
-    with _auth_store_lock():
-        auth_store = _load_auth_store()
+    normalized_provider = str(provider_id or "").strip().lower()
+    with _auth_store_lock(provider_id=normalized_provider):
+        auth_store = _load_auth_store(provider_id=normalized_provider)
         suppressed = auth_store.setdefault("suppressed_sources", {})
-        provider_list = suppressed.setdefault(provider_id, [])
+        provider_list = suppressed.setdefault(normalized_provider, [])
         if source not in provider_list:
             provider_list.append(source)
-        _save_auth_store(auth_store)
+        _save_auth_store(auth_store, provider_id=normalized_provider)
 
 
 def is_source_suppressed(provider_id: str, source: str) -> bool:
     """Check if a credential source has been suppressed by the user."""
     try:
-        auth_store = _load_auth_store()
+        normalized_provider = str(provider_id or "").strip().lower()
+        auth_store = _load_auth_store(provider_id=normalized_provider)
         suppressed = auth_store.get("suppressed_sources", {})
-        return source in suppressed.get(provider_id, [])
+        return source in suppressed.get(normalized_provider, [])
     except Exception:
         return False
 
@@ -1204,43 +1397,143 @@ def unsuppress_credential_source(provider_id: str, source: str) -> bool:
 
     Returns True if a marker was cleared, False if no marker existed.
     """
-    with _auth_store_lock():
-        auth_store = _load_auth_store()
+    normalized_provider = str(provider_id or "").strip().lower()
+    with _auth_store_lock(provider_id=normalized_provider):
+        auth_store = _load_auth_store(provider_id=normalized_provider)
         suppressed = auth_store.get("suppressed_sources")
         if not isinstance(suppressed, dict):
             return False
-        provider_list = suppressed.get(provider_id)
+        provider_list = suppressed.get(normalized_provider)
         if not isinstance(provider_list, list) or source not in provider_list:
             return False
         provider_list.remove(source)
         if not provider_list:
-            suppressed.pop(provider_id, None)
+            suppressed.pop(normalized_provider, None)
         if not suppressed:
             auth_store.pop("suppressed_sources", None)
-        _save_auth_store(auth_store)
+        _save_auth_store(auth_store, provider_id=normalized_provider)
         return True
 
 
 def get_provider_auth_state(provider_id: str) -> Optional[Dict[str, Any]]:
     """Return persisted auth state for a provider, or None.
 
-    In profile mode, falls back to the global-root ``auth.json`` when the
-    profile has no state for this provider. Profile state always wins when
-    present. Writes (``_save_auth_store`` / ``persist_*_credentials``) are
-    unchanged — they still target the profile only. This mirrors
-    ``read_credential_pool``'s per-provider shadowing semantics so that
-    ``_seed_from_singletons`` can reseed a profile's credential pool from
-    global-scope provider state (e.g. a globally-authenticated Anthropic
-    OAuth or Nous device-code session). See issue #18594 follow-up.
+    A configured shared provider resolves directly from the default-root
+    owner. Other providers retain the legacy profile-first, global-fallback
+    behavior. Provider-aware writes follow the same routing, while unscoped
+    writes remain profile-local. See issue #18594 follow-up.
     """
-    auth_store = _load_auth_store()
-    state = _load_provider_state(auth_store, provider_id)
+    normalized_provider = str(provider_id or "").strip().lower()
+    auth_store = _load_auth_store(provider_id=normalized_provider)
+    state = _load_provider_state(auth_store, normalized_provider)
     if state is not None:
         return state
+    if normalized_provider in SHAREABLE_AUTH_PROVIDERS:
+        return None
     global_store = _load_global_auth_store()
     if not global_store:
         return None
-    return _load_provider_state(global_store, provider_id)
+    return _load_provider_state(global_store, normalized_provider)
+
+
+def use_shared_provider_auth(provider_id: str, *, enabled: bool = True) -> Dict[str, Any]:
+    """Bind a named profile to one provider owned by the default Hermes root.
+
+    Enabling validates the owner before mutation, persists the non-secret
+    config opt-in, then removes only the selected provider's stale local
+    provider/pool/suppression entries. Token material is never copied.
+    Disabling removes only the opt-in; it never restores stale local OAuth.
+    """
+    normalized = str(provider_id or "").strip().lower()
+    if normalized not in SHAREABLE_AUTH_PROVIDERS:
+        raise ValueError(f"Provider does not support shared auth: {normalized or provider_id}")
+
+    global_path = _global_auth_file_path()
+    if global_path is None:
+        raise ValueError("Shared auth can only be configured from a named profile")
+
+    if enabled:
+        if not _root_authorizes_shared_provider(normalized):
+            profile_id = _active_profile_id() or "unknown"
+            raise ValueError(
+                f"Default Hermes root does not authorize profile {profile_id!r} "
+                f"to share {normalized}"
+            )
+        with _file_lock(
+            global_path.with_suffix(".lock"),
+            _shared_auth_lock_holder,
+            AUTH_LOCK_TIMEOUT_SECONDS,
+            "Timed out waiting for shared auth owner lock",
+        ):
+            global_store = _load_auth_store(global_path)
+            provider_state = _load_provider_state(global_store, normalized)
+            pool = global_store.get("credential_pool")
+            entries = pool.get(normalized) if isinstance(pool, dict) else None
+            state_tokens = (
+                provider_state.get("tokens")
+                if isinstance(provider_state, dict)
+                else None
+            )
+            has_state = bool(
+                isinstance(state_tokens, dict)
+                and state_tokens.get("access_token")
+                and state_tokens.get("refresh_token")
+            )
+            has_pool = bool(
+                isinstance(entries, list)
+                and any(
+                    isinstance(entry, dict)
+                    and entry.get("access_token")
+                    and entry.get("refresh_token")
+                    for entry in entries
+                )
+            )
+            if not (has_state or has_pool):
+                raise ValueError(
+                    f"Default Hermes root has no usable {normalized} OAuth owner"
+                )
+
+    from hermes_cli.config import save_config
+
+    with _auth_store_lock():
+        raw_config = read_raw_config()
+        auth_config = raw_config.get("auth")
+        if not isinstance(auth_config, dict):
+            auth_config = {}
+            raw_config["auth"] = auth_config
+        current = auth_config.get("shared_providers")
+        current_values = current if isinstance(current, list) else []
+        shared = {
+            str(value or "").strip().lower()
+            for value in current_values
+            if str(value or "").strip()
+        }
+        if enabled:
+            shared.add(normalized)
+        else:
+            shared.discard(normalized)
+        auth_config["shared_providers"] = sorted(shared)
+        save_config(raw_config)
+
+        local_changed = False
+        if enabled:
+            local_store = _load_auth_store()
+            for container_name in ("providers", "credential_pool", "suppressed_sources"):
+                container = local_store.get(container_name)
+                if isinstance(container, dict) and normalized in container:
+                    container.pop(normalized, None)
+                    local_changed = True
+                    if not container:
+                        local_store.pop(container_name, None)
+            if local_changed:
+                _save_auth_store(local_store)
+
+    return {
+        "provider": normalized,
+        "shared": enabled,
+        "owner": "default-hermes-root",
+        "local_shadow_removed": local_changed if enabled else False,
+    }
 
 
 def get_active_provider() -> Optional[str]:
@@ -3069,10 +3362,10 @@ def _read_codex_tokens(*, _lock: bool = True) -> Dict[str, Any]:
     Raises AuthError if no Codex tokens are stored.
     """
     if _lock:
-        with _auth_store_lock():
-            auth_store = _load_auth_store()
+        with _auth_store_lock(provider_id="openai-codex"):
+            auth_store = _load_auth_store(provider_id="openai-codex")
     else:
-        auth_store = _load_auth_store()
+        auth_store = _load_auth_store(provider_id="openai-codex")
     state = _load_provider_state(auth_store, "openai-codex")
     if not state:
         raise AuthError(
@@ -3115,14 +3408,14 @@ def _save_codex_tokens(tokens: Dict[str, str], last_refresh: str = None) -> None
     """Save Codex OAuth tokens to Hermes auth store (~/.hermes/auth.json)."""
     if last_refresh is None:
         last_refresh = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-    with _auth_store_lock():
-        auth_store = _load_auth_store()
+    with _auth_store_lock(provider_id="openai-codex"):
+        auth_store = _load_auth_store(provider_id="openai-codex")
         state = _load_provider_state(auth_store, "openai-codex") or {}
         state["tokens"] = tokens
         state["last_refresh"] = last_refresh
         state["auth_mode"] = "chatgpt"
         _save_provider_state(auth_store, "openai-codex", state)
-        _save_auth_store(auth_store)
+        _save_auth_store(auth_store, provider_id="openai-codex")
 
 
 def refresh_codex_oauth_pure(
@@ -3301,7 +3594,13 @@ def resolve_codex_runtime_credentials(
         should_refresh = _codex_access_token_is_expiring(access_token, refresh_skew_seconds)
     if should_refresh:
         # Re-read under lock to avoid racing with other Hermes processes
-        with _auth_store_lock(timeout_seconds=max(float(AUTH_LOCK_TIMEOUT_SECONDS), refresh_timeout_seconds + 5.0)):
+        with _auth_store_lock(
+            timeout_seconds=max(
+                float(AUTH_LOCK_TIMEOUT_SECONDS),
+                refresh_timeout_seconds + 5.0,
+            ),
+            provider_id="openai-codex",
+        ):
             data = _read_codex_tokens(_lock=False)
             tokens = dict(data["tokens"])
             access_token = str(tokens.get("access_token", "") or "").strip()
@@ -6176,6 +6475,13 @@ def _login_openai_codex(
 ) -> None:
     """OpenAI Codex login via device code flow. Tokens stored in ~/.hermes/auth.json."""
 
+    if _profile_requests_shared_provider("openai-codex"):
+        raise SystemExit(
+            "Cannot log in or import openai-codex credentials from a shared "
+            "consumer profile. Manage the credential once from the default "
+            "Hermes root."
+        )
+
     del args, pconfig  # kept for parity with other provider login helpers
 
     # Check for existing Hermes-owned credentials
@@ -7450,6 +7756,13 @@ def logout_command(args) -> None:
     if not target:
         print("No provider is currently logged in.")
         return
+
+    if _profile_requests_shared_provider(target):
+        print(
+            f"Cannot log out shared {target} credentials from a named profile. "
+            "Manage the credential once from the default Hermes root."
+        )
+        raise SystemExit(1)
 
     should_reset_config = _should_reset_config_provider_on_logout(target)
     provider_name = get_auth_provider_display_name(target)

@@ -83,6 +83,7 @@ const sidebars: SidebarsConfig = {
             'user-guide/features/goals',
             'user-guide/features/code-execution',
             'user-guide/features/hooks',
+            'user-guide/features/session-cleanup-hook',
             'user-guide/features/batch-processing',
           ],
         },

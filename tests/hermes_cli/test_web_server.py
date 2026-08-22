@@ -396,6 +396,11 @@ class TestBuildSchemaFromConfig:
         if "agent.max_turns" in CONFIG_SCHEMA:
             assert CONFIG_SCHEMA["agent.max_turns"]["category"] == "agent"
 
+    def test_shared_auth_settings_are_security_controls(self):
+        from hermes_cli.web_server import CONFIG_SCHEMA
+
+        assert CONFIG_SCHEMA["auth.shared_providers"]["category"] == "security"
+
     def test_category_merge_applied(self):
         """Small categories should be merged into larger ones."""
         from hermes_cli.web_server import CONFIG_SCHEMA

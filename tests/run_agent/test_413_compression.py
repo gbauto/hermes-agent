@@ -415,16 +415,21 @@ class TestHTTP413Compression:
 class TestPreflightCompression:
     """Preflight compression should compress history before the first API call."""
 
-    def test_compress_context_emits_lifecycle_status_before_work(self, agent):
-        """Direct context compression should tell gateway users why the turn paused."""
+    def test_compress_context_logs_cli_status_before_work(self, agent):
+        """CLI compression keeps a local progress marker without a chat event."""
         events = []
+        agent.platform = "cli"
         agent.status_callback = lambda ev, msg: events.append((ev, msg))
+
+        def _capture_vprint(message, force=False):
+            events.append(("cli", message, force))
 
         def _fake_compress(messages, current_tokens=None, focus_topic=None):
             events.append(("compress", "started"))
             return [{"role": "user", "content": f"{SUMMARY_PREFIX}\nPrevious conversation"}]
 
         with (
+            patch.object(agent, "_vprint", side_effect=_capture_vprint),
             patch.object(agent.context_compressor, "compress", side_effect=_fake_compress),
             patch.object(agent, "_build_system_prompt", return_value="new system prompt"),
             patch("run_agent.estimate_request_tokens_rough", return_value=42),
@@ -437,9 +442,37 @@ class TestPreflightCompression:
 
         assert compressed == [{"role": "user", "content": f"{SUMMARY_PREFIX}\nPrevious conversation"}]
         assert new_system_prompt == "new system prompt"
-        assert events[0][0] == "lifecycle"
+        assert events[0][0] == "cli"
         assert "Compacting context" in events[0][1]
+        assert events[0][2] is True
         assert events[1] == ("compress", "started")
+        assert all(event[0] != "lifecycle" for event in events)
+
+    def test_gateway_compression_does_not_emit_chat_progress(self, agent):
+        """Automatic gateway compression must not add a Telegram chat message."""
+        events = []
+        agent.platform = "telegram"
+        agent.status_callback = lambda ev, msg: events.append((ev, msg))
+
+        def _fake_compress(messages, current_tokens=None, focus_topic=None):
+            events.append(("compress", "started"))
+            return [{"role": "user", "content": f"{SUMMARY_PREFIX}\nPrevious conversation"}]
+
+        with (
+            patch.object(agent, "_vprint") as mock_vprint,
+            patch.object(agent.context_compressor, "compress", side_effect=_fake_compress),
+            patch.object(agent, "_build_system_prompt", return_value="new system prompt"),
+            patch("run_agent.estimate_request_tokens_rough", return_value=42),
+        ):
+            compressed, _ = agent._compress_context(
+                [{"role": "user", "content": "hello"}],
+                "system prompt",
+                approx_tokens=1234,
+            )
+
+        assert compressed == [{"role": "user", "content": f"{SUMMARY_PREFIX}\nPrevious conversation"}]
+        assert events == [("compress", "started")]
+        mock_vprint.assert_not_called()
 
     def test_preflight_compresses_oversized_history(self, agent):
         """When loaded history exceeds the model's context threshold, compress before API call."""

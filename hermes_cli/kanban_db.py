@@ -2088,11 +2088,10 @@ def _has_sticky_block(conn: sqlite3.Connection, task_id: str) -> bool:
 
     A ``blocked`` status can come from two very different sources:
 
-    * **Worker- or operator-initiated** — a worker called
-      ``kanban_block(reason="review-required: ...")`` (or somebody ran
-      ``hermes kanban block <id>``).  This is a deliberate handoff that
-      should stay blocked until an operator unblocks it.  The block tool
-      emits a ``"blocked"`` event row in ``task_events``.
+    * **Material worker/operator gate** — a worker called
+      ``kanban_block(reason="approval required: ...")`` or supplied another
+      material human-gate reason. This stays blocked until an operator
+      unblocks it and emits a ``"blocked"`` event row in ``task_events``.
 
     * **Circuit-breaker** — ``_record_task_failure`` tripped after
       repeated crashes / spawn failures / timeouts.  This emits
@@ -2129,9 +2128,9 @@ def recompute_ready(conn: sqlite3.Connection) -> int:
     ``blocked`` tasks are also considered for promotion (so a task
     blocked purely by a parent dependency unblocks itself when the
     parent completes), *except* when the most recent block event was a
-    worker-initiated ``kanban_block`` — those stay blocked until an
+    material human-gate ``kanban_block`` — those stay blocked until an
     explicit ``kanban_unblock`` (#28712).  Without that guard, a
-    ``review-required`` handoff would auto-respawn, the fresh worker
+    material approval handoff would auto-respawn, the fresh worker
     would find nothing to do, exit cleanly, get recorded as a protocol
     violation, and the cycle would repeat indefinitely.
     """
@@ -2951,8 +2950,21 @@ def _cleanup_workspace(conn: sqlite3.Connection, task_id: str) -> None:
         if kind != "scratch" or not path:
             return
         import shutil
-        wp = Path(path)
-        if wp.is_dir():
+        raw_wp = Path(path).expanduser()
+        wp = raw_wp.resolve(strict=False)
+        root = workspaces_root().expanduser().resolve(strict=False)
+        # Scratch cleanup is destructive, so require the exact canonical
+        # per-task directory.  Legacy or malformed rows may point at the
+        # shared workspaces root (or another arbitrary directory); deleting
+        # either would remove other tasks' data.  Refuse cleanup unless the
+        # resolved path is precisely <workspaces_root>/<task_id>.
+        if raw_wp.is_symlink() or wp.parent != root or wp.name != task_id:
+            _log.warning(
+                "Refusing unsafe scratch workspace cleanup for %s: %s",
+                task_id,
+                wp,
+            )
+        elif wp.is_dir():
             shutil.rmtree(wp, ignore_errors=True)
             _log.debug("Removed scratch workspace: %s", wp)
         # Also kill the tmux session for the worker that owned this task,
@@ -3055,6 +3067,84 @@ def edit_completed_task_result(
     return True
 
 
+_CI_WAIT_RE = re.compile(
+    r"\bci\b.*\b(queued|pending|in[_ -]?progress|running|waiting)\b|"
+    r"\b(queued|pending|in[_ -]?progress|running|waiting)\b.*\bci\b",
+    re.I,
+)
+_CI_FAILURE_RE = re.compile(r"\bci\b.*\b(failed|failure|failing)\b|\b(failed|failure|failing)\b.*\bci\b", re.I)
+_CHECK_EVIDENCE_RE = re.compile(r"\bcheck=([^\s,;]+)", re.I)
+_CONCLUSION_FAILURE_RE = re.compile(r"\bconclusion=(failure|failed|timed_out|cancelled)\b", re.I)
+_URL_EVIDENCE_RE = re.compile(r"\burl=https?://\S+", re.I)
+_ROUTINE_REVIEW_RE = re.compile(r"^\s*review-required:\s*", re.I)
+_MATERIAL_HUMAN_GATE_RE = re.compile(
+    r"\b(approval required|legal approval|credential|password|api key|secret|payment|billing|ops approval|human decision|need human input)\b",
+    re.I,
+)
+
+
+def _classify_block_reason(reason: Optional[str]) -> dict[str, Any]:
+    """Classify worker block requests into human gates vs machine waits.
+
+    Workers historically used ``kanban_block`` for routine handoffs and CI waits,
+    which left the board littered with false human blockers. Keep true material
+    blockers sticky, but reroute machine-actionable waits back into scheduler
+    states with evidence-rich events.
+    """
+    text = (reason or "").strip()
+    if _CI_WAIT_RE.search(text):
+        return {"classification": "ci_wait", "status": "scheduled", "waiting_on": "ci", "human_gate": False}
+
+    if _CI_FAILURE_RE.search(text):
+        check = _CHECK_EVIDENCE_RE.search(text)
+        if check and _CONCLUSION_FAILURE_RE.search(text) and _URL_EVIDENCE_RE.search(text):
+            return {
+                "classification": "ci_failure_evidenced",
+                "status": "blocked",
+                "failing_check": check.group(1),
+                "human_gate": False,
+            }
+        return {"classification": "ci_failure_needs_evidence", "status": "scheduled", "waiting_on": "ci", "human_gate": False}
+
+    if _ROUTINE_REVIEW_RE.search(text) and not _MATERIAL_HUMAN_GATE_RE.search(text):
+        return {"classification": "routine_handoff", "status": "ready", "human_gate": False}
+
+    return {"classification": "material_human_gate", "status": "blocked", "human_gate": True}
+
+
+def _ready_or_todo_after_parent_gate(conn: sqlite3.Connection, task_id: str) -> str:
+    undone_parent = conn.execute(
+        "SELECT 1 FROM task_links l "
+        "JOIN tasks p ON p.id = l.parent_id "
+        "WHERE l.child_id = ? AND p.status != 'done' LIMIT 1",
+        (task_id,),
+    ).fetchone()
+    return "todo" if undone_parent else "ready"
+
+
+def _policy_update_task_status(
+    conn: sqlite3.Connection,
+    task_id: str,
+    *,
+    status: str,
+    expected_run_id: Optional[int],
+) -> sqlite3.Cursor:
+    params: list[Any] = [status, task_id]
+    sql = """
+        UPDATE tasks
+           SET status       = ?,
+               claim_lock   = NULL,
+               claim_expires= NULL,
+               worker_pid   = NULL
+         WHERE id = ?
+           AND status IN ('running', 'ready', 'blocked')
+    """
+    if expected_run_id is not None:
+        sql += " AND current_run_id = ?"
+        params.append(int(expected_run_id))
+    return conn.execute(sql, params)
+
+
 def block_task(
     conn: sqlite3.Connection,
     task_id: str,
@@ -3062,52 +3152,130 @@ def block_task(
     reason: Optional[str] = None,
     expected_run_id: Optional[int] = None,
 ) -> bool:
-    """Transition ``running -> blocked``."""
+    """Transition a worker stop request using blocker policy classification."""
+    policy = _classify_block_reason(reason)
+    policy_status = str(policy["status"])
     with write_txn(conn):
-        if expected_run_id is None:
-            cur = conn.execute(
-                """
-                UPDATE tasks
-                   SET status       = 'blocked',
-                       claim_lock   = NULL,
-                       claim_expires= NULL,
-                       worker_pid   = NULL
-                 WHERE id = ?
-                   AND status IN ('running', 'ready')
-                """,
-                (task_id,),
-            )
-        else:
-            cur = conn.execute(
-                """
-                UPDATE tasks
-                   SET status       = 'blocked',
-                       claim_lock   = NULL,
-                       claim_expires= NULL,
-                       worker_pid   = NULL
-                 WHERE id = ?
-                   AND status IN ('running', 'ready')
-                   AND current_run_id = ?
-                """,
-                (task_id, int(expected_run_id)),
-            )
+        status = (
+            _ready_or_todo_after_parent_gate(conn, task_id)
+            if policy_status == "ready"
+            else policy_status
+        )
+        cur = _policy_update_task_status(
+            conn,
+            task_id,
+            status=status,
+            expected_run_id=expected_run_id,
+        )
         if cur.rowcount != 1:
             return False
+        run_status = status if status in {"blocked", "scheduled"} else "released"
         run_id = _end_run(
             conn, task_id,
-            outcome="blocked", status="blocked",
+            outcome=run_status,
+            status=run_status,
             summary=reason,
         )
-        # Synthesize a run when blocking a never-claimed task so the
-        # reason is preserved in attempt history.
+        # Synthesize a run when stopping a never-claimed task so the reason is
+        # preserved in attempt history.
         if run_id is None and reason:
             run_id = _synthesize_ended_run(
                 conn, task_id,
-                outcome="blocked",
+                outcome=run_status,
                 summary=reason,
             )
-        _append_event(conn, task_id, "blocked", {"reason": reason}, run_id=run_id)
+
+        payload = {"reason": reason, "classification": policy["classification"], "human_gate": policy["human_gate"]}
+        if "waiting_on" in policy:
+            payload["waiting_on"] = policy["waiting_on"]
+        if "failing_check" in policy:
+            payload["failing_check"] = policy["failing_check"]
+
+        if status == "scheduled":
+            _append_event(conn, task_id, "scheduled", payload, run_id=run_id)
+        elif policy_status == "ready":
+            payload["status"] = status
+            _append_event(conn, task_id, "false_blocker_repaired", payload, run_id=run_id)
+        else:
+            _append_event(conn, task_id, "blocked", payload, run_id=run_id)
         return True
+
+
+def repair_false_human_blockers(conn: sqlite3.Connection) -> dict[str, int]:
+    """Repair historical ``blocked`` tasks that are actually machine waits.
+
+    Looks at the latest explicit ``blocked`` event for each currently-blocked
+    task, re-runs the blocker classifier, and moves false human gates to the
+    appropriate non-human state. Material blockers are left untouched.
+    """
+    receipt = {
+        "repaired": 0,
+        "scheduled_waiting_on_ci": 0,
+        "ready_routine_handoff": 0,
+    }
+    with write_txn(conn):
+        rows = conn.execute(
+            """
+            SELECT t.id AS task_id, e.run_id AS run_id, e.payload AS payload
+              FROM tasks t
+              JOIN task_events e ON e.id = (
+                    SELECT e2.id
+                      FROM task_events e2
+                     WHERE e2.task_id = t.id
+                       AND e2.kind = 'blocked'
+                     ORDER BY e2.created_at DESC, e2.id DESC
+                     LIMIT 1
+              )
+             WHERE t.status = 'blocked'
+            """
+        ).fetchall()
+        for row in rows:
+            try:
+                payload = json.loads(row["payload"]) if row["payload"] else {}
+            except Exception:
+                payload = {}
+            reason = payload.get("reason") if isinstance(payload, dict) else None
+            policy = _classify_block_reason(str(reason or ""))
+            policy_status = str(policy["status"])
+            if policy_status == "blocked":
+                continue
+            status = (
+                _ready_or_todo_after_parent_gate(conn, row["task_id"])
+                if policy_status == "ready"
+                else policy_status
+            )
+
+            cur = conn.execute(
+                """
+                UPDATE tasks
+                   SET status = ?, claim_lock = NULL, claim_expires = NULL,
+                       worker_pid = NULL, current_run_id = NULL,
+                       consecutive_failures = 0, last_failure_error = NULL
+                 WHERE id = ? AND status = 'blocked'
+                """,
+                (status, row["task_id"]),
+            )
+            if cur.rowcount != 1:
+                continue
+
+            event_payload = {
+                "reason": reason,
+                "classification": policy["classification"],
+                "human_gate": policy["human_gate"],
+                "repaired_from": "blocked",
+            }
+            if "waiting_on" in policy:
+                event_payload["waiting_on"] = policy["waiting_on"]
+            if status == "scheduled":
+                _append_event(conn, row["task_id"], "scheduled", event_payload, run_id=row["run_id"])
+                if policy.get("waiting_on") == "ci":
+                    receipt["scheduled_waiting_on_ci"] += 1
+            else:
+                _append_event(conn, row["task_id"], "false_blocker_repaired", event_payload, run_id=row["run_id"])
+                if policy["classification"] == "routine_handoff":
+                    receipt["ready_routine_handoff"] += 1
+            receipt["repaired"] += 1
+    return receipt
 
 
 def unblock_task(conn: sqlite3.Connection, task_id: str) -> bool:
@@ -3738,14 +3906,19 @@ class DispatchResult:
     respawn_guarded: list[tuple[str, str]] = field(default_factory=list)
     """Tasks skipped by the respawn guard, as ``(task_id, reason)`` pairs.
 
-    Reasons: ``"blocker_auth"`` (quota/auth error — also auto-blocked),
-    ``"recent_success"`` (completed run within guard window),
-    ``"active_pr"`` (GitHub PR URL in a recent comment)."""
+    Built-in reasons are ``"blocker_auth"`` (quota/auth error),
+    ``"recent_success"`` (completed run within guard window), and
+    ``"active_pr"`` (GitHub PR URL in a recent comment). Consumers should
+    pass the reason through verbatim so future guard diagnostics remain
+    operator-visible."""
+    rate_limited: list[str] = field(default_factory=list)
+    """Compatibility bucket for dispatchers that distinguish provider
+    cooldowns from other respawn-guard reasons."""
     readiness_failed: list[tuple[str, str]] = field(default_factory=list)
-    """Tasks blocked/skipped by host/profile readiness preflight.
+    """Tasks blocked or skipped by host/profile readiness preflight.
 
-    These are pre-spawn control-plane failures (for example missing or
-    ambiguous forced skills), so they do not consume consecutive_failures.
+    These are pre-spawn control-plane failures, such as missing or ambiguous
+    forced skills, so they do not consume the worker retry budget.
     """
 
 
@@ -4918,7 +5091,9 @@ def dispatch_once(
             if task_for_preflight is not None:
                 from hermes_cli.profiles import normalize_profile_name
 
-                profile_arg = normalize_profile_name(task_for_preflight.assignee or row["assignee"])
+                profile_arg = normalize_profile_name(
+                    task_for_preflight.assignee or row["assignee"]
+                )
                 try:
                     _worker_skill_preflight(
                         task_for_preflight,
@@ -5027,7 +5202,9 @@ def dispatch_once(
                 task_for_preflight.skills = ["sdlc-review"]
                 from hermes_cli.profiles import normalize_profile_name
 
-                profile_arg = normalize_profile_name(task_for_preflight.assignee or row["assignee"])
+                profile_arg = normalize_profile_name(
+                    task_for_preflight.assignee or row["assignee"]
+                )
                 try:
                     _worker_skill_preflight(
                         task_for_preflight,
@@ -5321,18 +5498,21 @@ def _worker_skill_preflight(
     profile_arg: str,
     hermes_home: Optional[str],
 ) -> tuple[list[str], dict[str, Any]]:
-    """Resolve worker preloaded skills with the real profile-scoped resolver.
+    """Resolve profile-scoped worker skills before starting a subprocess.
 
-    ``kanban-worker`` is a best-effort built-in: missing means omit it because
-    KANBAN_GUIDANCE already carries the lifecycle contract. Task-forced skills
-    are mandatory. Ambiguity is always fatal because the CLI preloader refuses
-    to guess.
+    Built-in worker skills are best effort because their essential behavior is
+    also injected by the control plane. Skills explicitly forced on a task are
+    mandatory. Ambiguous names fail closed because the CLI must not guess.
     """
 
     optional_skills = {"kanban-worker", "sdlc-review"}
     requested: list[str] = ["kanban-worker"]
-    task_skills = [str(sk).strip() for sk in (task.skills or []) if str(sk).strip()]
-    forced = [sk for sk in task_skills if sk not in optional_skills]
+    task_skills = [
+        str(skill).strip()
+        for skill in (task.skills or [])
+        if str(skill).strip()
+    ]
+    forced = [skill for skill in task_skills if skill not in optional_skills]
     for skill in task_skills:
         if skill not in requested:
             requested.append(skill)
@@ -5344,12 +5524,17 @@ def _worker_skill_preflight(
         task_id=task.id,
         hermes_home=hermes_home,
     )
-
     loaded_names = set(resolved.loaded)
     forced_set = set(forced)
-    missing_forced = [sk for sk in resolved.missing if sk in forced_set]
+    missing_forced = [
+        skill for skill in resolved.missing if skill in forced_set
+    ]
     ambiguous_all = dict(resolved.ambiguous)
-    ambiguous = {sk: matches for sk, matches in ambiguous_all.items() if sk in forced_set}
+    ambiguous = {
+        skill: matches
+        for skill, matches in ambiguous_all.items()
+        if skill in forced_set
+    }
 
     payload: dict[str, Any] = {
         "check": "profile_skill_import",
@@ -5379,10 +5564,17 @@ def _worker_skill_preflight(
     argv_skills: list[str] = []
     if "kanban-worker" in loaded_names:
         argv_skills.append("kanban-worker")
+    unresolved = (
+        set(resolved.missing)
+        | set(ambiguous_all)
+        | set(resolved.errors)
+    )
     for skill in task_skills:
-        # Preserve the operator-requested identifier for the CLI argv while
-        # relying on the resolver result above for validity.
-        if skill != "kanban-worker" and skill in loaded_names:
+        # Keep the operator-requested identifier. The resolver may report a
+        # canonical frontmatter name that differs from a qualified path or
+        # alias, but the CLI needs the original identifier to make that same
+        # unambiguous selection.
+        if skill != "kanban-worker" and skill not in unresolved:
             argv_skills.append(skill)
     payload["argv_skills"] = list(argv_skills)
     return argv_skills, payload
@@ -5394,7 +5586,7 @@ def _record_host_readiness_failure(
     error: str,
     payload: dict[str, Any],
 ) -> None:
-    """Block a pre-spawn host/profile readiness failure without retry tick."""
+    """Block a pre-spawn host/profile readiness failure without retrying."""
 
     safe_error = error[:500]
     safe_payload = dict(payload)
@@ -5408,13 +5600,27 @@ def _record_host_readiness_failure(
             (safe_error, task_id),
         )
         run_id = _end_run(
-            conn, task_id,
-            outcome="blocked", status="blocked",
+            conn,
+            task_id,
+            outcome="blocked",
+            status="blocked",
             summary=safe_error,
             metadata=safe_payload,
         )
-        _append_event(conn, task_id, "host_readiness_failed", safe_payload, run_id=run_id)
-        _append_event(conn, task_id, "blocked", {"reason": safe_error}, run_id=run_id)
+        _append_event(
+            conn,
+            task_id,
+            "host_readiness_failed",
+            safe_payload,
+            run_id=run_id,
+        )
+        _append_event(
+            conn,
+            task_id,
+            "blocked",
+            {"reason": safe_error},
+            run_id=run_id,
+        )
 
 
 def _worker_terminal_timeout_env(
@@ -5551,13 +5757,11 @@ def _default_spawn(
         # profile-local worker sessions still register configured hooks.
         "--accept-hooks",
     ]
-    # Auto-load only skills that the real profile-scoped CLI preloader
-    # resolved above. ``kanban-worker`` remains best-effort because
-    # KANBAN_GUIDANCE carries the lifecycle contract; task-forced skills
-    # are mandatory and were rejected before reaching this argv path if
-    # missing or ambiguous.
-    for sk in argv_skills:
-        cmd.extend(["--skills", sk])
+    # Add only skills already resolved against this profile home. Built-ins
+    # are optional because their lifecycle contract is also injected, while
+    # task-forced skills fail during preflight before this subprocess starts.
+    for skill in argv_skills:
+        cmd.extend(["--skills", skill])
     if task.model_override:
         cmd.extend(["-m", task.model_override])
     cmd.extend([
