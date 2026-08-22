@@ -143,9 +143,9 @@ The block message is what appears in the dashboard / gateway notifier. The comme
 
 ## Heartbeats worth sending
 
-Good heartbeats name progress: `"epoch 12/50, loss 0.31"`, `"scanned 1.2M/2.4M rows"`, `"uploaded 47/120 videos"`.
+For long operations, send `kanban_heartbeat(note=...)` every 10–15 minutes with a human-readable note that proves forward motion: `"changed 2 files, adding tests now"`, `"pytest running: 83/214 passed so far"`, `"scanned 1.2M/2.4M rows"`, `"uploaded 47/120 videos"`.
 
-Bad heartbeats: `"still working"`, empty notes, sub-second intervals. Every few minutes max; skip entirely for tasks under ~2 minutes.
+Bad heartbeats: `"still working"`, empty notes, sub-second intervals. Skip entirely for tasks under ~2 minutes.
 
 ## Startup/readiness failures
 

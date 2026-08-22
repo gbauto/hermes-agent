@@ -25,6 +25,7 @@ from agent.prompt_builder import (
     TOOL_USE_ENFORCEMENT_MODELS,
     OPENAI_MODEL_EXECUTION_GUIDANCE,
     MEMORY_GUIDANCE,
+    KANBAN_GUIDANCE,
     SESSION_SEARCH_GUIDANCE,
     PLATFORM_HINTS,
     WSL_ENVIRONMENT_HINT,
@@ -44,6 +45,13 @@ class TestGuidanceConstants:
         assert "session_search" in MEMORY_GUIDANCE
         assert "like a diary" not in MEMORY_GUIDANCE
         assert ">80%" not in MEMORY_GUIDANCE
+
+    def test_kanban_guidance_requires_observable_heartbeat_notes(self):
+        assert "every 10–15 minutes" in KANBAN_GUIDANCE
+        assert "human-readable" in KANBAN_GUIDANCE
+        assert "concrete progress" in KANBAN_GUIDANCE
+        assert "files changed" in KANBAN_GUIDANCE
+        assert "tests running" in KANBAN_GUIDANCE
 
     def test_session_search_guidance_is_simple_cross_session_recall(self):
         assert "relevant cross-session context exists" in SESSION_SEARCH_GUIDANCE
