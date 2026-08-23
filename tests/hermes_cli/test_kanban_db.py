@@ -755,6 +755,57 @@ def test_complete_records_result(kanban_home):
     assert task.completed_at is not None
 
 
+def test_complete_rolls_up_parent_artifacts_to_dependent_root_event(kanban_home):
+    with kb.connect() as conn:
+        prd = kb.create_task(conn, title="prd producer")
+        report = kb.create_task(conn, title="report producer")
+        root = kb.create_task(conn, title="root closeout", parents=[prd, report])
+
+        assert kb.complete_task(
+            conn,
+            prd,
+            result="prd done",
+            metadata={"artifacts": ["/tmp/prd.md", "/tmp/shared-receipt.json"]},
+        )
+        assert kb.complete_task(
+            conn,
+            report,
+            result="report done",
+            metadata={
+                "artifacts": [
+                    "/tmp/report.html",
+                    "/tmp/shared-receipt.json",
+                    {"path": "/tmp/evidence.png", "kind": "validation"},
+                ]
+            },
+        )
+        assert kb.complete_task(
+            conn,
+            root,
+            result="root done",
+            metadata={"artifacts": ["/tmp/root-summary.md", "/tmp/prd.md"]},
+        )
+
+        completed = [e for e in kb.list_events(conn, root) if e.kind == "completed"][-1]
+        root_run = kb.latest_run(conn, root)
+
+    assert completed.payload["artifacts"] == [
+        "/tmp/root-summary.md",
+        "/tmp/prd.md",
+        "/tmp/shared-receipt.json",
+        "/tmp/report.html",
+        {"path": "/tmp/evidence.png", "kind": "validation", "producer_task_id": report},
+    ]
+    assert completed.payload["descendant_task_ids"] == [prd, report]
+    assert completed.payload["producer_task_ids"] == [prd, report]
+    assert root_run is not None
+    assert root_run.metadata is not None
+    root_metadata = root_run.metadata
+    assert root_metadata["artifacts"] == completed.payload["artifacts"]
+    assert root_metadata["descendant_task_ids"] == [prd, report]
+    assert root_metadata["producer_task_ids"] == [prd, report]
+
+
 def test_complete_removes_only_canonical_task_scratch_workspace(kanban_home):
     with kb.connect() as conn:
         task_id = kb.create_task(conn, title="owned scratch")
