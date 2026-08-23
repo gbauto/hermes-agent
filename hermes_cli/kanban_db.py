@@ -2744,6 +2744,179 @@ class HallucinatedCardsError(ValueError):
         )
 
 
+def _artifact_dedupe_key(item: Any) -> Optional[tuple[str, str]]:
+    if isinstance(item, str):
+        value = item.strip()
+        if not value:
+            return None
+        if value.startswith(("http://", "https://")):
+            return ("url", value)
+        return ("path", value)
+    if isinstance(item, dict):
+        path = item.get("path") or item.get("file") or item.get("file_path")
+        url = item.get("url") or item.get("href") or item.get("public_url")
+        if isinstance(url, str) and url.strip():
+            return ("url", url.strip())
+        if isinstance(path, str) and path.strip():
+            return ("path", path.strip())
+        try:
+            return ("json", json.dumps(item, sort_keys=True, default=str))
+        except TypeError:
+            return ("repr", repr(item))
+    return None
+
+
+def _clean_artifact_items(value: Any, *, producer_task_id: Optional[str] = None) -> list[Any]:
+    if isinstance(value, (str, dict)):
+        raw_items: Iterable[Any] = [value]
+    elif isinstance(value, (list, tuple)):
+        raw_items = value
+    else:
+        return []
+
+    cleaned: list[Any] = []
+    for item in raw_items:
+        if isinstance(item, str):
+            value_str = item.strip()
+            if value_str:
+                cleaned.append(value_str)
+        elif isinstance(item, dict):
+            copied = dict(item)
+            if producer_task_id:
+                copied.setdefault("producer_task_id", producer_task_id)
+            if _artifact_dedupe_key(copied) is not None:
+                cleaned.append(copied)
+    return cleaned
+
+
+def _merge_artifact_items(*artifact_lists: Iterable[Any]) -> list[Any]:
+    merged: list[Any] = []
+    seen: set[tuple[str, str]] = set()
+    for artifacts in artifact_lists:
+        for item in artifacts:
+            key = _artifact_dedupe_key(item)
+            if key is None or key in seen:
+                continue
+            seen.add(key)
+            merged.append(item)
+    return merged
+
+
+def _dependency_artifact_rollup(conn: sqlite3.Connection, task_id: str) -> dict[str, Any]:
+    """Collect explicit artifact receipts from upstream dependency tasks.
+
+    Hermes Kanban dependency edges are stored as ``parent_id -> child_id``:
+    the child cannot run until every parent is done.  Root/orchestrator
+    closeout tasks therefore often depend on artifact-producing children in
+    the implementation graph.  Gateway delivery is intentionally task-local,
+    so completion of the closeout task needs to promote dependency artifacts
+    onto its own completed event payload.
+    """
+    queue = [task_id]
+    seen_tasks = {task_id}
+    dependency_ids: list[str] = []
+    producer_ids: list[str] = []
+    rolled_artifacts: list[Any] = []
+
+    while queue:
+        current = queue.pop(0)
+        rows = conn.execute(
+            """
+            SELECT l.parent_id
+              FROM task_links l
+              JOIN tasks t ON t.id = l.parent_id
+             WHERE l.child_id = ?
+             ORDER BY l.rowid
+            """,
+            (current,),
+        ).fetchall()
+        for row in rows:
+            parent_id = str(row["parent_id"])
+            if parent_id in seen_tasks:
+                continue
+            seen_tasks.add(parent_id)
+            dependency_ids.append(parent_id)
+            queue.append(parent_id)
+
+    for producer_id in dependency_ids:
+        event_row = conn.execute(
+            """
+            SELECT payload
+              FROM task_events
+             WHERE task_id = ? AND kind = 'completed'
+             ORDER BY id DESC
+             LIMIT 1
+            """,
+            (producer_id,),
+        ).fetchone()
+        producer_artifacts: list[Any] = []
+        if event_row and event_row["payload"]:
+            try:
+                payload = json.loads(event_row["payload"])
+            except json.JSONDecodeError:
+                payload = {}
+            if isinstance(payload, dict):
+                producer_artifacts.extend(
+                    _clean_artifact_items(payload.get("artifacts"), producer_task_id=producer_id)
+                )
+
+        run_row = conn.execute(
+            """
+            SELECT metadata
+              FROM task_runs
+             WHERE task_id = ? AND metadata IS NOT NULL
+             ORDER BY started_at DESC, id DESC
+             LIMIT 1
+            """,
+            (producer_id,),
+        ).fetchone()
+        if run_row and run_row["metadata"]:
+            try:
+                run_metadata = json.loads(run_row["metadata"])
+            except json.JSONDecodeError:
+                run_metadata = {}
+            if isinstance(run_metadata, dict):
+                producer_artifacts.extend(
+                    _clean_artifact_items(run_metadata.get("artifacts"), producer_task_id=producer_id)
+                )
+
+        producer_artifacts = _merge_artifact_items(producer_artifacts)
+        if producer_artifacts:
+            producer_ids.append(producer_id)
+            rolled_artifacts.extend(producer_artifacts)
+
+    return {
+        "artifacts": _merge_artifact_items(rolled_artifacts),
+        "descendant_task_ids": dependency_ids,
+        "producer_task_ids": producer_ids,
+    }
+
+
+def _completion_metadata_with_artifact_rollup(
+    conn: sqlite3.Connection,
+    task_id: str,
+    metadata: Optional[dict],
+) -> Optional[dict]:
+    explicit_artifacts = _clean_artifact_items(metadata.get("artifacts") if isinstance(metadata, dict) else None)
+    rollup = _dependency_artifact_rollup(conn, task_id)
+    rolled_artifacts = rollup.get("artifacts") or []
+    dependency_ids = rollup.get("descendant_task_ids") or []
+    producer_ids = rollup.get("producer_task_ids") or []
+
+    if not explicit_artifacts and not rolled_artifacts and not dependency_ids and not producer_ids:
+        return metadata
+
+    merged_metadata = dict(metadata) if isinstance(metadata, dict) else {}
+    merged_artifacts = _merge_artifact_items(explicit_artifacts, rolled_artifacts)
+    if merged_artifacts:
+        merged_metadata["artifacts"] = merged_artifacts
+    if dependency_ids:
+        merged_metadata["descendant_task_ids"] = dependency_ids
+    if producer_ids:
+        merged_metadata["producer_task_ids"] = producer_ids
+    return merged_metadata
+
+
 def complete_task(
     conn: sqlite3.Connection,
     task_id: str,
@@ -2812,6 +2985,7 @@ def complete_task(
         verified_cards = []
 
     with write_txn(conn):
+        metadata = _completion_metadata_with_artifact_rollup(conn, task_id, metadata)
         if expected_run_id is None:
             cur = conn.execute(
                 """
@@ -2878,16 +3052,21 @@ def complete_task(
         # notifier can upload them as native attachments alongside the
         # completion message. Workers pass these via
         # ``kanban_complete(artifacts=[...])`` which stashes the list in
-        # ``metadata["artifacts"]`` — we promote it onto the event so
-        # consumers don't have to fetch the run row to find it.
+        # ``metadata["artifacts"]``. Parent/root closeout tasks also get
+        # deterministic dependency artifact rollups promoted onto their
+        # own completion event so subscribed Telegram threads receive a
+        # single authoritative bundle without gateway-side graph walking.
         if isinstance(metadata, dict):
             md_artifacts = metadata.get("artifacts")
-            if isinstance(md_artifacts, (list, tuple)):
-                cleaned_artifacts = [
-                    str(p).strip() for p in md_artifacts if isinstance(p, str) and str(p).strip()
-                ]
-                if cleaned_artifacts:
-                    completed_payload["artifacts"] = cleaned_artifacts
+            cleaned_artifacts = _clean_artifact_items(md_artifacts)
+            if cleaned_artifacts:
+                completed_payload["artifacts"] = cleaned_artifacts
+            descendant_task_ids = metadata.get("descendant_task_ids")
+            if isinstance(descendant_task_ids, list) and descendant_task_ids:
+                completed_payload["descendant_task_ids"] = descendant_task_ids
+            producer_task_ids = metadata.get("producer_task_ids")
+            if isinstance(producer_task_ids, list) and producer_task_ids:
+                completed_payload["producer_task_ids"] = producer_task_ids
         _append_event(
             conn, task_id, "completed",
             completed_payload,
