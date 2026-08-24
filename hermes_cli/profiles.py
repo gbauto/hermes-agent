@@ -633,6 +633,30 @@ def list_profiles() -> List[ProfileInfo]:
     return profiles
 
 
+def _profile_model_provider(profile_dir: Path) -> Optional[str]:
+    """Return normalized model.provider from a profile config, if present."""
+    _model, provider = _read_config_model(profile_dir)
+    return str(provider or "").strip().lower() or None
+
+
+def _sync_codex_shared_auth_metadata(profile_dir: Path, profile_id: str, *, enabled: bool) -> None:
+    """Best-effort metadata sync for named Codex profiles; never touches tokens."""
+    try:
+        from hermes_cli.auth import configure_profile_shared_provider_metadata
+
+        configure_profile_shared_provider_metadata(
+            profile_dir,
+            profile_id,
+            "openai-codex",
+            enabled=enabled,
+        )
+    except Exception:
+        # Profile CRUD must not fail because shared-auth metadata repair hit a
+        # malformed root config. `hermes auth reconcile-shared --repair` can fix
+        # and report exact drift later.
+        pass
+
+
 def create_profile(
     name: str,
     clone_from: Optional[str] = None,
@@ -777,6 +801,9 @@ def create_profile(
         except Exception:
             pass  # non-fatal — user can describe later with `hermes profile describe`
 
+    if _profile_model_provider(profile_dir) == "openai-codex":
+        _sync_codex_shared_auth_metadata(profile_dir, canon, enabled=True)
+
     return profile_dir
 
 
@@ -845,6 +872,8 @@ def delete_profile(name: str, yes: bool = False) -> Path:
     profile_dir = get_profile_dir(canon)
     if not profile_dir.is_dir():
         raise FileNotFoundError(f"Profile '{canon}' does not exist.")
+
+    _sync_codex_shared_auth_metadata(profile_dir, canon, enabled=False)
 
     # Show what will be deleted
     model, provider = _read_config_model(profile_dir)

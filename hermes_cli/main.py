@@ -11244,6 +11244,21 @@ def main():
         action="store_true",
         help="Confirm the profile auth-boundary change",
     )
+    auth_reconcile_shared = auth_subparsers.add_parser(
+        "reconcile-shared",
+        help="Report or repair shared Codex auth profile metadata",
+    )
+    auth_reconcile_shared.add_argument(
+        "provider",
+        nargs="?",
+        default="openai-codex",
+        help="Provider id (currently openai-codex)",
+    )
+    auth_reconcile_shared.add_argument(
+        "--repair",
+        action="store_true",
+        help="Repair metadata drift; dry-run by default",
+    )
     auth_spotify = auth_subparsers.add_parser(
         "spotify", help="Authenticate Hermes with Spotify via PKCE"
     )

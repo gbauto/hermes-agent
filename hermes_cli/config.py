@@ -5233,6 +5233,66 @@ def edit_config():
     subprocess.run([editor, str(config_path)])
 
 
+def _parse_config_cli_value(key: str, value: str):
+    """Parse `hermes config set` values with typed guards for structured keys."""
+    typed_list_keys = {
+        "auth.shared_providers",
+    }
+    typed_list_prefixes = (
+        "auth.shared_provider_consumers.",
+    )
+    if key in typed_list_keys or any(key.startswith(prefix) for prefix in typed_list_prefixes):
+        try:
+            parsed = yaml.safe_load(value)
+        except yaml.YAMLError as exc:
+            raise ValueError(f"{key} must be a YAML list of strings") from exc
+        if isinstance(parsed, str) and "," in parsed:
+            parsed = [part.strip() for part in parsed.split(",") if part.strip()]
+        if not isinstance(parsed, list) or not all(isinstance(item, str) for item in parsed):
+            raise ValueError(f"{key} must be a YAML list of strings, e.g. ['openai-codex']")
+        return [item.strip().lower() for item in parsed if item.strip()]
+
+    if value.lower() in {'true', 'yes', 'on'}:
+        return True
+    if value.lower() in {'false', 'no', 'off'}:
+        return False
+    if value.isdigit():
+        return int(value)
+    if value.replace('.', '', 1).isdigit():
+        return float(value)
+    return value
+
+
+def _sync_codex_shared_auth_after_provider_set(key: str, value: Any) -> None:
+    """Best-effort shared-auth metadata update for named-profile provider changes."""
+    if key != "model.provider":
+        return
+    try:
+        from hermes_constants import get_hermes_home, get_default_hermes_root
+        from hermes_cli.profiles import normalize_profile_name
+        from hermes_cli.auth import configure_profile_shared_provider_metadata
+
+        home = get_hermes_home()
+        root = get_default_hermes_root()
+        try:
+            if home.resolve(strict=False) == root.resolve(strict=False):
+                return
+        except Exception:
+            if home == root:
+                return
+        if home.parent.name != "profiles":
+            return
+        profile_id = normalize_profile_name(home.name)
+        configure_profile_shared_provider_metadata(
+            home,
+            profile_id,
+            "openai-codex",
+            enabled=(str(value or "").strip().lower() == "openai-codex"),
+        )
+    except Exception as exc:
+        print(f"⚠ shared Codex auth metadata sync skipped: {exc}")
+
+
 def set_config_value(key: str, value: str):
     """Set a configuration value."""
     if is_managed():
@@ -5273,15 +5333,14 @@ def set_config_value(key: str, value: str):
     # _set_nested which preserves list-typed nodes; before #17876 the
     # inline navigation here silently overwrote lists with dicts.
 
-    # Convert value to appropriate type
-    if value.lower() in {'true', 'yes', 'on'}:
-        value = True
-    elif value.lower() in {'false', 'no', 'off'}:
-        value = False
-    elif value.isdigit():
-        value = int(value)
-    elif value.replace('.', '', 1).isdigit():
-        value = float(value)
+    # Convert value to appropriate type. Structured keys (notably
+    # auth.shared_providers) parse YAML lists so `hermes config set` cannot
+    # accidentally persist the literal string "['openai-codex']".
+    try:
+        value = _parse_config_cli_value(key, value)
+    except ValueError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        sys.exit(1)
 
     _set_nested(user_config, key, value)
     
@@ -5316,6 +5375,8 @@ def set_config_value(key: str, value: str):
     }
     if key in _config_to_env_sync:
         save_env_value(_config_to_env_sync[key], str(value))
+
+    _sync_codex_shared_auth_after_provider_set(key, value)
 
     print(f"✓ Set {key} = {value} in {config_path}")
 
