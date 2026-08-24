@@ -94,7 +94,7 @@ _log = logging.getLogger(__name__)
 # Constants
 # ---------------------------------------------------------------------------
 
-VALID_STATUSES = {"triage", "todo", "scheduled", "ready", "running", "blocked", "review", "done", "archived"}
+VALID_STATUSES = {"triage", "todo", "scheduled", "ready", "running", "closeout_pending", "blocked", "review", "done", "archived"}
 VALID_INITIAL_STATUSES = {"running", "blocked"}
 VALID_WORKSPACE_KINDS = {"scratch", "worktree", "dir"}
 KNOWN_TOOLSET_NAMES = frozenset(name.casefold() for name in get_toolset_names())
@@ -2984,8 +2984,66 @@ def complete_task(
     else:
         verified_cards = []
 
+    metadata = _completion_metadata_with_artifact_rollup(conn, task_id, metadata)
+    try:
+        from hermes_cli import kanban_closeout_artifacts as _closeout_gate
+        gate_settings = _closeout_gate.gate_settings()
+        task_for_gate = get_task(conn, task_id)
+        if task_for_gate is not None and _closeout_gate.should_gate(task_for_gate, metadata, gate_settings):
+            metadata, closeout_receipt = _closeout_gate.run_gate(
+                task=task_for_gate,
+                metadata=metadata,
+                board=get_current_board(),
+                settings=gate_settings,
+            )
+        else:
+            closeout_receipt = None
+    except Exception as exc:
+        receipt = getattr(exc, "receipt", None)
+        reason = getattr(exc, "reason", None) or str(exc) or "closeout artifact publication failed"
+        with write_txn(conn):
+            cur = conn.execute(
+                """
+                UPDATE tasks
+                   SET status       = 'closeout_pending',
+                       result       = ?,
+                       claim_lock   = NULL,
+                       claim_expires= NULL,
+                       worker_pid   = NULL
+                 WHERE id = ?
+                   AND status IN ('running', 'ready', 'blocked', 'closeout_pending')
+                """,
+                (result, task_id),
+            )
+            if cur.rowcount == 1:
+                pending_metadata = dict(metadata) if isinstance(metadata, dict) else {}
+                pending_metadata["closeout_artifact_publication"] = receipt or {"ok": False, "reason": reason}
+                run_id = _end_run(
+                    conn, task_id,
+                    outcome="closeout_pending", status="closeout_pending",
+                    summary=summary if summary is not None else result,
+                    metadata=pending_metadata,
+                    error=reason,
+                )
+                if run_id is None and (summary or metadata or result):
+                    run_id = _synthesize_ended_run(
+                        conn, task_id,
+                        outcome="closeout_pending",
+                        summary=summary if summary is not None else result,
+                        metadata=pending_metadata,
+                        error=reason,
+                    )
+                _append_event(
+                    conn, task_id, "closeout_pending",
+                    {
+                        "reason": reason,
+                        "receipt": receipt,
+                    },
+                    run_id=run_id,
+                )
+        return False
+
     with write_txn(conn):
-        metadata = _completion_metadata_with_artifact_rollup(conn, task_id, metadata)
         if expected_run_id is None:
             cur = conn.execute(
                 """
@@ -2997,7 +3055,7 @@ def complete_task(
                        claim_expires= NULL,
                        worker_pid   = NULL
                  WHERE id = ?
-                   AND status IN ('running', 'ready', 'blocked')
+                   AND status IN ('running', 'ready', 'blocked', 'closeout_pending')
                 """,
                 (result, now, task_id),
             )
@@ -3012,7 +3070,7 @@ def complete_task(
                        claim_expires= NULL,
                        worker_pid   = NULL
                  WHERE id = ?
-                   AND status IN ('running', 'ready', 'blocked')
+                   AND status IN ('running', 'ready', 'blocked', 'closeout_pending')
                    AND current_run_id = ?
                 """,
                 (result, now, task_id, int(expected_run_id)),
@@ -3067,6 +3125,12 @@ def complete_task(
             producer_task_ids = metadata.get("producer_task_ids")
             if isinstance(producer_task_ids, list) and producer_task_ids:
                 completed_payload["producer_task_ids"] = producer_task_ids
+            verified_html_url = metadata.get("verified_html_url")
+            if isinstance(verified_html_url, str) and verified_html_url.strip():
+                completed_payload["verified_html_url"] = verified_html_url.strip()
+            publication = metadata.get("closeout_artifact_publication")
+            if isinstance(publication, dict):
+                completed_payload["closeout_artifact_publication"] = publication
         _append_event(
             conn, task_id, "completed",
             completed_payload,

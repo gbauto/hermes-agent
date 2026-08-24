@@ -1570,6 +1570,17 @@ DEFAULT_CONFIG = {
         # worker process (if still running host-locally) is terminated
         # before the reclaim.  0 disables stale detection entirely.
         "dispatch_stale_timeout_seconds": 14400,
+        # Default-OFF terminal-parent closeout artifact publication gate.
+        # When enabled, qualifying parent/closeout completions must publish a
+        # deterministic artifact manifest through the configured external
+        # command and receive a verified HTTPS HTML receipt before the task can
+        # transition to done. Failures leave the task in closeout_pending.
+        "closeout_artifacts": {
+            "enabled": False,
+            "publisher_command": "",
+            "publisher_timeout_seconds": 300,
+            "require_for_all_completions": False,
+        },
     },
 
     # execute_code settings — controls the tool used for programmatic tool calls.
