@@ -66,6 +66,59 @@ def test_closeout_artifact_gate_fail_closed_to_closeout_pending(tmp_path, monkey
         conn.close()
 
 
+def test_closeout_pending_task_can_retry_to_done_after_publisher_recovers(tmp_path, monkeypatch):
+    monkeypatch.setenv("HERMES_KANBAN_DB", str(tmp_path / "retry.db"))
+    kb.init_db()
+    publisher = tmp_path / "publisher.py"
+    publisher.write_text(
+        "import json, pathlib, sys\n"
+        "flag = pathlib.Path(sys.argv[1]).with_suffix('.allow')\n"
+        "if not flag.exists():\n"
+        "    print(json.dumps({\"ok\": False, \"reason\": \"publisher not ready\"}))\n"
+        "    raise SystemExit(0)\n"
+        "print(json.dumps({\"ok\": True, \"verified_html_url\": \"https://gbautomation.xyz/apps/retry-closeout/index.html\", \"content_type\": \"text/html; charset=utf-8\"}))\n"
+    )
+    shim = tmp_path / "publisher-shim"
+    shim.write_text(f"#!/usr/bin/env bash\nexec {sys.executable} {publisher} \"$@\"\n")
+    shim.chmod(0o755)
+    monkeypatch.setattr(
+        gate,
+        "gate_settings",
+        lambda: {
+            "enabled": True,
+            "require_for_all_completions": True,
+            "publisher_command": str(shim),
+            "publisher_timeout_seconds": 30,
+        },
+    )
+
+    conn = kb.connect()
+    try:
+        tid = kb.create_task(
+            conn,
+            title="parent artifact bundle closeout",
+            assignee="worker",
+            workspace_kind="dir",
+            workspace_path=str(tmp_path / "workspace"),
+        )
+        assert kb.complete_task(conn, tid, summary="done", metadata={"producer_task_ids": ["t_child"]}) is False
+        task = kb.get_task(conn, tid)
+        assert task is not None
+        assert task.status == "closeout_pending"
+
+        manifest = tmp_path / "workspace" / "kanban-closeout-artifact-manifest.json"
+        manifest.with_suffix(".allow").write_text("ok\n")
+        assert kb.complete_task(conn, tid, summary="done", metadata={"producer_task_ids": ["t_child"]}) is True
+        task = kb.get_task(conn, tid)
+        assert task is not None
+        assert task.status == "done"
+        events = [e for e in kb.list_events(conn, tid) if e.kind == "completed"]
+        assert events
+        assert events[-1].payload["verified_html_url"] == "https://gbautomation.xyz/apps/retry-closeout/index.html"
+    finally:
+        conn.close()
+
+
 def test_closeout_artifact_gate_success_promotes_verified_html_url(tmp_path, monkeypatch):
     monkeypatch.setenv("HERMES_KANBAN_DB", str(tmp_path / "success.db"))
     kb.init_db()
