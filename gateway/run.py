@@ -70,10 +70,12 @@ _TELEGRAM_NOISY_STATUS_RE = re.compile(
     r"("  # transient/auxiliary status that should stay in logs, not Telegram chat
     r"auxiliary\s+.+\s+failed"
     r"|compression\s+summary\s+failed"
+    r"|failed\s+to\s+generate\s+context\s+summary"
     r"|fallback\s+context\s+marker"
     r"|configured\s+compression\s+model\s+.+\s+failed"
     r"|no\s+auxiliary\s+llm\s+provider\s+configured"
     r"|auto-lowered\s+compression\s+threshold"
+    r"|compacting\s+context\s+[—-]\s+summarizing\s+earlier\s+conversation"
     r"|preflight\s+compression"
     r"|rate\s+limited\.\s+waiting\s+\d"
     r"|retrying\s+in\s+\d"
@@ -4520,7 +4522,7 @@ class GatewayRunner:
             logger.warning("kanban notifier: kanban_db not importable; notifier disabled")
             return
 
-        TERMINAL_KINDS = ("completed", "blocked", "gave_up", "crashed", "timed_out")
+        TERMINAL_KINDS = ("completed", "closeout_pending", "blocked", "gave_up", "crashed", "timed_out")
         # Subscriptions are removed only when the task reaches a truly final
         # status (done / archived). We used to also unsub on any terminal
         # event kind (gave_up / crashed / timed_out / blocked), but that
@@ -4681,6 +4683,9 @@ class GatewayRunner:
                     title = (task.title if task else sub["task_id"])[:120]
                     for ev in d["events"]:
                         kind = ev.kind
+                        title_for_message = title
+                        if kind == "completed" and ev.payload and ev.payload.get("verified_html_url"):
+                            title_for_message = f"[{title}]({str(ev.payload['verified_html_url']).strip()})"
                         # Identity prefix: attribute terminal pings to the
                         # worker that did the work. Makes fleets (where one
                         # chat subscribes to many tasks) legible at a glance.
@@ -4704,7 +4709,7 @@ class GatewayRunner:
                                 handoff = f"\n{r}"
                             msg = (
                                 f"✔ {tag}Kanban {sub['task_id']} done"
-                                f" — {title}{handoff}"
+                                f" — {title_for_message}{handoff}"
                             )
                             try:
                                 artifact_paths, artifact_links = self._collect_kanban_artifacts(
@@ -4716,8 +4721,15 @@ class GatewayRunner:
                                 artifact_paths, artifact_links = [], []
                             if artifact_links:
                                 msg += "\nLinks: " + ", ".join(artifact_links[:5])
-                            if not artifact_paths and not artifact_links:
+                            elif ev.payload and ev.payload.get("verified_html_url"):
+                                msg += "\nLinks: " + str(ev.payload["verified_html_url"]).strip()
+                            if not artifact_paths and not artifact_links and not (ev.payload and ev.payload.get("verified_html_url")):
                                 msg += "\nNo task-specific deliverable recorded"
+                        elif kind == "closeout_pending":
+                            reason = ""
+                            if ev.payload and ev.payload.get("reason"):
+                                reason = f": {str(ev.payload['reason'])[:180]}"
+                            msg = f"⏳ {tag}Kanban {sub['task_id']} closeout pending{reason}"
                         elif kind == "blocked":
                             reason = ""
                             if ev.payload and ev.payload.get("reason"):
