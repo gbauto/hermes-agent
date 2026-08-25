@@ -335,6 +335,24 @@ class TestCreateProfile:
         assert (default_home / "auth.json").read_bytes() == owner_before
         assert not profile_dir.exists()
 
+    def test_cancelled_delete_profile_preserves_codex_shared_auth_metadata(self, profile_env):
+        tmp_path = profile_env
+        default_home = tmp_path / ".hermes"
+        (default_home / "config.yaml").write_text(
+            yaml.safe_dump({"model": {"provider": "openai-codex", "default": "gpt-5.6-terra"}}),
+            encoding="utf-8",
+        )
+        profile_dir = create_profile("tac-builder", clone_config=True, no_alias=True)
+
+        with patch("builtins.input", return_value="nope"):
+            delete_profile("tac-builder", yes=False)
+
+        profile_cfg = yaml.safe_load((profile_dir / "config.yaml").read_text())
+        root_cfg = yaml.safe_load((default_home / "config.yaml").read_text())
+        assert profile_dir.exists()
+        assert profile_cfg["auth"]["shared_providers"] == ["openai-codex"]
+        assert root_cfg["auth"]["shared_provider_consumers"]["openai-codex"] == ["tac-builder"]
+
     def test_clone_config_missing_files_skipped(self, profile_env):
         """Clone config gracefully skips files that don't exist in source."""
         profile_dir = create_profile("coder", clone_config=True, no_alias=True)

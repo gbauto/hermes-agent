@@ -642,14 +642,22 @@ def _profile_model_provider(profile_dir: Path) -> Optional[str]:
 def _sync_codex_shared_auth_metadata(profile_dir: Path, profile_id: str, *, enabled: bool) -> None:
     """Best-effort metadata sync for named Codex profiles; never touches tokens."""
     try:
-        from hermes_cli.auth import configure_profile_shared_provider_metadata
+        if enabled or profile_dir.exists():
+            from hermes_cli.auth import configure_profile_shared_provider_metadata
 
-        configure_profile_shared_provider_metadata(
-            profile_dir,
-            profile_id,
-            "openai-codex",
-            enabled=enabled,
-        )
+            configure_profile_shared_provider_metadata(
+                profile_dir,
+                profile_id,
+                "openai-codex",
+                enabled=enabled,
+            )
+            return
+
+        # After a confirmed delete, the profile directory is gone. Revoke only
+        # the root allowlist entry without recreating profile-side config.
+        from hermes_cli.auth import update_shared_provider_consumer
+
+        update_shared_provider_consumer(profile_id, "openai-codex", enabled=False)
     except Exception:
         # Profile CRUD must not fail because shared-auth metadata repair hit a
         # malformed root config. `hermes auth reconcile-shared --repair` can fix
@@ -873,8 +881,6 @@ def delete_profile(name: str, yes: bool = False) -> Path:
     if not profile_dir.is_dir():
         raise FileNotFoundError(f"Profile '{canon}' does not exist.")
 
-    _sync_codex_shared_auth_metadata(profile_dir, canon, enabled=False)
-
     # Show what will be deleted
     model, provider = _read_config_model(profile_dir)
     gw_running = _check_gateway_running(profile_dir)
@@ -978,6 +984,7 @@ def delete_profile(name: str, yes: bool = False) -> Path:
         except TypeError:
             shutil.rmtree(profile_dir, onerror=_make_writable)
         print(f"✓ Removed {profile_dir}")
+        _sync_codex_shared_auth_metadata(profile_dir, canon, enabled=False)
     except Exception as e:
         print(f"⚠ Could not remove {profile_dir}: {e}")
 
