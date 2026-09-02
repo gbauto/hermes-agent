@@ -1536,6 +1536,130 @@ def use_shared_provider_auth(provider_id: str, *, enabled: bool = True) -> Dict[
     }
 
 
+def _coerce_string_list(value: Any) -> list[str]:
+    """Normalize a config list field without treating scalars as a list."""
+    if not isinstance(value, list):
+        return []
+    seen: set[str] = set()
+    out: list[str] = []
+    for item in value:
+        if not isinstance(item, str):
+            continue
+        normalized = item.strip().lower()
+        if normalized and normalized not in seen:
+            out.append(normalized)
+            seen.add(normalized)
+    return out
+
+
+def update_shared_provider_consumer(
+    profile_id: str,
+    provider_id: str,
+    *,
+    enabled: bool = True,
+) -> Dict[str, Any]:
+    """Enroll or revoke a named profile in the default-root shared-auth allowlist.
+
+    This mutates only root ``config.yaml`` metadata. It never reads, copies,
+    deletes, or prints OAuth credential material from ``auth.json``.
+    """
+    normalized_provider = str(provider_id or "").strip().lower()
+    if normalized_provider not in SHAREABLE_AUTH_PROVIDERS:
+        raise ValueError(f"Provider does not support shared auth: {normalized_provider or provider_id}")
+    profile = str(profile_id or "").strip().lower()
+    if not profile or profile == "default":
+        raise ValueError("shared-auth consumers must be named profiles")
+    from hermes_constants import get_default_hermes_root
+    from utils import atomic_yaml_write
+
+    root_config_path = get_default_hermes_root() / "config.yaml"
+    try:
+        raw_config = yaml.safe_load(root_config_path.read_text(encoding="utf-8")) or {}
+    except (OSError, TypeError, yaml.YAMLError):
+        raw_config = {}
+    if not isinstance(raw_config, dict):
+        raw_config = {}
+    auth_config = raw_config.get("auth")
+    if not isinstance(auth_config, dict):
+        auth_config = {}
+        raw_config["auth"] = auth_config
+    consumers = auth_config.get("shared_provider_consumers")
+    if not isinstance(consumers, dict):
+        consumers = {}
+        auth_config["shared_provider_consumers"] = consumers
+    current = set(_coerce_string_list(consumers.get(normalized_provider)))
+    if enabled:
+        current.add(profile)
+    else:
+        current.discard(profile)
+    if current:
+        consumers[normalized_provider] = sorted(current)
+    else:
+        consumers.pop(normalized_provider, None)
+    atomic_yaml_write(root_config_path, raw_config, sort_keys=False)
+    return {
+        "profile": profile,
+        "provider": normalized_provider,
+        "authorized": enabled,
+        "owner": "default-hermes-root",
+    }
+
+
+def configure_profile_shared_provider_metadata(
+    profile_dir: Path,
+    profile_id: str,
+    provider_id: str,
+    *,
+    enabled: bool = True,
+) -> Dict[str, Any]:
+    """Update the two-sided shared-provider metadata for a profile.
+
+    Enables/disables the profile-side ``auth.shared_providers`` opt-in and the
+    root owner ``auth.shared_provider_consumers.<provider>`` allowlist entry.
+    Credential files are intentionally untouched.
+    """
+    normalized_provider = str(provider_id or "").strip().lower()
+    if normalized_provider not in SHAREABLE_AUTH_PROVIDERS:
+        raise ValueError(f"Provider does not support shared auth: {normalized_provider or provider_id}")
+    profile = str(profile_id or "").strip().lower()
+    if not profile or profile == "default":
+        raise ValueError("shared-auth consumers must be named profiles")
+
+    from utils import atomic_yaml_write
+
+    config_path = Path(profile_dir) / "config.yaml"
+    try:
+        raw_config = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
+    except (OSError, TypeError, yaml.YAMLError):
+        raw_config = {}
+    if not isinstance(raw_config, dict):
+        raw_config = {}
+    auth_config = raw_config.get("auth")
+    if not isinstance(auth_config, dict):
+        auth_config = {}
+        raw_config["auth"] = auth_config
+    shared = set(_coerce_string_list(auth_config.get("shared_providers")))
+    if enabled:
+        shared.add(normalized_provider)
+    else:
+        shared.discard(normalized_provider)
+    if shared:
+        auth_config["shared_providers"] = sorted(shared)
+    else:
+        auth_config.pop("shared_providers", None)
+        if not auth_config:
+            raw_config.pop("auth", None)
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    atomic_yaml_write(config_path, raw_config, sort_keys=False)
+    owner = update_shared_provider_consumer(profile, normalized_provider, enabled=enabled)
+    return {
+        "profile": profile,
+        "provider": normalized_provider,
+        "profile_opt_in": enabled,
+        "owner_authorized": owner.get("authorized"),
+    }
+
+
 def get_active_provider() -> Optional[str]:
     """Return the currently active provider ID from auth store."""
     auth_store = _load_auth_store()

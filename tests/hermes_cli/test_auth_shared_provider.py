@@ -618,3 +618,29 @@ def test_two_profiles_serialize_singleton_refresh_across_processes(
     stored = json.loads((root / "auth.json").read_text())
     assert stored["providers"][PROVIDER]["tokens"]["refresh_token"] == "singleton-new"
     assert all(not (profile / "auth.json").exists() for profile in profiles)
+
+
+def test_reconcile_shared_auth_reports_and_repairs_metadata(profile_env, capsys):
+    from hermes_cli.auth_commands import auth_reconcile_shared_command
+
+    root = profile_env["root"]
+    profile = profile_env["profile"]
+    (profile / "config.yaml").write_text(
+        yaml.safe_dump({"model": {"provider": PROVIDER, "default": "gpt-5.6-terra"}}),
+        encoding="utf-8",
+    )
+    _authorize_shared(root, [])
+
+    auth_reconcile_shared_command(SimpleNamespace(provider=PROVIDER, repair=False))
+    dry = capsys.readouterr().out
+    assert "dry-run" in dry
+    assert "tac-builder" in dry
+    assert "No changes made" in dry
+
+    auth_reconcile_shared_command(SimpleNamespace(provider=PROVIDER, repair=True))
+    repaired = capsys.readouterr().out
+    assert "Repaired metadata" in repaired
+    profile_cfg = yaml.safe_load((profile / "config.yaml").read_text())
+    root_cfg = yaml.safe_load((root / "config.yaml").read_text())
+    assert profile_cfg["auth"]["shared_providers"] == [PROVIDER]
+    assert root_cfg["auth"]["shared_provider_consumers"][PROVIDER] == ["tac-builder"]
