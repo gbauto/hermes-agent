@@ -160,10 +160,54 @@ def test_live_readiness_failure_blocks_without_retry_budget(
     assert task.claim_lock is None
     assert task.worker_pid is None
     assert task.consecutive_failures == 0
-    assert any(event.kind == "host_readiness_failed" for event in events)
+    event_kinds = [event.kind for event in events]
+    assert event_kinds[-2:] == ["host_readiness_failed", "blocked"]
     readiness_event = next(event for event in events if event.kind == "host_readiness_failed")
     raw_payload = readiness_event.payload
     payload = raw_payload if isinstance(raw_payload, dict) else json.loads(raw_payload or "{}")
+    assert payload["schema_version"] == "host_readiness_failure_event.v1"
     assert payload["check"] == "profile_skill_import"
     assert payload["missing_required_skills"] == ["not-installed"]
-    assert runs[-1].outcome == "blocked"
+    assert payload["claim_prevented"] is True
+    assert payload["retry_budget_consumed"] is False
+    assert not any(event.kind == "claimed" for event in events)
+    assert runs == []
+
+
+def test_worktree_readiness_pass_event_precedes_claim(
+    kanban_home, tmp_path, all_assignees_spawnable
+):
+    """Repo-mutating worktree dispatch must pass readiness before claimed."""
+
+    spawned = []
+
+    def fake_spawn(task, workspace):
+        spawned.append((task.id, workspace))
+        return 456
+
+    worktree = tmp_path / ".worktrees" / "repo-task"
+    with kb.connect() as conn:
+        task_id = kb.create_task(
+            conn,
+            title="repo mutating task",
+            assignee="builder",
+            workspace_kind="worktree",
+            workspace_path=str(worktree),
+        )
+        res = kb.dispatch_once(conn, spawn_fn=fake_spawn)
+        task = kb.get_task(conn, task_id)
+        events = kb.list_events(conn, task_id)
+
+    assert spawned == [(task_id, str(worktree))]
+    assert res.spawned and res.spawned[0][0] == task_id
+    assert task is not None
+    assert task.status == "running"
+    kinds = [event.kind for event in events]
+    assert kinds.index("host_readiness_preflight") < kinds.index("claimed")
+    preflight_event = next(event for event in events if event.kind == "host_readiness_preflight")
+    raw_payload = preflight_event.payload
+    payload = raw_payload if isinstance(raw_payload, dict) else json.loads(raw_payload or "{}")
+    assert payload["schema_version"] == "host_readiness_preflight_gate.v1"
+    assert payload["workspace_kind"] == "worktree"
+    assert payload["claim_allowed"] is True
+    assert payload["retry_budget_consumed"] is False
