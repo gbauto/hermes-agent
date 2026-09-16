@@ -5173,9 +5173,10 @@ def dispatch_once(
       2. Reclaim stale running tasks (no recent heartbeat).
       3. Reclaim crashed running tasks (host-local PID no longer alive).
       3. Promote todo -> ready where all parents are done.
-      4. For each ready task with an assignee, atomically claim and call
-         ``spawn_fn(task, workspace_path, board) -> Optional[int]``. The
-         return value (if any) is recorded as ``worker_pid`` so subsequent
+      4. For each ready task with an assignee, run worker host/profile
+         readiness checks before any execution claim, then atomically claim
+         and call ``spawn_fn(task, workspace_path, board) -> Optional[int]``.
+         The return value (if any) is recorded as ``worker_pid`` so subsequent
          ticks can detect crashes before the TTL expires.
 
     Spawn failures are counted per-task. After ``failure_limit`` consecutive
@@ -5348,22 +5349,27 @@ def dispatch_once(
                     continue
             result.spawned.append((row["id"], row["assignee"], ""))
             continue
-        claimed = claim_task(conn, row["id"], ttl_seconds=ttl_seconds)
-        if claimed is None:
+        task_for_preflight = get_task(conn, row["id"])
+        if task_for_preflight is None:
             continue
         from hermes_cli.profiles import normalize_profile_name
 
-        profile_arg = normalize_profile_name(claimed.assignee or "")
+        profile_arg = normalize_profile_name(task_for_preflight.assignee or "")
         try:
-            _worker_skill_preflight(
-                claimed,
+            _argv_skills, readiness_payload = _worker_skill_preflight(
+                task_for_preflight,
                 profile_arg=profile_arg,
                 hermes_home=_worker_profile_home(profile_arg),
             )
         except WorkerSkillReadinessError as exc:
-            _record_host_readiness_failure(conn, claimed.id, str(exc), exc.payload)
-            result.readiness_failed.append((claimed.id, str(exc)))
+            _record_host_readiness_failure(conn, row["id"], str(exc), exc.payload)
+            result.readiness_failed.append((row["id"], str(exc)))
             continue
+        _record_host_readiness_preflight(conn, task_for_preflight, readiness_payload)
+        claimed = claim_task(conn, row["id"], ttl_seconds=ttl_seconds)
+        if claimed is None:
+            continue
+        profile_arg = normalize_profile_name(claimed.assignee or "")
         try:
             workspace = resolve_workspace(claimed, board=board)
         except Exception as exc:
@@ -5823,6 +5829,28 @@ def _worker_skill_preflight(
     return argv_skills, payload
 
 
+def _record_host_readiness_preflight(
+    conn: sqlite3.Connection,
+    task: Task,
+    payload: dict[str, Any],
+) -> None:
+    """Record a successful pre-claim readiness gate for repo-mutating work."""
+
+    if (task.workspace_kind or "scratch") != "worktree":
+        return
+    safe_payload = dict(payload)
+    safe_payload.update({
+        "schema_version": "host_readiness_preflight_gate.v1",
+        "task_id": task.id,
+        "workspace_kind": task.workspace_kind,
+        "claim_allowed": True,
+        "claim_prevented": False,
+        "retry_budget_consumed": False,
+    })
+    with write_txn(conn):
+        _append_event(conn, task.id, "host_readiness_preflight", safe_payload)
+
+
 def _record_host_readiness_failure(
     conn: sqlite3.Connection,
     task_id: str,
@@ -5833,7 +5861,14 @@ def _record_host_readiness_failure(
 
     safe_error = error[:500]
     safe_payload = dict(payload)
-    safe_payload["error"] = safe_error
+    safe_payload.update({
+        "schema_version": "host_readiness_failure_event.v1",
+        "action": "block_before_claim",
+        "task_status_after": "blocked",
+        "claim_prevented": True,
+        "retry_budget_consumed": False,
+        "error": safe_error,
+    })
     with write_txn(conn):
         conn.execute(
             "UPDATE tasks SET status = 'blocked', claim_lock = NULL, "
