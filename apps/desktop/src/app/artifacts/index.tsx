@@ -1,5 +1,5 @@
 import type * as React from 'react'
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { memo, useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router'
 
 import { TitlebarIcon } from '@/app/shell/titlebar-icon'
@@ -17,8 +17,9 @@ import {
   PaginationPrevious
 } from '@/components/ui/pagination'
 import { RowButton } from '@/components/ui/row-button'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Tip } from '@/components/ui/tooltip'
-import { getAllSessionMessages, listAllProfileSessions } from '@/hermes'
+import { useContributions } from '@/contrib'
 import { type Translations, useI18n } from '@/i18n'
 import { resolveBrandIcon } from '@/lib/brand-icon'
 import {
@@ -34,7 +35,7 @@ import { downloadGatewayMediaFile, isRemoteGateway } from '@/lib/media'
 import { normalize } from '@/lib/text'
 import { fmtDayTime } from '@/lib/time'
 import { cn } from '@/lib/utils'
-import { notify, notifyError } from '@/store/notifications'
+import { notifyError } from '@/store/notifications'
 
 import { useRefreshHotkey } from '../hooks/use-refresh-hotkey'
 import { useRouteEnumParam } from '../hooks/use-route-enum-param'
@@ -42,13 +43,9 @@ import { openSession } from '../open-session'
 import { PageSearchShell } from '../page-search-shell'
 import type { SetStatusbarItemGroup } from '../shell/statusbar-controls'
 
-import {
-  ARTIFACT_FILTERS,
-  type ArtifactFilter,
-  artifactImageSrc,
-  type ArtifactRecord,
-  loadArtifactsForSessions
-} from './artifact-utils'
+import { ARTIFACT_SOURCES_AREA, artifactSources } from './artifact-sources'
+import { ARTIFACT_FILTERS, type ArtifactFilter, artifactImageSrc, type ArtifactRecord } from './artifact-utils'
+import { useArtifactCatalog } from './use-artifact-catalog'
 
 function formatArtifactTime(timestamp: number): string {
   return fmtDayTime.format(new Date(timestamp))
@@ -115,7 +112,30 @@ export function ArtifactsView({ setStatusbarItemGroup: _setStatusbarItemGroup, .
   const { t } = useI18n()
   const a = t.artifacts
   const navigate = useNavigate()
-  const [artifacts, setArtifacts] = useState<ArtifactRecord[] | null>(null)
+  const contributions = useContributions(ARTIFACT_SOURCES_AREA)
+  const sources = useMemo(() => artifactSources(contributions), [contributions])
+
+  const {
+    artifacts,
+    refreshing,
+    refresh: refreshArtifacts,
+    unavailable,
+    partial,
+    sessionFailures
+  } = useArtifactCatalog(sources)
+
+  const [selectedSource, setSelectedSource] = useState('all')
+
+  const sourceFilter =
+    selectedSource === 'sessions' || sources.some(source => source.id === selectedSource) ? selectedSource : 'all'
+
+  const sourceArtifacts = useMemo(
+    () =>
+      artifacts?.filter(artifact => sourceFilter === 'all' || (artifact.sourceId ?? 'sessions') === sourceFilter) ??
+      null,
+    [artifacts, sourceFilter]
+  )
+
   const [query, setQuery] = useState('')
 
   const [kindFilter, setKindFilter] = useRouteEnumParam('tab', ARTIFACT_FILTERS, 'all')
@@ -124,78 +144,21 @@ export function ArtifactsView({ setStatusbarItemGroup: _setStatusbarItemGroup, .
   const [imagePage, setImagePage] = useState(1)
   const [filePage, setFilePage] = useState(1)
 
-  const [refreshing, setRefreshing] = useState(false)
-  const refreshInFlightRef = useRef(false)
-
-  const refreshArtifacts = useCallback(async () => {
-    if (refreshInFlightRef.current) {
-      return
-    }
-
-    refreshInFlightRef.current = true
-    setRefreshing(true)
-
-    try {
-      const sessions = (await listAllProfileSessions(30, 1)).sessions
-
-      const { artifacts: nextArtifacts, failures } = await loadArtifactsForSessions(
-        sessions,
-        async session => (await getAllSessionMessages(session.id, session.profile)).messages
-      )
-
-      if (failures.length > 0) {
-        const safeLimitFailures = failures.filter(({ error }) =>
-          String(error instanceof Error ? error.message : error).includes('safe-load limit')
-        ).length
-
-        const otherFailures = failures.length - safeLimitFailures
-
-        const detail = [
-          safeLimitFailures ? `${safeLimitFailures} exceeded the safe transcript load limit.` : '',
-          otherFailures ? `${otherFailures} could not be read.` : ''
-        ]
-          .filter(Boolean)
-          .join(' ')
-
-        notify({
-          id: 'artifacts-partial-load',
-          kind: 'warning',
-          title: a.failedLoad,
-          message: `Skipped ${failures.length} of ${sessions.length} recent sessions while indexing artifacts.`,
-          detail,
-          durationMs: 10_000
-        })
-      }
-
-      setArtifacts(nextArtifacts.sort((left, right) => right.timestamp - left.timestamp))
-    } catch (err) {
-      notifyError(err, a.failedLoad)
-      setArtifacts([])
-    } finally {
-      refreshInFlightRef.current = false
-      setRefreshing(false)
-    }
-  }, [a])
-
   useRefreshHotkey(refreshArtifacts)
-
-  useEffect(() => {
-    void refreshArtifacts()
-  }, [refreshArtifacts])
 
   useEffect(() => {
     setImagePage(1)
     setFilePage(1)
-  }, [artifacts, kindFilter, query])
+  }, [artifacts, kindFilter, query, sourceFilter])
 
   const visibleArtifacts = useMemo(() => {
-    if (!artifacts) {
+    if (!sourceArtifacts) {
       return []
     }
 
     const q = normalize(query)
 
-    return artifacts.filter(artifact => {
+    return sourceArtifacts.filter(artifact => {
       if (kindFilter !== 'all' && artifact.kind !== kindFilter) {
         return false
       }
@@ -210,7 +173,7 @@ export function ArtifactsView({ setStatusbarItemGroup: _setStatusbarItemGroup, .
         artifact.sessionTitle.toLowerCase().includes(q)
       )
     })
-  }, [artifacts, kindFilter, query])
+  }, [sourceArtifacts, kindFilter, query])
 
   const visibleImageArtifacts = useMemo(
     () => visibleArtifacts.filter(artifact => artifact.kind === 'image'),
@@ -259,7 +222,7 @@ export function ArtifactsView({ setStatusbarItemGroup: _setStatusbarItemGroup, .
   }, [artifacts, t])
 
   const counts = useMemo(() => {
-    const all = artifacts || []
+    const all = sourceArtifacts || []
 
     return {
       all: all.length,
@@ -267,7 +230,7 @@ export function ArtifactsView({ setStatusbarItemGroup: _setStatusbarItemGroup, .
       file: all.filter(artifact => artifact.kind === 'file').length,
       link: all.filter(artifact => artifact.kind === 'link').length
     }
-  }, [artifacts])
+  }, [sourceArtifacts])
 
   const openArtifact = useCallback(
     async (href: string) => {
@@ -315,6 +278,41 @@ export function ArtifactsView({ setStatusbarItemGroup: _setStatusbarItemGroup, .
     <PageSearchShell
       {...props}
       activeTab={kindFilter}
+      filters={
+        <>
+          {sources.length > 0 && (
+            <Select onValueChange={setSelectedSource} value={sourceFilter}>
+              <SelectTrigger aria-label={a.sourceFilter} size="sm">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">{a.allSources}</SelectItem>
+                <SelectItem value="sessions">{a.sessionSource}</SelectItem>
+                {sources.map(source => (
+                  <SelectItem key={source.id} value={source.id}>
+                    {source.title}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
+          {unavailable.length > 0 && (
+            <span className="text-xs text-muted-foreground" role="status">
+              {a.sourceUnavailable(unavailable.join(', '))}
+            </span>
+          )}
+          {partial.length > 0 && (
+            <span className="text-xs text-muted-foreground" role="status">
+              {a.sourcePartial(partial.join(', '))}
+            </span>
+          )}
+          {sessionFailures > 0 && (
+            <span className="text-xs text-muted-foreground" role="status">
+              {a.sourceUnavailable(a.sessionSource)}
+            </span>
+          )}
+        </>
+      }
       onSearchChange={setQuery}
       onTabChange={id => setKindFilter(id as typeof kindFilter)}
       searchHidden={counts.all === 0}
@@ -530,7 +528,13 @@ function ArtifactImageCard({ artifact, failedImage, onImageError, onOpenChat }: 
         </div>
 
         <div className="flex flex-wrap gap-1.5">
-          <Button onClick={() => onOpenChat(artifact.sessionId)} size="xs" type="button" variant="textStrong">
+          <Button
+            disabled={!artifact.sessionId}
+            onClick={() => artifact.sessionId && onOpenChat(artifact.sessionId)}
+            size="xs"
+            type="button"
+            variant="textStrong"
+          >
             <FolderOpen className="size-3" />
             {a.chat}
           </Button>
@@ -581,8 +585,8 @@ const PrimaryCell = memo(function PrimaryCell({ artifact, ctx }: { artifact: Art
   const isLink = artifact.kind === 'link'
   const brand = isLink ? resolveBrandIcon(shortHostLabel(artifact.href)) : null
   const Icon = brand ?? (isLink ? Link2 : FileText)
-  const fetchedTitle = useLinkTitle(isLink ? artifact.href : null)
-  const label = isLink ? fetchedTitle || urlSlugTitleLabel(artifact.href) : artifact.label
+  const fetchedTitle = useLinkTitle(isLink && !artifact.sourceId ? artifact.href : null)
+  const label = isLink && !artifact.sourceId ? fetchedTitle || urlSlugTitleLabel(artifact.href) : artifact.label
 
   return (
     <ArtifactCellAction
@@ -591,7 +595,7 @@ const PrimaryCell = memo(function PrimaryCell({ artifact, ctx }: { artifact: Art
       title={label}
     >
       <span className="mt-0.5 grid size-6 shrink-0 place-items-center self-start rounded-md bg-(--ui-bg-tertiary) text-(--ui-text-tertiary)">
-        <Icon className="size-3.5" />
+        <Icon aria-hidden className="size-3.5" />
       </span>
       <span className={cn('min-w-0 flex-1', isLink ? 'wrap-anywhere' : 'truncate')}>
         {label}
@@ -633,8 +637,20 @@ const LocationCell = memo(function LocationCell({ artifact }: { artifact: Artifa
 })
 
 const SessionCell = memo(function SessionCell({ artifact, ctx }: { artifact: ArtifactRecord; ctx: CellCtx }) {
+  if (!artifact.sessionId) {
+    return (
+      <div className="px-2.5 py-1.5 text-[length:var(--conversation-caption-font-size)] text-(--ui-text-secondary)">
+        <div>{artifact.sessionTitle}</div>
+        <div className="text-[0.6875rem] text-(--ui-text-tertiary)">{formatArtifactTime(artifact.timestamp)}</div>
+      </div>
+    )
+  }
+
   return (
-    <ArtifactCellAction onClick={() => ctx.onOpenChat(artifact.sessionId)} title={artifact.sessionTitle}>
+    <ArtifactCellAction
+      onClick={() => artifact.sessionId && ctx.onOpenChat(artifact.sessionId)}
+      title={artifact.sessionTitle}
+    >
       <span className="flex min-w-0 flex-col">
         <span className="truncate">{artifact.sessionTitle}</span>
         <span className="truncate text-[0.6875rem] font-normal text-(--ui-text-tertiary)">
@@ -665,7 +681,7 @@ const ARTIFACT_COLUMNS: readonly ArtifactColumn[] = [
   {
     Cell: SessionCell,
     bodyClassName: 'p-0',
-    header: (_filter, a) => a.colSession,
+    header: (_filter, a) => a.colSource,
     id: 'session',
     width: filter => (filter === 'link' ? 'w-[20%]' : 'w-[24%]')
   }

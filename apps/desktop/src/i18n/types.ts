@@ -1603,6 +1603,12 @@ export interface Translations {
   }
 
   artifacts: {
+    sourceFilter: string
+    allSources: string
+    sessionSource: string
+    colSource: string
+    sourceUnavailable: (source: string) => string
+    sourcePartial: (source: string) => string
     search: string
     refresh: string
     refreshing: string

@@ -69,6 +69,47 @@ live in the companion
 [`hermes-example-plugins`](https://github.com/NousResearch/hermes-example-plugins)
 repo.
 
+## Links in native Artifacts
+
+Use the `artifacts.sources` data contribution to make an existing catalog visible
+in **Desktop → Artifacts**. This is a read-only projection, not a second artifact
+database. The catalog remains authoritative. Desktop merges these links with
+recent conversation outputs and supplies a source filter.
+
+```javascript
+ctx.register({
+  id: 'published-reports',
+  area: 'artifacts.sources', // ARTIFACT_SOURCES_AREA on supporting SDKs
+  title: 'Published reports',
+  data: {
+    version: 1,
+    load: async ({ signal }) => {
+      const result = await ctx.rest('/artifact-links', { timeoutMs: 8000 })
+      signal.throwIfAborted()
+      return result
+    }
+  }
+})
+```
+
+Return `{ items, partial?: boolean }`. Each item has a catalog-stable `id`,
+`label` (up to 240 characters), `href` (HTTPS, up to 2048 characters, no embedded
+credentials), `attribution` (up to 240 characters), and `timestamp` (Unix
+milliseconds). Return at most 1000 items; set `partial: true` when the response
+is bounded or incomplete. Invalid rows are omitted with a visible partial state.
+
+Entries have **no native session link**. Supply truthful attribution, such as
+the producing harness and catalog; never invent a Hermes session to make a link
+appear. Different sources retain independent IDs even for matching URLs. Reads
+time out after 15 seconds, respect connection/profile changes, and refresh on
+the page's Refresh action. Failed sources leave conversation outputs available.
+Disabling the plugin removes its entries. `ctx.rest` follows the active backend
+connection and profile; keep credentials and scope enforcement in that backend.
+
+Older Desktop builds ignore this contribution area. Registering the literal
+area name lets a plugin preserve its existing surfaces on older builds; showing
+catalog entries in native Artifacts requires a build supporting this contract.
+
 ## Quick start — your first plugin
 
 Create `$HERMES_HOME/desktop-plugins/hello/plugin.js` (that's `~/.hermes/...`

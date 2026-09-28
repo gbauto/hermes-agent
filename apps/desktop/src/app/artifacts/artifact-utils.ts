@@ -11,8 +11,9 @@ export interface ArtifactRecord {
   value: string
   href: string
   label: string
-  sessionId: string
+  sessionId: string | null
   sessionTitle: string
+  sourceId?: string
   timestamp: number
 }
 

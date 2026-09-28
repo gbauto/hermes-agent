@@ -20,6 +20,8 @@
 
 import { atom, computed, type ReadableAtom } from 'nanostores'
 
+export { ARTIFACT_SOURCES_AREA, type ArtifactLinkSource } from '@/app/artifacts/artifact-sources'
+
 import { PRIMARY_SESSION_VIEW } from '@/app/chat/session-view'
 import { openSession, type OpenSessionIntent } from '@/app/open-session'
 import type { ClientSessionState } from '@/app/types'

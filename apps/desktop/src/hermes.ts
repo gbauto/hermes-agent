@@ -359,6 +359,7 @@ export async function pluginRest<T>(pluginId: string, path: string, opts: Plugin
     body: opts.body,
     upload: opts.upload,
     timeoutMs: opts.timeoutMs,
+    ...connectionScoped(),
     ...profileScoped()
   })
 }
