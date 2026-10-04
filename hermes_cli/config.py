@@ -3283,7 +3283,9 @@ def read_user_config_raw(config_path: Optional[Path] = None) -> Dict[str, Any]:
     expansion, no migration, no root-model normalization, no caching.
 
     ONLY legal for write-back round-trips and raw-file diagnostics —
-    behavioral reads must use load_config()/load_config_readonly().
+    Exact owner-authorization allowlists also use this raw read: defaults must
+    never create a grant. Other behavioral reads must use
+    load_config()/load_config_readonly().
 
     Legal call sites, exhaustively:
 
@@ -5414,6 +5416,8 @@ def set_config_value(key: str, value: str, force: bool = False):
             refused (bare ``model`` is redirected to ``model.default``). The
             CLI exposes this via ``hermes config set --force``.
     """
+
+
     if is_managed():
         managed_error("set configuration values")
         return
@@ -5548,6 +5552,17 @@ def set_config_value(key: str, value: str, force: bool = False):
                     f"readers will ignore a string here.",
                     file=sys.stderr,
                 )
+
+    if key == "auth.shared_providers" or key.startswith("auth.shared_provider_consumers."):
+        try:
+            parsed = yaml.safe_load(value if isinstance(value, str) else "")
+        except yaml.YAMLError as exc:
+            print(f"Error: {key} must be a YAML list of strings: {exc}", file=sys.stderr)
+            sys.exit(1)
+        if not isinstance(parsed, list) or not all(isinstance(item, str) for item in parsed):
+            print(f"Error: {key} must be a YAML list of strings", file=sys.stderr)
+            sys.exit(1)
+        coerced_value = [item.strip().lower() for item in parsed if item.strip()]
 
     value = coerced_value
     # Normalize a scalar ``model`` key before writing sub-keys so that

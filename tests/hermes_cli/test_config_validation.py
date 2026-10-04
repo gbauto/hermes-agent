@@ -141,3 +141,46 @@ class TestUnknownTopLevelKeys:
         assert any("base_url" in i.message for i in misplaced)
         assert any("api_key" in i.message for i in misplaced)
 
+
+def test_config_set_parses_auth_shared_providers_as_yaml_list(tmp_path, monkeypatch):
+    from pathlib import Path
+    import yaml
+    from hermes_cli.config import set_config_value
+
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    hermes_home = tmp_path / ".hermes"
+    hermes_home.mkdir()
+    monkeypatch.setenv("HERMES_HOME", str(hermes_home))
+
+    set_config_value("auth.shared_providers", "['openai-codex']")
+
+    cfg = yaml.safe_load((hermes_home / "config.yaml").read_text())
+    assert cfg["auth"]["shared_providers"] == ["openai-codex"]
+
+
+def test_config_set_model_provider_does_not_change_shared_owner_policy(tmp_path, monkeypatch):
+    from pathlib import Path
+    import yaml
+    from hermes_cli.config import set_config_value
+
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    root = tmp_path / ".hermes"
+    profile = root / "profiles" / "client-account"
+    profile.mkdir(parents=True)
+    monkeypatch.setenv("HERMES_HOME", str(profile))
+    owner = {"auth": {"shared_provider_consumers": {"openai-codex": ["tac-builder"]}}}
+    (root / "config.yaml").write_text(yaml.safe_dump(owner), encoding="utf-8")
+
+    set_config_value("model.provider", "openai-codex")
+
+    profile_cfg = yaml.safe_load((profile / "config.yaml").read_text())
+    root_cfg = yaml.safe_load((root / "config.yaml").read_text())
+    assert profile_cfg["model"]["provider"] == "openai-codex"
+    assert "openai-codex" not in profile_cfg.get("auth", {}).get("shared_providers", [])
+    assert root_cfg["auth"]["shared_provider_consumers"]["openai-codex"] == ["tac-builder"]
+
+    set_config_value("model.provider", "openrouter")
+    profile_cfg = yaml.safe_load((profile / "config.yaml").read_text())
+    root_cfg = yaml.safe_load((root / "config.yaml").read_text())
+    assert profile_cfg["model"]["provider"] == "openrouter"
+    assert root_cfg["auth"]["shared_provider_consumers"]["openai-codex"] == ["tac-builder"]

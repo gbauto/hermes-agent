@@ -1122,6 +1122,17 @@ def profiles_to_serve(
 
     return serve
 
+def _revoke_codex_shared_auth_metadata(profile_id: str) -> None:
+    """Revoke a deleted profile without creating new shared-auth permissions."""
+    try:
+        from hermes_cli.auth import update_shared_provider_consumer
+
+        update_shared_provider_consumer(profile_id, "openai-codex", enabled=False)
+    except Exception:
+        # Profile deletion must not fail because owner metadata is malformed.
+        # The explicit reconciliation command reports remaining drift.
+        pass
+
 
 def create_profile(
     name: str,
@@ -1766,6 +1777,7 @@ def delete_profile(name: str, yes: bool = False) -> Path:
 
         _rmtree_with_retry(profile_dir, _make_writable)
         print(f"✓ Removed {profile_dir}")
+        _revoke_codex_shared_auth_metadata(canon)
     except Exception as e:
         print(f"⚠ Could not remove {profile_dir}: {e}")
         remove_error = e

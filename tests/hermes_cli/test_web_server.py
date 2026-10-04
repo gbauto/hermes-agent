@@ -2367,6 +2367,11 @@ class TestBuildSchemaFromConfig:
 
 
 
+    def test_shared_auth_settings_are_security_controls(self):
+        from hermes_cli.web_server import CONFIG_SCHEMA
+
+        assert CONFIG_SCHEMA["auth.shared_providers"]["category"] == "security"
+
 
     def test_no_single_field_categories(self):
         """After merging, no category should have just 1 field."""
