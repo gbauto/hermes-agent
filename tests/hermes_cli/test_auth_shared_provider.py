@@ -629,12 +629,22 @@ def test_reconcile_shared_auth_reports_and_repairs_metadata(profile_env, capsys)
         yaml.safe_dump({"model": {"provider": PROVIDER, "default": "gpt-5.6-terra"}}),
         encoding="utf-8",
     )
-    _authorize_shared(root, [])
+    client = root / "profiles" / "client-account"
+    client.mkdir()
+    (client / "config.yaml").write_text(
+        yaml.safe_dump({
+            "model": {"provider": PROVIDER, "default": "gpt-5.6-terra"},
+            "auth": {"shared_providers": [PROVIDER]},
+        }),
+        encoding="utf-8",
+    )
+    _authorize_shared(root, ["tac-builder"])
 
     auth_reconcile_shared_command(SimpleNamespace(provider=PROVIDER, repair=False))
     dry = capsys.readouterr().out
     assert "dry-run" in dry
     assert "tac-builder" in dry
+    assert "client-account" in dry
     assert "No changes made" in dry
 
     auth_reconcile_shared_command(SimpleNamespace(provider=PROVIDER, repair=True))
@@ -644,3 +654,5 @@ def test_reconcile_shared_auth_reports_and_repairs_metadata(profile_env, capsys)
     root_cfg = yaml.safe_load((root / "config.yaml").read_text())
     assert profile_cfg["auth"]["shared_providers"] == [PROVIDER]
     assert root_cfg["auth"]["shared_provider_consumers"][PROVIDER] == ["tac-builder"]
+    client_cfg = yaml.safe_load((client / "config.yaml").read_text())
+    assert PROVIDER not in client_cfg.get("auth", {}).get("shared_providers", [])

@@ -957,9 +957,10 @@ def auth_reconcile_shared_command(args) -> None:
             malformed.append(info.name)
 
     codex = set(codex_profiles)
-    missing_profile_opt_in = sorted(codex - profile_opted)
-    missing_root_owner = sorted(codex - root_allowed)
-    stale_profile_opt_in = sorted(profile_opted - codex)
+    authorized = codex & root_allowed
+    missing_profile_opt_in = sorted(authorized - profile_opted)
+    unapproved_codex_profiles = sorted(codex - root_allowed)
+    stale_profile_opt_in = sorted(profile_opted - root_allowed)
     stale_root_owner = sorted(root_allowed - codex)
 
     print("Shared Codex auth reconciliation")
@@ -967,29 +968,31 @@ def auth_reconcile_shared_command(args) -> None:
     print(f"  Mode: {'repair' if repair else 'dry-run'}")
     print(f"  Codex profiles: {len(codex_profiles)}")
     print(f"  Missing profile opt-in: {missing_profile_opt_in or 'none'}")
-    print(f"  Missing root owner allowlist: {missing_root_owner or 'none'}")
+    print(f"  Codex profiles outside owner allowlist: {unapproved_codex_profiles or 'none'}")
     print(f"  Stale profile opt-in: {stale_profile_opt_in or 'none'}")
     print(f"  Stale root owner allowlist: {stale_root_owner or 'none'}")
     print(f"  Malformed profile shared_providers: {malformed or 'none'}")
 
     if repair:
         repaired = []
-        for name in sorted(codex):
+        # The root allowlist is the admission authority. Repair may sync
+        # existing approvals, but must never grant owner auth to every Codex
+        # profile just because its model uses this provider.
+        for name in sorted(authorized):
             configure_profile_shared_provider_metadata(
                 get_profile_dir(name), name, provider, enabled=True
             )
             repaired.append(name)
-        for name in sorted((profile_opted | root_allowed) - codex):
-            if name == "default":
-                continue
+        for name in stale_profile_opt_in:
             profile_dir = get_profile_dir(name)
             if profile_dir.exists():
                 configure_profile_shared_provider_metadata(
                     profile_dir, name, provider, enabled=False
                 )
-            else:
+        for name in stale_root_owner:
+            if name != "default":
                 auth_mod.update_shared_provider_consumer(name, provider, enabled=False)
-        print(f"  Repaired metadata for {len(repaired)} Codex profile(s).")
+        print(f"  Repaired metadata for {len(repaired)} authorized Codex profile(s).")
     else:
         print("  No changes made. Re-run with --repair to update metadata.")
 

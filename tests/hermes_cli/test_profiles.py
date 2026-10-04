@@ -153,7 +153,7 @@ class TestCreateProfile:
 
 
 
-    def test_clone_codex_profile_auto_enrolls_shared_auth_metadata(self, profile_env):
+    def test_clone_codex_profile_does_not_grant_shared_owner(self, profile_env):
         tmp_path = profile_env
         default_home = tmp_path / ".hermes"
         (default_home / "config.yaml").write_text(
@@ -161,12 +161,12 @@ class TestCreateProfile:
             encoding="utf-8",
         )
 
-        profile_dir = create_profile("tac-builder", clone_config=True, no_alias=True)
+        profile_dir = create_profile("client-account", clone_config=True, no_alias=True)
 
         profile_cfg = yaml.safe_load((profile_dir / "config.yaml").read_text())
         root_cfg = yaml.safe_load((default_home / "config.yaml").read_text())
-        assert profile_cfg["auth"]["shared_providers"] == ["openai-codex"]
-        assert root_cfg["auth"]["shared_provider_consumers"]["openai-codex"] == ["tac-builder"]
+        assert "openai-codex" not in profile_cfg.get("auth", {}).get("shared_providers", [])
+        assert "openai-codex" not in root_cfg.get("auth", {}).get("shared_provider_consumers", {})
 
     def test_delete_profile_revokes_shared_auth_metadata_without_touching_owner(self, profile_env):
         tmp_path = profile_env
@@ -177,6 +177,11 @@ class TestCreateProfile:
         )
         (default_home / "auth.json").write_text('{"providers":{"openai-codex":{"tokens":{"access_token":"[REDACTED]"}}}}')
         profile_dir = create_profile("tac-builder", clone_config=True, no_alias=True)
+        from hermes_cli.auth import configure_profile_shared_provider_metadata
+
+        configure_profile_shared_provider_metadata(
+            profile_dir, "tac-builder", "openai-codex", enabled=True
+        )
         owner_before = (default_home / "auth.json").read_bytes()
 
         delete_profile("tac-builder", yes=True)
@@ -194,6 +199,11 @@ class TestCreateProfile:
             encoding="utf-8",
         )
         profile_dir = create_profile("tac-builder", clone_config=True, no_alias=True)
+        from hermes_cli.auth import configure_profile_shared_provider_metadata
+
+        configure_profile_shared_provider_metadata(
+            profile_dir, "tac-builder", "openai-codex", enabled=True
+        )
 
         with patch("builtins.input", return_value="nope"):
             delete_profile("tac-builder", yes=False)
