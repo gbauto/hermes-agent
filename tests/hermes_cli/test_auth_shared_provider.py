@@ -525,6 +525,8 @@ def test_revoked_consumer_cannot_refresh_or_copy_loaded_owner_token(
         {"version": 1, "credential_pool": {PROVIDER: [_oauth_entry(expired, "old")]}},
     )
     pool = load_pool(PROVIDER)
+    cached = pool.entries()[0]
+    pool._current_id = cached.id
     _authorize_shared(profile_env["root"], [])
     monkeypatch.setattr(
         auth_mod,
@@ -532,7 +534,12 @@ def test_revoked_consumer_cannot_refresh_or_copy_loaded_owner_token(
         lambda *_args, **_kwargs: pytest.fail("revoked consumer must not refresh"),
     )
 
-    assert pool._refresh_entry(pool.entries()[0], force=True) is None
+    assert pool._refresh_entry(cached, force=True) is None
+    assert pool.select() is None
+    assert pool.peek() is None
+    assert pool.acquire_lease(cached.id) is None
+    assert pool.entries() == []
+    assert not pool.has_credentials()
     assert not (profile_env["profile"] / "auth.json").exists()
 
 

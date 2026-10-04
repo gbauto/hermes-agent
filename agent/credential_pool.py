@@ -713,6 +713,10 @@ def _write_through_provider_state_to_global_root(
 class CredentialPool:
     def __init__(self, provider: str, entries: List[PooledCredential]):
         self.provider = provider
+        self._shared_owner_bound = (
+            provider == "openai-codex"
+            and auth_mod._provider_uses_shared_auth_store(provider)
+        )
         self._entries = sorted(entries, key=lambda entry: entry.priority)
         self._current_id: Optional[str] = None
         self._strategy = get_pool_strategy(provider)
@@ -739,8 +743,29 @@ class CredentialPool:
         # entry is identified or an escape path returns None.
         self._unmatched_rotation_streak: int = 0
 
+    def _drop_revoked_shared_owner_entries(self) -> bool:
+        """Forget cached owner tokens as soon as either policy side is revoked.
+
+        Call only while holding self._lock. Never persist the stale pool: after
+        revocation, this process no longer has authority to mutate the owner.
+        """
+        denied = self.provider == "openai-codex" and (
+            auth_mod._shared_provider_binding_denied(self.provider)
+            or (
+                self._shared_owner_bound
+                and not auth_mod._provider_uses_shared_auth_store(self.provider)
+            )
+        )
+        if denied:
+            self._entries = []
+            self._current_id = None
+            self._active_leases.clear()
+        return denied
+
     def has_credentials(self) -> bool:
         with self._lock:
+            if self._drop_revoked_shared_owner_entries():
+                return False
             return bool(self._entries)
 
     def has_available(self) -> bool:
@@ -791,10 +816,12 @@ class CredentialPool:
 
     def entries(self) -> List[PooledCredential]:
         with self._lock:
+            if self._drop_revoked_shared_owner_entries():
+                return []
             return list(self._entries)
 
     def _current_unlocked(self) -> Optional[PooledCredential]:
-        if not self._current_id:
+        if self._drop_revoked_shared_owner_entries() or not self._current_id:
             return None
         return next((entry for entry in self._entries if entry.id == self._current_id), None)
 
@@ -1944,6 +1971,8 @@ class CredentialPool:
         lock, avoiding stalling all pool consumers during cross-process flock
         acquisition + OAuth network I/O.
         """
+        if self._drop_revoked_shared_owner_entries():
+            return [], []
         now = time.time()
         cleared_any = False
         entries_to_prune: List[str] = []
@@ -2355,6 +2384,8 @@ class CredentialPool:
     ) -> Tuple[Optional[str], List[tuple]]:
         """Run lease acquisition under the lock, returning id + pending refreshes."""
         with self._lock:
+            if self._drop_revoked_shared_owner_entries():
+                return None, []
             if credential_id:
                 self._active_leases[credential_id] = self._active_leases.get(credential_id, 0) + 1
                 self._current_id = credential_id
