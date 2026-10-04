@@ -5400,37 +5400,6 @@ def _coerce_float(value: str):
     return f
 
 
-def _sync_codex_shared_auth_after_provider_set(key: str, value: Any) -> None:
-    """Best-effort shared-auth metadata update for named-profile provider changes."""
-    if key != "model.provider":
-        return
-    try:
-        from hermes_constants import get_hermes_home, get_default_hermes_root
-        from hermes_cli.profiles import normalize_profile_name
-        from hermes_cli.auth import configure_profile_shared_provider_metadata
-
-        home = get_hermes_home()
-        root = get_default_hermes_root()
-        try:
-            if home.resolve(strict=False) == root.resolve(strict=False):
-                return
-        except Exception:
-            if home == root:
-                return
-        if home.parent.name != "profiles":
-            return
-        profile_id = normalize_profile_name(home.name)
-        configure_profile_shared_provider_metadata(
-            home,
-            profile_id,
-            "openai-codex",
-            enabled=(str(value or "").strip().lower() == "openai-codex"),
-        )
-    except Exception as exc:
-        print(f"⚠ shared Codex auth metadata sync skipped: {exc}")
-
-
-
 def set_config_value(key: str, value: str, force: bool = False):
     """Set a configuration value.
 
@@ -5706,7 +5675,6 @@ def set_config_value(key: str, value: str, force: bool = False):
     else:
         _display_value = value
     print(f"✓ Set {key} = {_display_value} in {config_path}")
-    _sync_codex_shared_auth_after_provider_set(key, value)
     warn_unpinned_cron_jobs_after_model_config_change(key, value, user_config)
 
     # Post-write unknown-key notice (#34067): value IS saved, but tell the
