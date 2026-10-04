@@ -1122,6 +1122,37 @@ def profiles_to_serve(
 
     return serve
 
+def _profile_model_provider(profile_dir: Path) -> Optional[str]:
+    """Return normalized model.provider from a profile config, if present."""
+    _model, provider = _read_config_model(profile_dir)
+    return str(provider or "").strip().lower() or None
+
+
+def _sync_codex_shared_auth_metadata(profile_dir: Path, profile_id: str, *, enabled: bool) -> None:
+    """Best-effort metadata sync for named Codex profiles; never touches tokens."""
+    try:
+        if enabled or profile_dir.exists():
+            from hermes_cli.auth import configure_profile_shared_provider_metadata
+
+            configure_profile_shared_provider_metadata(
+                profile_dir,
+                profile_id,
+                "openai-codex",
+                enabled=enabled,
+            )
+            return
+
+        # After a confirmed delete, the profile directory is gone. Revoke only
+        # the root allowlist entry without recreating profile-side config.
+        from hermes_cli.auth import update_shared_provider_consumer
+
+        update_shared_provider_consumer(profile_id, "openai-codex", enabled=False)
+    except Exception:
+        # Profile CRUD must not fail because shared-auth metadata repair hit a
+        # malformed root config. `hermes auth reconcile-shared --repair` can fix
+        # and report exact drift later.
+        pass
+
 
 def create_profile(
     name: str,
@@ -1312,6 +1343,8 @@ def create_profile(
     # / launchd / windows) this is a no-op — the existing per-profile
     # unit-generation paths handle gateway lifecycle.
     _maybe_register_gateway_service(canon)
+    if _profile_model_provider(profile_dir) == "openai-codex":
+        _sync_codex_shared_auth_metadata(profile_dir, canon, enabled=True)
 
     return profile_dir
 
@@ -1766,6 +1799,7 @@ def delete_profile(name: str, yes: bool = False) -> Path:
 
         _rmtree_with_retry(profile_dir, _make_writable)
         print(f"✓ Removed {profile_dir}")
+        _sync_codex_shared_auth_metadata(profile_dir, canon, enabled=False)
     except Exception as e:
         print(f"⚠ Could not remove {profile_dir}: {e}")
         remove_error = e

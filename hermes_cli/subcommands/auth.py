@@ -70,6 +70,27 @@ def build_auth_parser(subparsers, *, cmd_auth: Callable) -> None:
         "logout", help="Log out a provider and clear stored auth state"
     )
     auth_logout.add_argument("provider", help="Provider id")
+    auth_use_shared = auth_subparsers.add_parser(
+        "use-shared", help="Use a provider credential owned by the default Hermes root",
+    )
+    auth_use_shared.add_argument("provider", help="Provider id")
+    auth_use_shared.add_argument(
+        "--no-shared", action="store_true",
+        help="Disable the binding without restoring stale local credentials",
+    )
+    auth_use_shared.add_argument(
+        "--yes", action="store_true", help="Confirm the profile auth-boundary change",
+    )
+    auth_reconcile_shared = auth_subparsers.add_parser(
+        "reconcile-shared", help="Report or repair shared Codex auth profile metadata",
+    )
+    auth_reconcile_shared.add_argument(
+        "provider", nargs="?", default="openai-codex",
+        help="Provider id (currently openai-codex)",
+    )
+    auth_reconcile_shared.add_argument(
+        "--repair", action="store_true", help="Repair metadata drift; dry-run by default",
+    )
     auth_spotify = auth_subparsers.add_parser(
         "spotify", help="Authenticate Hermes with Spotify via PKCE"
     )

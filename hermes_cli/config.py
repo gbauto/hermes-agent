@@ -5400,6 +5400,37 @@ def _coerce_float(value: str):
     return f
 
 
+def _sync_codex_shared_auth_after_provider_set(key: str, value: Any) -> None:
+    """Best-effort shared-auth metadata update for named-profile provider changes."""
+    if key != "model.provider":
+        return
+    try:
+        from hermes_constants import get_hermes_home, get_default_hermes_root
+        from hermes_cli.profiles import normalize_profile_name
+        from hermes_cli.auth import configure_profile_shared_provider_metadata
+
+        home = get_hermes_home()
+        root = get_default_hermes_root()
+        try:
+            if home.resolve(strict=False) == root.resolve(strict=False):
+                return
+        except Exception:
+            if home == root:
+                return
+        if home.parent.name != "profiles":
+            return
+        profile_id = normalize_profile_name(home.name)
+        configure_profile_shared_provider_metadata(
+            home,
+            profile_id,
+            "openai-codex",
+            enabled=(str(value or "").strip().lower() == "openai-codex"),
+        )
+    except Exception as exc:
+        print(f"⚠ shared Codex auth metadata sync skipped: {exc}")
+
+
+
 def set_config_value(key: str, value: str, force: bool = False):
     """Set a configuration value.
 
@@ -5414,6 +5445,8 @@ def set_config_value(key: str, value: str, force: bool = False):
             refused (bare ``model`` is redirected to ``model.default``). The
             CLI exposes this via ``hermes config set --force``.
     """
+
+
     if is_managed():
         managed_error("set configuration values")
         return
@@ -5549,6 +5582,17 @@ def set_config_value(key: str, value: str, force: bool = False):
                     file=sys.stderr,
                 )
 
+    if key == "auth.shared_providers" or key.startswith("auth.shared_provider_consumers."):
+        try:
+            parsed = yaml.safe_load(value if isinstance(value, str) else "")
+        except yaml.YAMLError as exc:
+            print(f"Error: {key} must be a YAML list of strings: {exc}", file=sys.stderr)
+            sys.exit(1)
+        if not isinstance(parsed, list) or not all(isinstance(item, str) for item in parsed):
+            print(f"Error: {key} must be a YAML list of strings", file=sys.stderr)
+            sys.exit(1)
+        coerced_value = [item.strip().lower() for item in parsed if item.strip()]
+
     value = coerced_value
     # Normalize a scalar ``model`` key before writing sub-keys so that
     # ``hermes config set model.provider openai`` doesn't silently
@@ -5662,6 +5706,7 @@ def set_config_value(key: str, value: str, force: bool = False):
     else:
         _display_value = value
     print(f"✓ Set {key} = {_display_value} in {config_path}")
+    _sync_codex_shared_auth_after_provider_set(key, value)
     warn_unpinned_cron_jobs_after_model_config_change(key, value, user_config)
 
     # Post-write unknown-key notice (#34067): value IS saved, but tell the

@@ -158,6 +158,13 @@ def _migrate_legacy_custom_pool_key(provider: str, legacy_key: str) -> None:
     except Exception:
         pass
 
+def _reject_shared_consumer_mutation(provider: str, action: str) -> None:
+    if auth_mod._profile_requests_shared_provider(provider):
+        raise SystemExit(
+            f"Cannot {action} shared {provider} credentials from a named profile. "
+            "Manage the credential once from the default Hermes root."
+        )
+
 
 def _provider_base_url(provider: str) -> str:
     if provider == "openrouter":
@@ -247,6 +254,7 @@ def _format_exhausted_status(entry) -> str:
 
 def auth_add_command(args) -> None:
     provider = _normalize_provider(getattr(args, "provider", ""))
+    _reject_shared_consumer_mutation(provider, "add")
     configured_provider = _configured_provider_entry(provider)
     if not _is_known_provider(provider, configured_provider):
         raise SystemExit(f"Unknown provider: {provider}")
@@ -561,6 +569,7 @@ def auth_list_command(args) -> None:
 
 def auth_remove_command(args) -> None:
     provider = _normalize_provider(getattr(args, "provider", ""))
+    _reject_shared_consumer_mutation(provider, "remove")
     target = getattr(args, "target", None)
     if target is None:
         target = getattr(args, "index", None)
@@ -599,6 +608,7 @@ def auth_remove_command(args) -> None:
 
 def auth_reset_command(args) -> None:
     provider = _normalize_provider(getattr(args, "provider", ""))
+    _reject_shared_consumer_mutation(provider, "reset")
     pool = load_pool(provider)
     count = pool.reset_statuses()
     print(f"Reset status on {count} {provider} credentials")
@@ -625,7 +635,29 @@ def auth_status_command(args) -> None:
 
 
 def auth_logout_command(args) -> None:
-    auth_mod.logout_command(SimpleNamespace(provider=getattr(args, "provider", None)))
+    provider = _normalize_provider(getattr(args, "provider", ""))
+    _reject_shared_consumer_mutation(provider, "log out")
+    auth_mod.logout_command(SimpleNamespace(provider=provider))
+
+
+def auth_use_shared_command(args) -> None:
+    provider = _normalize_provider(getattr(args, "provider", ""))
+    if not bool(getattr(args, "yes", False)):
+        raise SystemExit(
+            "This changes the profile auth boundary. Re-run with --yes after review."
+        )
+    enabled = not bool(getattr(args, "no_shared", False))
+    try:
+        result = auth_mod.use_shared_provider_auth(provider, enabled=enabled)
+    except ValueError as exc:
+        raise SystemExit(str(exc)) from exc
+    if enabled:
+        action = "removed" if result["local_shadow_removed"] else "already absent"
+        print(f"{provider}: using default Hermes root auth owner")
+        print(f"  profile-local shadow: {action}")
+    else:
+        print(f"{provider}: shared auth disabled for this profile")
+        print("  no local credential was restored")
 
 
 def auth_spotify_command(args) -> None:
@@ -874,6 +906,94 @@ def _interactive_strategy() -> None:
     print(f"Set {provider} strategy to: {strategy}")
 
 
+def auth_reconcile_shared_command(args) -> None:
+    """Report/repair shared auth metadata for Codex-configured profiles."""
+    provider = _normalize_provider(getattr(args, "provider", None) or "openai-codex")
+    if provider != "openai-codex":
+        raise SystemExit("Only openai-codex shared auth reconciliation is supported")
+    repair = bool(getattr(args, "repair", False))
+
+    from pathlib import Path
+    import yaml
+    from hermes_constants import get_default_hermes_root
+    from hermes_cli.profiles import list_profiles, get_profile_dir
+    from hermes_cli.auth import configure_profile_shared_provider_metadata
+
+    root = get_default_hermes_root()
+    root_config_path = root / "config.yaml"
+    try:
+        root_config = yaml.safe_load(root_config_path.read_text(encoding="utf-8")) or {}
+    except Exception:
+        root_config = {}
+    if not isinstance(root_config, dict):
+        root_config = {}
+    auth_config = root_config.get("auth") if isinstance(root_config.get("auth"), dict) else {}
+    consumers = auth_config.get("shared_provider_consumers") if isinstance(auth_config, dict) else {}
+    root_allowed_raw = consumers.get(provider) if isinstance(consumers, dict) else []
+    root_allowed = {
+        item.strip().lower() for item in root_allowed_raw
+        if isinstance(item, str) and item.strip()
+    } if isinstance(root_allowed_raw, list) else set()
+
+    codex_profiles: list[str] = []
+    profile_opted: set[str] = set()
+    malformed: list[str] = []
+    for info in list_profiles():
+        if info.name == "default":
+            continue
+        if str(info.provider or "").strip().lower() == provider:
+            codex_profiles.append(info.name)
+        profile_dir = Path(info.path)
+        try:
+            cfg = yaml.safe_load((profile_dir / "config.yaml").read_text(encoding="utf-8")) or {}
+        except Exception:
+            cfg = {}
+        auth = cfg.get("auth") if isinstance(cfg, dict) else None
+        shared = auth.get("shared_providers") if isinstance(auth, dict) else []
+        if isinstance(shared, list):
+            if provider in {str(item or "").strip().lower() for item in shared}:
+                profile_opted.add(info.name)
+        elif shared not in (None, []):
+            malformed.append(info.name)
+
+    codex = set(codex_profiles)
+    missing_profile_opt_in = sorted(codex - profile_opted)
+    missing_root_owner = sorted(codex - root_allowed)
+    stale_profile_opt_in = sorted(profile_opted - codex)
+    stale_root_owner = sorted(root_allowed - codex)
+
+    print("Shared Codex auth reconciliation")
+    print(f"  Provider: {provider}")
+    print(f"  Mode: {'repair' if repair else 'dry-run'}")
+    print(f"  Codex profiles: {len(codex_profiles)}")
+    print(f"  Missing profile opt-in: {missing_profile_opt_in or 'none'}")
+    print(f"  Missing root owner allowlist: {missing_root_owner or 'none'}")
+    print(f"  Stale profile opt-in: {stale_profile_opt_in or 'none'}")
+    print(f"  Stale root owner allowlist: {stale_root_owner or 'none'}")
+    print(f"  Malformed profile shared_providers: {malformed or 'none'}")
+
+    if repair:
+        repaired = []
+        for name in sorted(codex):
+            configure_profile_shared_provider_metadata(
+                get_profile_dir(name), name, provider, enabled=True
+            )
+            repaired.append(name)
+        for name in sorted((profile_opted | root_allowed) - codex):
+            if name == "default":
+                continue
+            profile_dir = get_profile_dir(name)
+            if profile_dir.exists():
+                configure_profile_shared_provider_metadata(
+                    profile_dir, name, provider, enabled=False
+                )
+            else:
+                auth_mod.update_shared_provider_consumer(name, provider, enabled=False)
+        print(f"  Repaired metadata for {len(repaired)} Codex profile(s).")
+    else:
+        print("  No changes made. Re-run with --repair to update metadata.")
+
+
 def auth_command(args) -> None:
     action = getattr(args, "auth_action", "")
     if action == "add":
@@ -893,6 +1013,12 @@ def auth_command(args) -> None:
         return
     if action == "logout":
         auth_logout_command(args)
+        return
+    if action == "use-shared":
+        auth_use_shared_command(args)
+        return
+    if action == "reconcile-shared":
+        auth_reconcile_shared_command(args)
         return
     if action == "spotify":
         auth_spotify_command(args)

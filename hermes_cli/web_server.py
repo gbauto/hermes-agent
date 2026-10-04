@@ -1301,6 +1301,7 @@ _SCHEMA_OVERRIDES: Dict[str, Dict[str, Any]] = {
 
 # Categories with fewer fields get merged into "general" to avoid tab sprawl.
 _CATEGORY_MERGE: Dict[str, str] = {
+    "auth": "security",
     "privacy": "security",
     "context": "agent",
     "skills": "agent",
@@ -11167,6 +11168,14 @@ async def disconnect_oauth_provider(
                            f"Available: {', '.join(sorted(catalog_by_id))}",
                 )
 
+            if provider_id == "openai-codex":
+                from hermes_cli.auth import _profile_requests_shared_provider
+                if _profile_requests_shared_provider(provider_id):
+                    raise HTTPException(
+                        status_code=403,
+                        detail="Shared openai-codex credentials are managed from the default Hermes root",
+                    )
+
             disconnect_hint = _oauth_provider_disconnect_hint(provider, {})
             if disconnect_hint:
                 raise HTTPException(
@@ -12130,6 +12139,17 @@ async def start_oauth_login(
     valid = {p["id"] for p in _OAUTH_PROVIDER_CATALOG}
     if provider_id not in valid:
         raise HTTPException(status_code=400, detail=f"Unknown provider {provider_id}")
+    if provider_id == "openai-codex":
+        from hermes_cli.auth import _profile_requests_shared_provider
+
+        if _profile_requests_shared_provider(provider_id):
+            raise HTTPException(
+                status_code=403,
+                detail=(
+                    "Shared openai-codex credentials are managed from the "
+                    "default Hermes root"
+                ),
+            )
     catalog_entry = next(p for p in _OAUTH_PROVIDER_CATALOG if p["id"] == provider_id)
     if catalog_entry["flow"] == "external":
         raise HTTPException(
