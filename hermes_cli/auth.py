@@ -86,6 +86,7 @@ from hermes_cli.config import (
     get_hermes_home,
     get_config_path,
     read_raw_config,
+    read_user_config_raw,
     require_readable_config_before_write,
 )
 from hermes_constants import OPENROUTER_BASE_URL, secure_parent_dir
@@ -1146,7 +1147,7 @@ def _root_shared_provider_consumers(provider_id: str) -> frozenset[str]:
         from hermes_constants import get_default_hermes_root
 
         config_path = get_default_hermes_root() / "config.yaml"
-        raw = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
+        raw = read_user_config_raw(config_path)
     except (OSError, ValueError, TypeError, yaml.YAMLError):
         return frozenset()
     auth_config = raw.get("auth") if isinstance(raw, dict) else None
@@ -2274,7 +2275,7 @@ def update_shared_provider_consumer(
 
     root_config_path = get_default_hermes_root() / "config.yaml"
     try:
-        raw_config = yaml.safe_load(root_config_path.read_text(encoding="utf-8")) or {}
+        raw_config = read_user_config_raw(root_config_path)
     except (OSError, TypeError, yaml.YAMLError):
         raw_config = {}
     if not isinstance(raw_config, dict):
@@ -2329,7 +2330,7 @@ def configure_profile_shared_provider_metadata(
 
     config_path = Path(profile_dir) / "config.yaml"
     try:
-        raw_config = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
+        raw_config = read_user_config_raw(config_path)
     except (OSError, TypeError, yaml.YAMLError):
         raw_config = {}
     if not isinstance(raw_config, dict):

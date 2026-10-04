@@ -914,15 +914,15 @@ def auth_reconcile_shared_command(args) -> None:
     repair = bool(getattr(args, "repair", False))
 
     from pathlib import Path
-    import yaml
     from hermes_constants import get_default_hermes_root
+    from hermes_cli.config import read_user_config_raw
     from hermes_cli.profiles import list_profiles, get_profile_dir
     from hermes_cli.auth import configure_profile_shared_provider_metadata
 
     root = get_default_hermes_root()
     root_config_path = root / "config.yaml"
     try:
-        root_config = yaml.safe_load(root_config_path.read_text(encoding="utf-8")) or {}
+        root_config = read_user_config_raw(root_config_path)
     except Exception:
         root_config = {}
     if not isinstance(root_config, dict):
@@ -945,7 +945,7 @@ def auth_reconcile_shared_command(args) -> None:
             codex_profiles.append(info.name)
         profile_dir = Path(info.path)
         try:
-            cfg = yaml.safe_load((profile_dir / "config.yaml").read_text(encoding="utf-8")) or {}
+            cfg = read_user_config_raw(profile_dir / "config.yaml")
         except Exception:
             cfg = {}
         auth = cfg.get("auth") if isinstance(cfg, dict) else None

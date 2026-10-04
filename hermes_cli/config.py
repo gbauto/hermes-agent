@@ -3283,7 +3283,9 @@ def read_user_config_raw(config_path: Optional[Path] = None) -> Dict[str, Any]:
     expansion, no migration, no root-model normalization, no caching.
 
     ONLY legal for write-back round-trips and raw-file diagnostics —
-    behavioral reads must use load_config()/load_config_readonly().
+    Exact owner-authorization allowlists also use this raw read: defaults must
+    never create a grant. Other behavioral reads must use
+    load_config()/load_config_readonly().
 
     Legal call sites, exhaustively:
 
