@@ -674,6 +674,7 @@ class Task:
     # set the env var. Lets clients render a per-session board without
     # relying on tenant + time-window heuristics.
     session_id: Optional[str] = None
+    prd_metadata: Optional[dict] = None
 
     @classmethod
     def from_row(cls, row: sqlite3.Row) -> "Task":
@@ -743,8 +744,9 @@ class Task:
             session_id=(
                 row["session_id"] if "session_id" in keys else None
             ),
+            prd_metadata=(json.loads(row["prd_metadata"])
+                          if "prd_metadata" in keys and row["prd_metadata"] else None),
         )
-
 
 @dataclass
 class Run:
@@ -880,7 +882,8 @@ CREATE TABLE IF NOT EXISTS tasks (
     -- for tasks created from the CLI, dashboard, or any path that doesn't
     -- set the env var. Indexed so per-session list queries stay cheap on
     -- larger boards.
-    session_id           TEXT
+    session_id           TEXT,
+    prd_metadata         TEXT
 );
 
 CREATE TABLE IF NOT EXISTS task_links (
@@ -1148,6 +1151,8 @@ def _migrate_add_optional_columns(conn: sqlite3.Connection) -> None:
     Called by ``init_db`` so opening an old DB is always safe.
     """
     cols = {row["name"] for row in conn.execute("PRAGMA table_info(tasks)")}
+    if "prd_metadata" not in cols:
+        _add_column_if_missing(conn, "tasks", "prd_metadata", "prd_metadata TEXT")
     if "tenant" not in cols:
         _add_column_if_missing(conn, "tasks", "tenant", "tenant TEXT")
     if "result" not in cols:
@@ -1662,6 +1667,63 @@ def _find_missing_parents(conn: sqlite3.Connection, parents: Iterable[str]) -> l
 def get_task(conn: sqlite3.Connection, task_id: str) -> Optional[Task]:
     row = conn.execute("SELECT * FROM tasks WHERE id = ?", (task_id,)).fetchone()
     return Task.from_row(row) if row else None
+
+
+def reconcile_existing_prd_metadata(
+    conn: sqlite3.Connection, task_id: str, *, expected_status: str,
+    expected_run_count: int, prd_id: str, prd_path: str, actor: str, reason: str,
+) -> dict[str, Any]:
+    """One-shot PRD stamp on an unrun todo/blocked card with atomic readback.
+
+    Refuses any prior stamp, any run (even ended runs), or an active claim.
+    Does not alter scheduling, task text, links or run records.
+    """
+    if expected_status not in {"todo", "blocked"}:
+        raise ValueError("expected_status must be todo or blocked")
+    if type(expected_run_count) is not int or expected_run_count != 0:
+        raise ValueError("expected_run_count must be 0")
+    for name, value in (("task_id", task_id), ("prd_id", prd_id),
+                        ("actor", actor), ("reason", reason)):
+        if not isinstance(value, str) or not value.strip() or len(value) > 1024:
+            raise ValueError(f"{name} must be non-empty and at most 1024 characters")
+    if (not isinstance(prd_path, str) or not prd_path.startswith("/")
+            or not prd_path.strip() or len(prd_path) > 4096 or "\x00" in prd_path):
+        raise ValueError("prd_path must be an absolute path of at most 4096 characters")
+    metadata = {"prd_id": prd_id, "prd_path": prd_path}
+    with write_txn(conn):
+        updated = conn.execute(
+            """UPDATE tasks SET prd_metadata = ?
+               WHERE id = ? AND status = ? AND prd_metadata IS NULL
+                 AND current_run_id IS NULL AND claim_lock IS NULL
+                 AND NOT EXISTS (SELECT 1 FROM task_runs WHERE task_id = tasks.id)""",
+            (json.dumps(metadata, ensure_ascii=False), task_id, expected_status),
+        )
+        if updated.rowcount != 1:
+            raise ValueError("card missing, status changed, already stamped, claimed, or has runs")
+        audit_payload = {
+            "prd_id": prd_id, "prd_path": prd_path, "actor": actor,
+            "reason": reason, "expected_status": expected_status,
+            "expected_run_count": expected_run_count,
+        }
+        _append_event(conn, task_id, "prd_metadata_reconciled", audit_payload)
+        event_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+        task = get_task(conn, task_id)
+        event = conn.execute(
+            "SELECT kind, payload, run_id FROM task_events WHERE id = ? AND task_id = ?",
+            (event_id, task_id),
+        ).fetchone()
+        run_count = conn.execute(
+            "SELECT COUNT(*) FROM task_runs WHERE task_id = ?", (task_id,)
+        ).fetchone()[0]
+        if (task is None or task.status != expected_status
+                or task.prd_metadata != metadata or run_count != 0 or event is None
+                or event["kind"] != "prd_metadata_reconciled" or event["run_id"] is not None
+                or json.loads(event["payload"]) != audit_payload):
+            raise RuntimeError("PRD metadata readback failed")
+        return {"task_id": task.id, "status": task.status,
+                "run_count": run_count, "prd_metadata": task.prd_metadata,
+                "event_id": event_id, "event_kind": event["kind"],
+                "event_payload": json.loads(event["payload"]), "event_run_id": event["run_id"]}
 
 
 # Canonical sort-order mappings for ``hermes kanban list --sort``.

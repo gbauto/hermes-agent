@@ -78,6 +78,7 @@ def _task_to_dict(t: kb.Task) -> dict[str, Any]:
         "session_id": t.session_id,
         "workflow_template_id": t.workflow_template_id,
         "current_step_key": t.current_step_key,
+        "prd_metadata": t.prd_metadata,
     }
 
 
@@ -535,6 +536,17 @@ def build_parser(parent_subparsers: argparse._SubParsersAction) -> argparse.Argu
         help="JSON dict of structured facts to store on the latest completed run.",
     )
 
+    p_prd = sub.add_parser("reconcile-prd", help="Audit-stamp PRD identity on one unrun existing card")
+    p_prd.add_argument("task_id", help="Exact existing card ID")
+    p_prd.add_argument("--expected-status", required=True, choices=["todo", "blocked"])
+    p_prd.add_argument("--expected-run-count", required=True, type=int, choices=[0],
+                       help="Explicit optimistic guard: only zero-run cards are supported")
+    p_prd.add_argument("--prd-id", required=True)
+    p_prd.add_argument("--prd-path", required=True)
+    p_prd.add_argument("--actor", required=True)
+    p_prd.add_argument("--reason", required=True)
+    p_prd.add_argument("--json", action="store_true", help="Print atomic readback receipt")
+
     p_block = sub.add_parser("block", help="Mark one or more tasks blocked")
     p_block.add_argument("task_id")
     p_block.add_argument("reason", nargs="*", help="Reason (also appended as a comment)")
@@ -827,6 +839,14 @@ def kanban_command(args: argparse.Namespace) -> int:
     if action == "boards":
         return _dispatch_boards(args)
 
+    # PRD reconciliation must never fall back to an implicit/default board,
+    # nor be redirected by a worker's direct DB override.
+    if action == "reconcile-prd" and (
+        not getattr(args, "board", None) or os.environ.get("HERMES_KANBAN_DB")
+    ):
+        print("kanban: reconcile-prd requires explicit --board and no HERMES_KANBAN_DB override", file=sys.stderr)
+        return 2
+
     # `--board <slug>` applies to every subcommand below by way of an
     # env-var pin for the duration of this call. Using HERMES_KANBAN_BOARD
     # (rather than threading `board=` through 50+ kb.connect() sites)
@@ -896,6 +916,7 @@ def kanban_command(args: argparse.Namespace) -> int:
         "comment":  _cmd_comment,
         "complete": _cmd_complete,
         "edit":     _cmd_edit,
+        "reconcile-prd": _cmd_reconcile_prd,
         "block":    _cmd_block,
         "schedule": _cmd_schedule,
         "unblock":  _cmd_unblock,
@@ -1892,6 +1913,22 @@ def _cmd_edit(args: argparse.Namespace) -> int:
             )
             return 1
     print(f"Edited {args.task_id}")
+    return 0
+
+
+def _cmd_reconcile_prd(args: argparse.Namespace) -> int:
+    with kb.connect() as conn:
+        receipt = kb.reconcile_existing_prd_metadata(
+            conn, args.task_id, expected_status=args.expected_status,
+            expected_run_count=args.expected_run_count,
+            prd_id=args.prd_id, prd_path=args.prd_path,
+            actor=args.actor, reason=args.reason,
+        )
+    receipt["board"] = kb._normalize_board_slug(args.board)
+    if args.json:
+        print(json.dumps(receipt, ensure_ascii=False, sort_keys=True))
+    else:
+        print(f"PRD metadata reconciled for {args.task_id}; event {receipt['event_id']}")
     return 0
 
 
