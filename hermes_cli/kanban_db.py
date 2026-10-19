@@ -2119,6 +2119,54 @@ def _has_sticky_block(conn: sqlite3.Connection, task_id: str) -> bool:
     return bool(row) and row["kind"] == "blocked"
 
 
+def _dependency_evidence_errors(conn: sqlite3.Connection, task_id: str) -> list[str]:
+    """Check parent receipts and declared local artifacts without inventing locations."""
+    errors: list[str] = []
+    rows = conn.execute(
+        "WITH RECURSIVE ancestors(id) AS ("
+        "SELECT parent_id FROM task_links WHERE child_id = ? UNION "
+        "SELECT l.parent_id FROM task_links l JOIN ancestors a ON l.child_id = a.id) "
+        "SELECT p.id, p.status FROM ancestors a JOIN tasks p ON p.id = a.id ORDER BY p.id",
+        (task_id,),
+    ).fetchall()
+    for row in rows:
+        if row["status"] not in ("done", "archived"):
+            continue
+        event = conn.execute(
+            "SELECT payload FROM task_events WHERE task_id = ? AND kind = 'completed' "
+            "ORDER BY id DESC LIMIT 1", (row["id"],),
+        ).fetchone()
+        if event is None and row["status"] == "archived":
+            continue  # Explicitly discarded work has no deliverable receipt.
+        if event is None:
+            errors.append(f"{row['id']}: missing completion receipt")
+            continue
+        try:
+            payload = json.loads(event["payload"])
+        except (TypeError, ValueError):
+            errors.append(f"{row['id']}: malformed completion receipt")
+            continue
+        if not isinstance(payload, dict):
+            errors.append(f"{row['id']}: malformed completion receipt")
+            continue
+        artifacts = _clean_artifact_items(payload.get("artifacts"))
+        for artifact in artifacts:
+            if isinstance(artifact, dict) and any(
+                isinstance(artifact.get(key), str) and artifact[key].startswith(("https://", "http://"))
+                for key in ("url", "href", "public_url")
+            ):
+                continue  # Published URL is not an incidental local path.
+            path = artifact if isinstance(artifact, str) else next(
+                (artifact[key] for key in ("path", "file", "file_path")
+                 if isinstance(artifact.get(key), str)), None
+            )
+            if path and not path.startswith(("https://", "http://")):
+                candidate = Path(path).expanduser()
+                if not candidate.is_absolute() or not candidate.is_file():
+                    errors.append(f"{row['id']}: unreadable declared artifact {path}")
+    return errors
+
+
 def recompute_ready(conn: sqlite3.Connection) -> int:
     """Promote ``todo`` tasks to ``ready`` when all parents are ``done`` or ``archived``.
 
@@ -2154,7 +2202,7 @@ def recompute_ready(conn: sqlite3.Connection) -> int:
                 "WHERE l.child_id = ?",
                 (task_id,),
             ).fetchall()
-            if all(p["status"] in ("done", "archived") for p in parents):
+            if all(p["status"] in ("done", "archived") for p in parents) and not _dependency_evidence_errors(conn, task_id):
                 # Blocked tasks also get their failure counters reset —
                 # this is effectively an auto-unblock (circuit-breaker
                 # recovery; worker-initiated blocks are skipped above).
@@ -2173,6 +2221,46 @@ def recompute_ready(conn: sqlite3.Connection) -> int:
                 _append_event(conn, task_id, "promoted", None)
                 promoted += 1
     return promoted
+
+
+def reconcile_task_state(conn: sqlite3.Connection, task_id: str, *, now: Optional[int] = None) -> dict[str, Any]:
+    """Task-local, non-dispatching diagnosis. Only repair a provably starved todo.
+
+    Stale claims and failures need an operator/worker policy decision; reporting
+    them here must not silently retry or reset a human gate.
+    """
+    instant = int(time.time()) if now is None else int(now)
+    with write_txn(conn):
+        row = conn.execute(
+            "SELECT status, claim_expires, consecutive_failures FROM tasks WHERE id = ?", (task_id,)
+        ).fetchone()
+        if row is None:
+            return {"task_id": task_id, "state": "missing", "changed": False}
+        status = row["status"]
+        parents = conn.execute(
+            "SELECT p.status FROM task_links l JOIN tasks p ON p.id = l.parent_id WHERE l.child_id = ?",
+            (task_id,),
+        ).fetchall()
+        errors = _dependency_evidence_errors(conn, task_id)
+        eligible = all(p["status"] in ("done", "archived") for p in parents) and not errors
+        state = status
+        changed = False
+        if status == "done" and not conn.execute(
+            "SELECT 1 FROM task_events WHERE task_id = ? AND kind = 'completed' LIMIT 1", (task_id,)
+        ).fetchone():
+            state = "done_without_receipt"
+        elif status == "running" and row["claim_expires"] is not None and row["claim_expires"] <= instant:
+            state = "stale_claim"
+        elif status == "blocked":
+            state = "human_blocked" if _has_sticky_block(conn, task_id) else "failed_blocked"
+        elif status == "todo" and eligible:
+            conn.execute("UPDATE tasks SET status = 'ready' WHERE id = ? AND status = 'todo'", (task_id,))
+            _append_event(conn, task_id, "promoted", {"source": "task_reconciliation"})
+            state, changed = "ready_starvation_repaired", True
+        elif status in ("todo", "ready") and errors:
+            state = "dependency_evidence_missing"
+        return {"task_id": task_id, "state": state, "changed": changed, "errors": errors,
+                "consecutive_failures": row["consecutive_failures"]}
 
 
 # ---------------------------------------------------------------------------
@@ -2219,6 +2307,11 @@ def claim_task(
                 conn, task_id, "claim_rejected",
                 {"reason": "parents_not_done"},
             )
+            return None
+        evidence_errors = _dependency_evidence_errors(conn, task_id)
+        if evidence_errors:
+            conn.execute("UPDATE tasks SET status = 'todo' WHERE id = ? AND status = 'ready'", (task_id,))
+            _append_event(conn, task_id, "claim_rejected", {"reason": "dependency_evidence_unreadable", "errors": evidence_errors})
             return None
         # Defensive: if a prior run somehow leaked (invariant violation from
         # an unknown code path), close it as 'reclaimed' so we don't strand
@@ -3166,12 +3259,27 @@ def complete_task(
     recompute_ready(conn)
     # Clean up the scratch workspace and any stale tmux session for the worker.
     _cleanup_workspace(conn, task_id)
+    # Release producer scratch only after every dependent has completed or
+    # archived. A missing dependent receipt never triggers early deletion.
+    _cleanup_ancestor_workspaces(conn, task_id)
     return True
 
 
 # ---------------------------------------------------------------------------
 # Workspace / tmux cleanup
 # ---------------------------------------------------------------------------
+
+def _cleanup_ancestor_workspaces(conn: sqlite3.Connection, task_id: str) -> None:
+    """Reconsider every producer whose evidence can be rolled up through this task."""
+    rows = conn.execute(
+        "WITH RECURSIVE ancestors(id) AS ("
+        "SELECT parent_id FROM task_links WHERE child_id = ? UNION "
+        "SELECT l.parent_id FROM task_links l JOIN ancestors a ON l.child_id = a.id) "
+        "SELECT id FROM ancestors ORDER BY id", (task_id,),
+    ).fetchall()
+    for row in rows:
+        _cleanup_workspace(conn, row["id"])
+
 
 def _cleanup_workspace(conn: sqlite3.Connection, task_id: str) -> None:
     """Remove a task's scratch workspace dir and kill its stale tmux session.
@@ -3208,8 +3316,26 @@ def _cleanup_workspace(conn: sqlite3.Connection, task_id: str) -> None:
                 wp,
             )
         elif wp.is_dir():
-            shutil.rmtree(wp, ignore_errors=True)
-            _log.debug("Removed scratch workspace: %s", wp)
+            # Preserve producer scratch only while a dependent owns the
+            # handoff. Standalone scratch has no owner and remains ephemeral.
+            owners = [row["id"] for row in conn.execute(
+                "WITH RECURSIVE descendants(id) AS ("
+                "SELECT child_id FROM task_links WHERE parent_id = ? UNION "
+                "SELECT l.child_id FROM task_links l JOIN descendants d ON l.parent_id = d.id) "
+                "SELECT d.id FROM descendants d JOIN tasks c ON c.id = d.id "
+                "WHERE c.status NOT IN ('done', 'archived') ORDER BY d.id",
+                (task_id,),
+            ).fetchall()]
+            if owners:
+                # The receipt identifies the exact dependent owners; once all
+                # finish, their completion triggers a final cleanup pass.
+                with write_txn(conn):
+                    _append_event(conn, task_id, "scratch_evidence_preserved", {
+                        "workspace_path": str(wp), "dependent_owners": owners,
+                    })
+            else:
+                shutil.rmtree(wp, ignore_errors=True)
+                _log.debug("Removed scratch workspace: %s", wp)
         # Also kill the tmux session for the worker that owned this task,
         # if the tmux session is now dead (worker process exited).
         _cleanup_worker_tmux(conn, task_id)
@@ -3892,6 +4018,7 @@ def archive_task(conn: sqlite3.Connection, task_id: str) -> bool:
     # Promote newly-unblocked dependents immediately instead of waiting
     # for a later dispatcher tick.
     recompute_ready(conn)
+    _cleanup_ancestor_workspaces(conn, task_id)
     return True
 
 
@@ -5741,6 +5868,51 @@ def _worker_profile_home(profile_arg: str) -> Optional[str]:
         return os.environ.get("HERMES_HOME")
 
 
+def _worker_model_preflight(task: Task, hermes_home: Optional[str]) -> dict[str, Any]:
+    """Reject known-incompatible effective Codex models before claiming a run.
+
+    Offline catalogs include speculative forward-compatible slugs, so they
+    cannot establish account entitlement. This is deliberately a narrow
+    negative check, not a claim that other model names are accepted remotely.
+    """
+    payload: dict[str, Any] = {"check": "codex_model_override", "task_id": task.id}
+    model = (task.model_override or "").strip()
+    if not hermes_home:
+        return payload
+    config_path = Path(hermes_home) / "config.yaml"
+    if not config_path.is_file():
+        return payload
+    try:
+        import yaml
+        config = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
+        if not isinstance(config, dict):
+            raise ValueError("profile config must be a mapping")
+        model_config = config.get("model")
+        provider = config.get("provider") or (
+            model_config.get("provider") if isinstance(model_config, dict) else None
+        )
+        if not model:
+            default_model = (
+                model_config.get("default") or model_config.get("name") or model_config.get("model")
+                if isinstance(model_config, dict) else model_config
+            )
+            model = str(default_model or "").strip()
+    except Exception as exc:
+        raise WorkerSkillReadinessError(
+            "worker model readiness failed: cannot read profile provider",
+            {**payload, "error": type(exc).__name__},
+        ) from exc
+    payload["provider"] = provider
+    payload["effective_model"] = model
+    payload["model_source"] = "task_override" if task.model_override else "profile_default"
+    if provider == "openai-codex" and model in {"gpt-5.5"}:
+        raise WorkerSkillReadinessError(
+            f"worker model readiness failed: unsupported openai-codex model {model}",
+            payload,
+        )
+    return payload
+
+
 def _worker_skill_preflight(
     task: Task,
     *,
@@ -5750,18 +5922,20 @@ def _worker_skill_preflight(
     """Resolve profile-scoped worker skills before starting a subprocess.
 
     Built-in worker skills are best effort because their essential behavior is
-    also injected by the control plane. Skills explicitly forced on a task are
-    mandatory. Ambiguous names fail closed because the CLI must not guess.
+    also injected by the control plane. Explicitly forced skills are mandatory;
+    ambiguous implicit names must not be passed to the CLI.
     """
 
-    optional_skills = {"kanban-worker", "sdlc-review"}
+    model_readiness = _worker_model_preflight(task, hermes_home)
     requested: list[str] = ["kanban-worker"]
     task_skills = [
         str(skill).strip()
         for skill in (task.skills or [])
         if str(skill).strip()
     ]
-    forced = [skill for skill in task_skills if skill not in optional_skills]
+    # The dispatcher injects sdlc-review for review-column tasks; preserve
+    # its historical best-effort behavior. Other explicit task skills must load.
+    forced = [skill for skill in task_skills if skill != "sdlc-review"]
     for skill in task_skills:
         if skill not in requested:
             requested.append(skill)
@@ -5787,6 +5961,7 @@ def _worker_skill_preflight(
 
     payload: dict[str, Any] = {
         "check": "profile_skill_import",
+        "model_preflight": model_readiness,
         "profile": profile_arg,
         "task_id": task.id,
         "hermes_home": hermes_home,
@@ -5810,14 +5985,14 @@ def _worker_skill_preflight(
             payload,
         )
 
-    argv_skills: list[str] = []
-    if "kanban-worker" in loaded_names:
-        argv_skills.append("kanban-worker")
     unresolved = (
         set(resolved.missing)
         | set(ambiguous_all)
         | set(resolved.errors)
     )
+    argv_skills: list[str] = []
+    if "kanban-worker" in loaded_names and "kanban-worker" not in unresolved:
+        argv_skills.append("kanban-worker")
     for skill in task_skills:
         # Keep the operator-requested identifier. The resolver may report a
         # canonical frontmatter name that differs from a qualified path or
@@ -6040,12 +6215,12 @@ def _default_spawn(
     # task-forced skills fail during preflight before this subprocess starts.
     for skill in argv_skills:
         cmd.extend(["--skills", skill])
+    cmd.append("chat")
+    # The chat subparser owns -m; placing it before `chat` is overwritten
+    # by the subparser's default and silently uses the profile model.
     if task.model_override:
         cmd.extend(["-m", task.model_override])
-    cmd.extend([
-        "chat",
-        "-q", prompt,
-    ])
+    cmd.extend(["-q", prompt])
     # Redirect output to a per-task log under <board-root>/logs/.
     # Anchored at the board root (not the shared kanban root), so
     # `hermes kanban log` on a specific board reads its own file and

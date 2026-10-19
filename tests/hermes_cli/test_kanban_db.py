@@ -755,7 +755,13 @@ def test_complete_records_result(kanban_home):
     assert task.completed_at is not None
 
 
-def test_complete_rolls_up_parent_artifacts_to_dependent_root_event(kanban_home):
+def test_complete_rolls_up_parent_artifacts_to_dependent_root_event(kanban_home, tmp_path):
+    # The dependent promotion now reads back every declared parent artifact.
+    for filename in ("prd.md", "shared-receipt.json", "report.html", "evidence.png"):
+        (tmp_path / filename).write_text("receipt")
+    def artifact(filename):
+        return str(tmp_path / filename)
+
     with kb.connect() as conn:
         prd = kb.create_task(conn, title="prd producer")
         report = kb.create_task(conn, title="report producer")
@@ -765,7 +771,7 @@ def test_complete_rolls_up_parent_artifacts_to_dependent_root_event(kanban_home)
             conn,
             prd,
             result="prd done",
-            metadata={"artifacts": ["/tmp/prd.md", "/tmp/shared-receipt.json"]},
+            metadata={"artifacts": [artifact("prd.md"), artifact("shared-receipt.json")]},
         )
         assert kb.complete_task(
             conn,
@@ -773,9 +779,9 @@ def test_complete_rolls_up_parent_artifacts_to_dependent_root_event(kanban_home)
             result="report done",
             metadata={
                 "artifacts": [
-                    "/tmp/report.html",
-                    "/tmp/shared-receipt.json",
-                    {"path": "/tmp/evidence.png", "kind": "validation"},
+                    artifact("report.html"),
+                    artifact("shared-receipt.json"),
+                    {"path": artifact("evidence.png"), "kind": "validation"},
                 ]
             },
         )
@@ -783,18 +789,18 @@ def test_complete_rolls_up_parent_artifacts_to_dependent_root_event(kanban_home)
             conn,
             root,
             result="root done",
-            metadata={"artifacts": ["/tmp/root-summary.md", "/tmp/prd.md"]},
+            metadata={"artifacts": [artifact("root-summary.md"), artifact("prd.md")]},
         )
 
         completed = [e for e in kb.list_events(conn, root) if e.kind == "completed"][-1]
         root_run = kb.latest_run(conn, root)
 
     assert completed.payload["artifacts"] == [
-        "/tmp/root-summary.md",
-        "/tmp/prd.md",
-        "/tmp/shared-receipt.json",
-        "/tmp/report.html",
-        {"path": "/tmp/evidence.png", "kind": "validation", "producer_task_id": report},
+        artifact("root-summary.md"),
+        artifact("prd.md"),
+        artifact("shared-receipt.json"),
+        artifact("report.html"),
+        {"path": artifact("evidence.png"), "kind": "validation", "producer_task_id": report},
     ]
     assert completed.payload["descendant_task_ids"] == [prd, report]
     assert completed.payload["producer_task_ids"] == [prd, report]
@@ -2099,8 +2105,12 @@ class TestSharedBoardPaths:
             claim_expires=None,
             tenant=None,
             branch_name="wt/t_dispatch_env",
+            model_override="gpt-6-sol",
         )
         kb._default_spawn(task, str(tmp_path / "ws"))
+        cmd = captured["cmd"]
+        assert cmd.index("chat") < cmd.index("-m")
+        assert cmd[cmd.index("-m") + 1] == "gpt-6-sol"
 
         env = captured["env"]
         assert env["HERMES_KANBAN_DB"] == str(default_home / "kanban.db")
