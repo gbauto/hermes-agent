@@ -5537,7 +5537,17 @@ def dispatch_once(
     if _crash_auto_blocked:
         result.auto_blocked.extend(_crash_auto_blocked)
     result.timed_out = enforce_max_runtime(conn)
-    result.promoted = recompute_ready(conn)
+    # Reconcile a bounded, deterministic slice of unclaimed todo cards before
+    # legacy promotion. Do not sweep blocked/running/done cards here: task-local
+    # reconciliation is not a retry or recovery policy. Keep the existing
+    # promotion path for remaining cards; the reconciliation workload itself
+    # must not grow with the entire todo queue.
+    for candidate in conn.execute(
+        "SELECT id FROM tasks WHERE status = 'todo' AND claim_lock IS NULL "
+        "ORDER BY priority DESC, created_at ASC, id ASC LIMIT 128"
+    ).fetchall():
+        result.promoted += int(reconcile_task_state(conn, candidate["id"])["changed"])
+    result.promoted += recompute_ready(conn)
 
     # Count tasks already running so max_spawn enforces concurrency rather
     # than a per-tick spawn budget. See the docstring above for the full
@@ -5742,8 +5752,7 @@ def dispatch_once(
         if dry_run:
             task_for_preflight = get_task(conn, row["id"])
             if task_for_preflight is not None:
-                task_for_preflight._injected_review_skill = "sdlc-review" not in (task_for_preflight.skills or [])
-                task_for_preflight.skills = ["sdlc-review"]
+                _add_review_skill(task_for_preflight)
                 from hermes_cli.profiles import normalize_profile_name
 
                 profile_arg = normalize_profile_name(
@@ -5763,8 +5772,7 @@ def dispatch_once(
         claimed = claim_review_task(conn, row["id"], ttl_seconds=ttl_seconds)
         if claimed is None:
             continue
-        claimed._injected_review_skill = "sdlc-review" not in (claimed.skills or [])
-        claimed.skills = ["sdlc-review"]
+        _add_review_skill(claimed)
         from hermes_cli.profiles import normalize_profile_name
 
         profile_arg = normalize_profile_name(claimed.assignee or "")
@@ -5818,6 +5826,15 @@ def dispatch_once(
             if auto:
                 result.auto_blocked.append(claimed.id)
     return result
+
+
+def _add_review_skill(task: Task) -> None:
+    """Inject the optional review default without dropping explicit requirements."""
+    skills = list(task.skills or [])
+    task._injected_review_skill = "sdlc-review" not in skills
+    if task._injected_review_skill:
+        skills.append("sdlc-review")
+    task.skills = skills
 
 
 def _positive_int(value: Any, default: int, *, minimum: int = 1) -> int:
