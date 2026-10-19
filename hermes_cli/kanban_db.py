@@ -71,6 +71,7 @@ new locking.
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import json
 import os
 import re
@@ -1672,8 +1673,9 @@ def get_task(conn: sqlite3.Connection, task_id: str) -> Optional[Task]:
 def reconcile_existing_prd_metadata(
     conn: sqlite3.Connection, task_id: str, *, expected_status: str,
     expected_run_count: int, prd_id: str, prd_path: str, actor: str, reason: str,
+    adoption_receipt_path: str,
 ) -> dict[str, Any]:
-    """One-shot PRD stamp on an unrun todo/blocked card with atomic readback.
+    """One-shot PRD stamp on an unrun descendant of the adopted plan root.
 
     Refuses any prior stamp, any run (even ended runs), or an active claim.
     Does not alter scheduling, task text, links or run records.
@@ -1689,8 +1691,60 @@ def reconcile_existing_prd_metadata(
     if (not isinstance(prd_path, str) or not prd_path.startswith("/")
             or not prd_path.strip() or len(prd_path) > 4096 or "\x00" in prd_path):
         raise ValueError("prd_path must be an absolute path of at most 4096 characters")
+    if not isinstance(adoption_receipt_path, str) or not adoption_receipt_path.startswith("/"):
+        raise ValueError("adoption_receipt_path must be absolute")
+    try:
+        receipt_file = Path(adoption_receipt_path).resolve(strict=True)
+        receipt = json.loads(receipt_file.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise ValueError("adoption receipt cannot be read") from exc
+    if not isinstance(receipt, dict):
+        raise ValueError("invalid adoption receipt identity")
+    artifacts = receipt.get("prd_artifacts")
+    links = receipt.get("kanban_dispatch_links")
+    if (receipt.get("schema_version") != "gbauto-plan-artifact-adoption.v1"
+            or receipt.get("ok") is not True or not isinstance(artifacts, dict)
+            or artifacts.get("schema_version") != "prd_artifacts.identity.v1"
+            or not isinstance(links, dict) or links.get("readback_ok") is not True
+            or links.get("schema_version") != "prd_kanban_dispatch_links.identity.v1"):
+        raise ValueError("invalid adoption receipt identity")
+    root_id = links.get("root_task_id")
+    digest = artifacts.get("canonical_plan_sha256")
+    relative = artifacts.get("canonical_plan_path")
+    if (not isinstance(root_id, str) or not root_id.startswith("t_")
+            or not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest)
+            or not isinstance(relative, str) or Path(relative).is_absolute()
+            or ".." in Path(relative).parts
+            or not isinstance(receipt.get("source"), dict)
+            or receipt["source"].get("sha256") != digest
+            or artifacts.get("prd_id") != prd_id):
+        raise ValueError("adoption receipt ID, path or hash mismatch")
+    # Receipt is under <repo>/artifacts/plan-renders/adopted-plans/.
+    repo = receipt_file.parent.parent.parent.parent
+    if receipt_file.parent != repo / "artifacts" / "plan-renders" / "adopted-plans":
+        raise ValueError("adoption receipt is outside its expected repository location")
+    try:
+        plan = (repo / relative).resolve(strict=True)
+        requested = Path(prd_path).resolve(strict=True)
+        actual_digest = hashlib.sha256(plan.read_bytes()).hexdigest()
+    except OSError as exc:
+        raise ValueError("canonical PRD cannot be read") from exc
+    if (plan != requested or prd_path != str(plan)
+            or not plan.is_relative_to(repo)
+            or actual_digest != digest):
+        raise ValueError("canonical PRD path or content does not match adoption receipt")
     metadata = {"prd_id": prd_id, "prd_path": prd_path}
     with write_txn(conn):
+        lineage = conn.execute(
+            """WITH RECURSIVE ancestors(id) AS (
+                 SELECT parent_id FROM task_links WHERE child_id = ?
+                 UNION SELECT task_links.parent_id FROM task_links
+                 JOIN ancestors ON task_links.child_id = ancestors.id
+               ) SELECT 1 FROM ancestors JOIN tasks ON tasks.id = ancestors.id
+               WHERE ancestors.id = ?""", (task_id, root_id),
+        ).fetchone()
+        if lineage is None:
+            raise ValueError("card is not descended from adoption receipt root task")
         updated = conn.execute(
             """UPDATE tasks SET prd_metadata = ?
                WHERE id = ? AND status = ? AND prd_metadata IS NULL
@@ -1704,26 +1758,42 @@ def reconcile_existing_prd_metadata(
             "prd_id": prd_id, "prd_path": prd_path, "actor": actor,
             "reason": reason, "expected_status": expected_status,
             "expected_run_count": expected_run_count,
+            "root_task_id": root_id, "canonical_plan_sha256": digest,
+            "adoption_receipt_path": str(receipt_file),
         }
         _append_event(conn, task_id, "prd_metadata_reconciled", audit_payload)
         event_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
-        task = get_task(conn, task_id)
-        event = conn.execute(
-            "SELECT kind, payload, run_id FROM task_events WHERE id = ? AND task_id = ?",
-            (event_id, task_id),
-        ).fetchone()
-        run_count = conn.execute(
-            "SELECT COUNT(*) FROM task_runs WHERE task_id = ?", (task_id,)
-        ).fetchone()[0]
-        if (task is None or task.status != expected_status
-                or task.prd_metadata != metadata or run_count != 0 or event is None
-                or event["kind"] != "prd_metadata_reconciled" or event["run_id"] is not None
-                or json.loads(event["payload"]) != audit_payload):
-            raise RuntimeError("PRD metadata readback failed")
-        return {"task_id": task.id, "status": task.status,
-                "run_count": run_count, "prd_metadata": task.prd_metadata,
-                "event_id": event_id, "event_kind": event["kind"],
-                "event_payload": json.loads(event["payload"]), "event_run_id": event["run_id"]}
+    # A new read-only connection, after write_txn has committed. Never issue
+    # a success receipt based solely on the writer's transaction snapshot.
+    db_file = conn.execute("PRAGMA database_list").fetchone()[2]
+    try:
+        with sqlite3.connect(Path(db_file).resolve().as_uri() + "?mode=ro", uri=True) as reader:
+            reader.row_factory = sqlite3.Row
+            task = get_task(reader, task_id)
+            event = reader.execute(
+                "SELECT kind, payload, run_id FROM task_events WHERE id = ? AND task_id = ?",
+                (event_id, task_id),
+            ).fetchone()
+            run_count = reader.execute(
+                "SELECT COUNT(*) FROM task_runs WHERE task_id = ?", (task_id,)
+            ).fetchone()[0]
+            event_count = reader.execute(
+                "SELECT COUNT(*) FROM task_events WHERE task_id = ? AND kind = 'prd_metadata_reconciled'",
+                (task_id,),
+            ).fetchone()[0]
+            if (task is None or task.status != expected_status
+                    or task.prd_metadata != metadata or run_count != 0 or event_count != 1
+                    or task.current_run_id is not None or task.claim_lock is not None
+                    or event is None or event["kind"] != "prd_metadata_reconciled"
+                    or event["run_id"] is not None or json.loads(event["payload"]) != audit_payload):
+                raise RuntimeError("post-commit PRD metadata readback failed")
+    except (sqlite3.Error, OSError, ValueError) as exc:
+        raise RuntimeError("post-commit PRD metadata readback failed") from exc
+    return {"task_id": task_id, "status": expected_status,
+            "run_count": run_count, "prd_metadata": metadata,
+            "event_id": event_id, "event_kind": "prd_metadata_reconciled",
+            "event_payload": audit_payload, "event_run_id": None,
+            "post_commit_readback_ok": True}
 
 
 # Canonical sort-order mappings for ``hermes kanban list --sort``.

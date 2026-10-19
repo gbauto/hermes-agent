@@ -543,6 +543,9 @@ def build_parser(parent_subparsers: argparse._SubParsersAction) -> argparse.Argu
                        help="Explicit optimistic guard: only zero-run cards are supported")
     p_prd.add_argument("--prd-id", required=True)
     p_prd.add_argument("--prd-path", required=True)
+    p_prd.add_argument("--adoption-receipt", required=True, help="Absolute adoption receipt JSON path")
+    p_prd.add_argument("--expected-db-path", required=True,
+                       help="Absolute canonical board kanban.db path pinned by operator")
     p_prd.add_argument("--actor", required=True)
     p_prd.add_argument("--reason", required=True)
     p_prd.add_argument("--json", action="store_true", help="Print atomic readback receipt")
@@ -883,6 +886,16 @@ def kanban_command(args: argparse.Namespace) -> int:
             return 1
         os.environ["HERMES_KANBAN_BOARD"] = normed
         restore_board_env = True
+
+    if action == "reconcile-prd":
+        # Fail before init_db: a redirected home must not initialize an unintended board.
+        expected = args.expected_db_path
+        resolved = kb.kanban_db_path(board_override).resolve()
+        if (not os.path.isabs(expected) or os.path.normpath(expected) != str(resolved)
+                or not resolved.is_file()):
+            print("kanban: resolved board DB differs from --expected-db-path or is missing", file=sys.stderr)
+            _restore_board_env()
+            return 2
 
     # Auto-initialize the DB before dispatching any subcommand. init_db
     # is idempotent, so running it every invocation is cheap (one
@@ -1918,13 +1931,18 @@ def _cmd_edit(args: argparse.Namespace) -> int:
 
 def _cmd_reconcile_prd(args: argparse.Namespace) -> int:
     with kb.connect() as conn:
+        actual = conn.execute("PRAGMA database_list").fetchone()[2]
+        if os.path.realpath(actual) != args.expected_db_path:
+            raise ValueError("connected board DB differs from --expected-db-path")
         receipt = kb.reconcile_existing_prd_metadata(
             conn, args.task_id, expected_status=args.expected_status,
             expected_run_count=args.expected_run_count,
             prd_id=args.prd_id, prd_path=args.prd_path,
+            adoption_receipt_path=args.adoption_receipt,
             actor=args.actor, reason=args.reason,
         )
     receipt["board"] = kb._normalize_board_slug(args.board)
+    receipt["board_db_path"] = args.expected_db_path
     if args.json:
         print(json.dumps(receipt, ensure_ascii=False, sort_keys=True))
     else:
