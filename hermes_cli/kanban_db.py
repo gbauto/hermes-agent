@@ -660,6 +660,8 @@ class Task:
     # JSON array of skill names. None = use only the defaults; empty
     # list = explicitly no extra skills.
     skills: Optional[list] = None
+    # In-memory dispatch provenance; never persisted as an operator request.
+    _injected_review_skill: bool = False
     model_override: Optional[str] = None
     # Per-task override for the consecutive-failure circuit breaker.
     # The value is the failure count at which the breaker trips — e.g.
@@ -3413,6 +3415,34 @@ def _cleanup_ancestor_workspaces(conn: sqlite3.Connection, task_id: str) -> None
         _cleanup_workspace(conn, row["id"])
 
 
+def _advertised_scratch_artifacts(conn: sqlite3.Connection, task_id: str, workspace: Path) -> list[str]:
+    """Find local completion receipts in scratch that must outlive dependents."""
+    row = conn.execute(
+        "SELECT payload FROM task_events WHERE task_id = ? AND kind = 'completed' "
+        "ORDER BY id DESC LIMIT 1", (task_id,),
+    ).fetchone()
+    if not row:
+        return []
+    try:
+        payload = json.loads(row["payload"])
+    except (TypeError, ValueError):
+        # Never delete evidence when its receipt cannot be inspected.
+        return [str(workspace)]
+    if not isinstance(payload, dict):
+        return [str(workspace)]
+    paths = []
+    for item in _clean_artifact_items(payload.get("artifacts")):
+        path = item if isinstance(item, str) else (
+            item.get("path") or item.get("file") or item.get("file_path")
+        )
+        if not isinstance(path, str) or not path.strip() or path.startswith(("http://", "https://")):
+            continue
+        candidate = Path(path).expanduser()
+        if candidate.is_absolute() and candidate.resolve(strict=False).is_relative_to(workspace) and candidate.exists():
+            paths.append(str(candidate))
+    return paths
+
+
 def _cleanup_workspace(conn: sqlite3.Connection, task_id: str) -> None:
     """Remove a task's scratch workspace dir and kill its stale tmux session.
 
@@ -3458,6 +3488,7 @@ def _cleanup_workspace(conn: sqlite3.Connection, task_id: str) -> None:
                 "WHERE c.status NOT IN ('done', 'archived') ORDER BY d.id",
                 (task_id,),
             ).fetchall()]
+            artifacts = _advertised_scratch_artifacts(conn, task_id, wp)
             if owners:
                 # The receipt identifies the exact dependent owners; once all
                 # finish, their completion triggers a final cleanup pass.
@@ -3465,6 +3496,10 @@ def _cleanup_workspace(conn: sqlite3.Connection, task_id: str) -> None:
                     _append_event(conn, task_id, "scratch_evidence_preserved", {
                         "workspace_path": str(wp), "dependent_owners": owners,
                     })
+            elif artifacts:
+                # Completion events and run metadata still advertise these
+                # paths after the final dependent has finished or archived.
+                _log.debug("Preserved advertised scratch artifacts for %s: %s", task_id, artifacts)
             else:
                 shutil.rmtree(wp, ignore_errors=True)
                 _log.debug("Removed scratch workspace: %s", wp)
@@ -5707,6 +5742,7 @@ def dispatch_once(
         if dry_run:
             task_for_preflight = get_task(conn, row["id"])
             if task_for_preflight is not None:
+                task_for_preflight._injected_review_skill = "sdlc-review" not in (task_for_preflight.skills or [])
                 task_for_preflight.skills = ["sdlc-review"]
                 from hermes_cli.profiles import normalize_profile_name
 
@@ -5727,6 +5763,7 @@ def dispatch_once(
         claimed = claim_review_task(conn, row["id"], ttl_seconds=ttl_seconds)
         if claimed is None:
             continue
+        claimed._injected_review_skill = "sdlc-review" not in (claimed.skills or [])
         claimed.skills = ["sdlc-review"]
         from hermes_cli.profiles import normalize_profile_name
 
@@ -6020,12 +6057,12 @@ def _worker_model_preflight(task: Task, hermes_home: Optional[str]) -> dict[str,
         if not isinstance(config, dict):
             raise ValueError("profile config must be a mapping")
         model_config = config.get("model")
-        provider = config.get("provider") or (
+        provider = (
             model_config.get("provider") if isinstance(model_config, dict) else None
-        )
+        ) or config.get("provider")
         if not model:
             default_model = (
-                model_config.get("default") or model_config.get("name") or model_config.get("model")
+                model_config.get("default") or model_config.get("model")
                 if isinstance(model_config, dict) else model_config
             )
             model = str(default_model or "").strip()
@@ -6065,9 +6102,11 @@ def _worker_skill_preflight(
         for skill in (task.skills or [])
         if str(skill).strip()
     ]
-    # The dispatcher injects sdlc-review for review-column tasks; preserve
-    # its historical best-effort behavior. Other explicit task skills must load.
-    forced = [skill for skill in task_skills if skill != "sdlc-review"]
+    # A review-column dispatch injects sdlc-review into an in-memory task;
+    # distinguish that default from an operator's explicitly requested skill.
+    forced = [skill for skill in task_skills if not (
+        skill == "sdlc-review" and getattr(task, "_injected_review_skill", False)
+    )]
     for skill in task_skills:
         if skill not in requested:
             requested.append(skill)

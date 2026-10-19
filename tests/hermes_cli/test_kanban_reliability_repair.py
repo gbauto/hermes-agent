@@ -42,6 +42,40 @@ def test_codex_bad_override_blocks_before_claim(isolated_home, monkeypatch, all_
         assert kb.get_task(conn, tid).status == "blocked"
 
 
+@pytest.mark.parametrize(
+    ("config", "effective_provider"),
+    [
+        ("provider: anthropic\nmodel:\n  provider: openai-codex\n  default: gpt-5.5\n", "openai-codex"),
+        ("provider: openai-codex\nmodel:\n  provider: anthropic\n  default: gpt-5.5\n", "anthropic"),
+    ],
+)
+def test_model_provider_precedence_matches_cli(isolated_home, config, effective_provider):
+    (isolated_home / "config.yaml").write_text(config)
+    with kb.connect() as conn:
+        tid = kb.create_task(conn, title="nested provider", assignee="builder")
+        task = kb.get_task(conn, tid)
+        assert task is not None
+        if effective_provider == "openai-codex":
+            with pytest.raises(kb.WorkerSkillReadinessError) as exc:
+                kb._worker_model_preflight(task, str(isolated_home))
+            assert exc.value.payload["provider"] == effective_provider
+            assert exc.value.payload["effective_model"] == "gpt-5.5"
+        else:
+            assert kb._worker_model_preflight(task, str(isolated_home))["provider"] == effective_provider
+
+
+def test_model_default_wins_over_legacy_model_name(isolated_home):
+    (isolated_home / "config.yaml").write_text(
+        "model:\n  provider: openai-codex\n  default: gpt-5.5\n  model: gpt-6-sol\n"
+    )
+    with kb.connect() as conn:
+        task = kb.get_task(conn, kb.create_task(conn, title="effective default"))
+        assert task is not None
+        with pytest.raises(kb.WorkerSkillReadinessError) as exc:
+            kb._worker_model_preflight(task, str(isolated_home))
+        assert exc.value.payload["effective_model"] == "gpt-5.5"
+
+
 def test_explicit_builtin_missing_is_required(isolated_home, all_assignees_spawnable):
     with kb.connect() as conn:
         tid = kb.create_task(conn, title="required builtin", assignee="builder", skills=["kanban-worker"])
@@ -164,7 +198,26 @@ def test_multihop_rolled_scratch_survives_intermediate_completion(isolated_home)
         assert receipt.read_text() == "original"  # D still owns the rolled-up A receipt.
         assert kb.claim_task(conn, d) is not None
         assert kb.complete_task(conn, d)
-        assert not workspace.exists()
+        # The completed producer and closeout events still advertise this path.
+        assert receipt.read_text() == "original"
+        events = [e for e in kb.list_events(conn, d) if e.kind == "completed"]
+        assert str(receipt) in str(events[-1].payload)
+
+
+def test_archiving_final_dependent_preserves_advertised_scratch(isolated_home):
+    with kb.connect() as conn:
+        producer = kb.create_task(conn, title="producer")
+        consumer = kb.create_task(conn, title="consumer", parents=[producer])
+        task = kb.get_task(conn, producer)
+        assert task is not None
+        workspace = kb.resolve_workspace(task)
+        kb.set_workspace_path(conn, producer, workspace)
+        artifact = workspace / "report.txt"
+        artifact.write_text("durable receipt")
+        assert kb.complete_task(conn, producer, metadata={"artifacts": [{"path": str(artifact)}]})
+        assert kb.archive_task(conn, consumer)
+        assert artifact.read_text() == "durable receipt"
+        assert str(artifact) in str([e.payload for e in kb.list_events(conn, producer) if e.kind == "completed"])
 
 
 def test_malformed_completion_event_blocks_promotion_and_claim(isolated_home):

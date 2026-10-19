@@ -76,6 +76,35 @@ def test_missing_forced_skill_fails_dry_run_before_spawn(
         assert task.status == "ready"
 
 
+def test_explicit_review_skill_is_mandatory_but_injected_review_is_best_effort(
+    kanban_home, all_assignees_spawnable
+):
+    with kb.connect() as conn:
+        explicit = kb.create_task(conn, title="forced review", assignee="builder", skills=["sdlc-review"])
+        result = kb.dispatch_once(conn, dry_run=True)
+        assert any(tid == explicit and "missing required skill" in reason
+                   for tid, reason in result.readiness_failed)
+        task = kb.get_task(conn, explicit)
+        assert task is not None
+        task._injected_review_skill = True
+        argv, payload = kb._worker_skill_preflight(
+            task, profile_arg="builder", hermes_home=str(kanban_home),
+        )
+        assert "sdlc-review" not in argv
+        assert payload["missing_required_skills"] == []
+
+
+def test_explicit_review_skill_collision_is_mandatory(kanban_home):
+    _write_skill(kanban_home, "alpha/sdlc-review", name="sdlc-review")
+    _write_skill(kanban_home, "beta/sdlc-review", name="sdlc-review")
+    with kb.connect() as conn:
+        tid = kb.create_task(conn, title="forced review", skills=["sdlc-review"])
+        task = kb.get_task(conn, tid)
+        assert task is not None
+        with pytest.raises(kb.WorkerSkillReadinessError, match="ambiguous skill"):
+            kb._worker_skill_preflight(task, profile_arg="builder", hermes_home=str(kanban_home))
+
+
 def test_ambiguous_forced_skill_fails_readiness(
     kanban_home, all_assignees_spawnable
 ):
