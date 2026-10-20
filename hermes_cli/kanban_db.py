@@ -3453,10 +3453,20 @@ def _cleanup_workspace(conn: sqlite3.Connection, task_id: str) -> None:
     """
     try:
         row = conn.execute(
-            "SELECT workspace_kind, workspace_path FROM tasks WHERE id = ?",
+            "SELECT status, workspace_kind, workspace_path FROM tasks WHERE id = ?",
             (task_id,),
         ).fetchone()
         if not row:
+            return
+        # Archive can interrupt a running task. Archive alone is not proof of
+        # completion. Guard the deletion boundary, including ancestor cleanup
+        # and explicit retries, not just the board-wide retry selector.
+        if row["status"] != "done" and not (
+            row["status"] == "archived" and conn.execute(
+                "SELECT 1 FROM task_events WHERE task_id = ? AND kind = 'completed' LIMIT 1",
+                (task_id,),
+            ).fetchone()
+        ):
             return
         kind: Optional[str] = row["workspace_kind"]
         path: Optional[str] = row["workspace_path"]
@@ -3550,6 +3560,11 @@ def retry_failed_scratch_cleanup(conn: sqlite3.Connection, task_id: str) -> bool
         return False
     if task.status not in ("done", "archived") or task.workspace_kind != "scratch" or not task.workspace_path:
         return False
+    if task.status == "archived" and not conn.execute(
+        "SELECT 1 FROM task_events WHERE task_id = ? AND kind = 'completed' LIMIT 1",
+        (task_id,),
+    ).fetchone():
+        return False
     _cleanup_workspace(conn, task_id)
     latest = conn.execute(
         "SELECT kind FROM task_events WHERE task_id = ? "
@@ -3566,14 +3581,17 @@ def _retry_pending_scratch_cleanup(conn: sqlite3.Connection, *, limit: int = 16)
     """Retry a bounded, rotating batch on normal board-wide ticks.
 
     Includes completed scratch with no receipt when the pre-delete intent
-    could not commit. Receipt paths are never trusted: cleanup rechecks the
-    canonical workspace location, dependent ownership, and advertised artifacts.
+    could not commit. Archive alone is not completion: archived candidates
+    require a durable completed event. Receipt paths are never trusted: cleanup
+    rechecks the canonical workspace, completion, ownership, and artifacts.
     """
     global _scratch_retry_cursor
     if limit <= 0:
         return
     rows = conn.execute(
-        "SELECT t.id FROM tasks t WHERE t.status IN ('done', 'archived') "
+        "SELECT t.id FROM tasks t WHERE (t.status = 'done' OR "
+        "(t.status = 'archived' AND EXISTS (SELECT 1 FROM task_events c "
+        "WHERE c.task_id = t.id AND c.kind = 'completed'))) "
         "AND t.workspace_kind = 'scratch' AND t.workspace_path IS NOT NULL "
         "AND COALESCE((SELECT e.kind FROM task_events e WHERE e.task_id = t.id "
         "AND e.kind IN ('scratch_cleanup_started', 'scratch_cleanup_failed', "

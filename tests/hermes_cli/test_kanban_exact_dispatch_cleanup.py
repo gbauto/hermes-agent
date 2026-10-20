@@ -203,6 +203,60 @@ def test_success_receipt_failure_after_delete_recovers_missing_path(board, monke
         ]
 
 
+@pytest.mark.parametrize("has_intent", [False, True])
+def test_archived_running_scratch_survives_unselected_tick_and_explicit_retry(board, has_intent):
+    kb, _ = board
+    with kb.connect() as conn:
+        tid = kb.create_task(conn, title="unfinished worker scratch")
+        workspace = kb.resolve_workspace(kb.get_task(conn, tid))
+        kb.set_workspace_path(conn, tid, workspace)
+        unfinished = workspace / "unfinished.txt"
+        unfinished.write_text("do not delete")
+        assert kb.claim_task(conn, tid)
+        assert kb.archive_task(conn, tid)
+        assert kb.get_task(conn, tid).status == "archived"
+        assert not any(e.kind == "completed" for e in kb.list_events(conn, tid))
+        # An ordinary board-wide dispatch must not mistake archive for
+        # completion, with or without a stale cleanup intent.
+        if has_intent:
+            with kb.write_txn(conn):
+                kb._append_event(conn, tid, "scratch_cleanup_started", {"workspace_path": str(workspace)})
+        assert not kb.retry_failed_scratch_cleanup(conn, tid)
+        assert kb.dispatch_once(conn).spawned == []
+        assert unfinished.read_text() == "do not delete"
+        assert not any(e.kind == "scratch_cleanup_succeeded" for e in kb.list_events(conn, tid))
+
+
+def test_archived_completed_legacy_missing_intent_recovers_on_tick(board, monkeypatch):
+    kb, _ = board
+    with kb.connect() as conn:
+        tid = kb.create_task(conn, title="completed legacy fallback")
+        workspace = kb.resolve_workspace(kb.get_task(conn, tid))
+        kb.set_workspace_path(conn, tid, workspace)
+        (workspace / "disposable.txt").write_text("completed")
+        original = kb._append_event
+
+        def fail_intent(conn, task_id, kind, *args, **kwargs):
+            if task_id == tid and kind == "scratch_cleanup_started":
+                raise OSError("simulated legacy missing intent")
+            return original(conn, task_id, kind, *args, **kwargs)
+
+        with monkeypatch.context() as m:
+            m.setattr(kb, "_append_event", fail_intent)
+            assert kb.complete_task(conn, tid)
+        assert workspace.exists()
+        assert kb.archive_task(conn, tid)
+        assert not any(e.kind.startswith("scratch_cleanup_") for e in kb.list_events(conn, tid))
+        assert any(e.kind == "completed" for e in kb.list_events(conn, tid))
+        kb.dispatch_once(conn, dry_run=True)
+        assert workspace.exists()
+        kb.dispatch_once(conn)
+        assert not workspace.exists()
+        assert [e.kind for e in kb.list_events(conn, tid) if e.kind.startswith("scratch_cleanup_")] == [
+            "scratch_cleanup_started", "scratch_cleanup_succeeded",
+        ]
+
+
 def test_retry_batch_is_bounded_and_rotates(board, monkeypatch):
     kb, _ = board
     with kb.connect() as conn:
