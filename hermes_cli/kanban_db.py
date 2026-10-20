@@ -3477,7 +3477,13 @@ def _cleanup_workspace(conn: sqlite3.Connection, task_id: str) -> None:
                 task_id,
                 wp,
             )
-        elif wp.is_dir():
+        elif wp.is_dir() or (
+            wp.parent == root and wp.name == task_id and not wp.exists()
+            and conn.execute(
+                "SELECT 1 FROM task_events WHERE task_id = ? AND kind = 'scratch_cleanup_failed' LIMIT 1",
+                (task_id,),
+            ).fetchone()
+        ):
             # Preserve producer scratch only while a dependent owns the
             # handoff. Standalone scratch has no owner and remains ephemeral.
             owners = [row["id"] for row in conn.execute(
@@ -3501,13 +3507,48 @@ def _cleanup_workspace(conn: sqlite3.Connection, task_id: str) -> None:
                 # paths after the final dependent has finished or archived.
                 _log.debug("Preserved advertised scratch artifacts for %s: %s", task_id, artifacts)
             else:
-                shutil.rmtree(wp, ignore_errors=True)
-                _log.debug("Removed scratch workspace: %s", wp)
+                try:
+                    if wp.exists():
+                        shutil.rmtree(wp)
+                except OSError as exc:
+                    _log.warning("Scratch cleanup failed for %s: %s", task_id, exc)
+                    with write_txn(conn):
+                        _append_event(conn, task_id, "scratch_cleanup_failed", {
+                            "workspace_path": str(wp), "error": str(exc),
+                            "retry": "retry_failed_scratch_cleanup",
+                        })
+                else:
+                    with write_txn(conn):
+                        _append_event(conn, task_id, "scratch_cleanup_succeeded", {
+                            "workspace_path": str(wp),
+                        })
+                    _log.debug("Removed scratch workspace: %s", wp)
         # Also kill the tmux session for the worker that owned this task,
         # if the tmux session is now dead (worker process exited).
         _cleanup_worker_tmux(conn, task_id)
     except Exception:
         pass  # best-effort — never block completion
+
+
+def retry_failed_scratch_cleanup(conn: sqlite3.Connection, task_id: str) -> bool:
+    """Retry an outstanding cleanup receipt using the normal path/evidence guards."""
+    row = conn.execute(
+        "SELECT kind FROM task_events WHERE task_id = ? "
+        "AND kind IN ('scratch_cleanup_failed', 'scratch_cleanup_succeeded') "
+        "ORDER BY id DESC LIMIT 1", (task_id,),
+    ).fetchone()
+    task = get_task(conn, task_id)
+    if not row or row["kind"] != "scratch_cleanup_failed" or task is None:
+        return False
+    if task.status not in ("done", "archived") or task.workspace_kind != "scratch" or not task.workspace_path:
+        return False
+    _cleanup_workspace(conn, task_id)
+    latest = conn.execute(
+        "SELECT kind FROM task_events WHERE task_id = ? "
+        "AND kind IN ('scratch_cleanup_failed', 'scratch_cleanup_succeeded') "
+        "ORDER BY id DESC LIMIT 1", (task_id,),
+    ).fetchone()
+    return bool(latest and latest["kind"] == "scratch_cleanup_succeeded")
 
 
 def _cleanup_worker_tmux(conn: sqlite3.Connection, task_id: str) -> None:
@@ -5459,6 +5500,7 @@ def dispatch_once(
     failure_limit: int = DEFAULT_SPAWN_FAILURE_LIMIT,
     stale_timeout_seconds: int = 0,
     board: Optional[str] = None,
+    task_id: Optional[str] = None,
 ) -> DispatchResult:
     """Run one dispatcher tick.
 
@@ -5489,6 +5531,10 @@ def dispatch_once(
     ``board`` pins workspace/log/db resolution for this tick to a specific
     board. When omitted, the current-board resolution chain is used.
     """
+    # Selected dispatch must never run board-wide recovery or promotion.
+    if task_id is not None and get_task(conn, task_id) is None:
+        raise ValueError(f"unknown task ID: {task_id}")
+
     # Reap zombie children from previously spawned workers.
     # The gateway-embedded dispatcher is the parent of every worker spawned
     # via _default_spawn (start_new_session=True only detaches the
@@ -5509,7 +5555,7 @@ def dispatch_once(
     # called explicitly.  The kanban dispatcher discards the Popen handle
     # after spawn (``_default_spawn`` → abandon), so on Windows there's
     # nothing to reap here — skip the whole block.
-    if os.name != "nt":
+    if task_id is None and not dry_run and os.name != "nt":
         try:
             while True:
                 try:
@@ -5523,31 +5569,38 @@ def dispatch_once(
             pass
 
     result = DispatchResult()
-    result.reclaimed = release_stale_claims(conn)
-    result.stale = detect_stale_running(
-        conn, stale_timeout_seconds=stale_timeout_seconds,
-    )
-    result.crashed = detect_crashed_workers(conn)
+    if task_id is None:
+        result.reclaimed = release_stale_claims(conn)
+        result.stale = detect_stale_running(
+            conn, stale_timeout_seconds=stale_timeout_seconds,
+        )
+        result.crashed = detect_crashed_workers(conn)
     # detect_crashed_workers stashes protocol-violation auto-blocks on
     # itself so the public list-return stays stable. Pull them into the
     # DispatchResult here so telemetry / tests see the trip.
     _crash_auto_blocked = getattr(
         detect_crashed_workers, "_last_auto_blocked", []
-    )
+    ) if task_id is None else []
     if _crash_auto_blocked:
         result.auto_blocked.extend(_crash_auto_blocked)
-    result.timed_out = enforce_max_runtime(conn)
+    if task_id is None:
+        result.timed_out = enforce_max_runtime(conn)
     # Reconcile a bounded, deterministic slice of unclaimed todo cards before
     # legacy promotion. Do not sweep blocked/running/done cards here: task-local
     # reconciliation is not a retry or recovery policy. Keep the existing
     # promotion path for remaining cards; the reconciliation workload itself
     # must not grow with the entire todo queue.
-    for candidate in conn.execute(
-        "SELECT id FROM tasks WHERE status = 'todo' AND claim_lock IS NULL "
-        "ORDER BY priority DESC, created_at ASC, id ASC LIMIT 128"
-    ).fetchall():
-        result.promoted += int(reconcile_task_state(conn, candidate["id"])["changed"])
-    result.promoted += recompute_ready(conn)
+    if task_id is None:
+        for candidate in conn.execute(
+            "SELECT id FROM tasks WHERE status = 'todo' AND claim_lock IS NULL "
+            "ORDER BY priority DESC, created_at ASC, id ASC LIMIT 128"
+        ).fetchall():
+            result.promoted += int(reconcile_task_state(conn, candidate["id"])["changed"])
+        result.promoted += recompute_ready(conn)
+    elif not dry_run:
+        selected = get_task(conn, task_id)
+        if selected is not None and selected.status == "todo" and selected.claim_lock is None:
+            result.promoted += int(reconcile_task_state(conn, task_id)["changed"])
 
     # Count tasks already running so max_spawn enforces concurrency rather
     # than a per-tick spawn budget. See the docstring above for the full
@@ -5567,7 +5620,9 @@ def dispatch_once(
     ready_rows = conn.execute(
         "SELECT id, assignee FROM tasks "
         "WHERE status = 'ready' AND claim_lock IS NULL "
-        "ORDER BY priority DESC, created_at ASC"
+        + ("AND id = ? " if task_id is not None else "")
+        + "ORDER BY priority DESC, created_at ASC",
+        (task_id,) if task_id is not None else (),
     ).fetchall()
     # Honour kanban.max_in_progress: if the board already has enough running
     # tasks, skip spawning this tick so slow workers (local LLMs,
@@ -5734,7 +5789,9 @@ def dispatch_once(
     review_rows = conn.execute(
         "SELECT id, assignee FROM tasks "
         "WHERE status = 'review' AND claim_lock IS NULL "
-        "ORDER BY priority DESC, created_at ASC"
+        + ("AND id = ? " if task_id is not None else "")
+        + "ORDER BY priority DESC, created_at ASC",
+        (task_id,) if task_id is not None else (),
     ).fetchall()
     for row in review_rows:
         if max_spawn is not None and running_count + spawned >= max_spawn:

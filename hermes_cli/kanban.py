@@ -588,6 +588,8 @@ def build_parser(parent_subparsers: argparse._SubParsersAction) -> argparse.Argu
     )
     p_disp.add_argument("--dry-run", action="store_true",
                         help="Don't actually spawn processes; just print what would happen")
+    p_disp.add_argument("--task-id", default=None,
+                        help="Dispatch only this exact task ID; do not sweep other tasks")
     p_disp.add_argument("--max", type=int, default=None,
                         help="Cap number of spawns this pass")
     p_disp.add_argument("--failure-limit", type=int,
@@ -2058,12 +2060,17 @@ def _cmd_tail(args: argparse.Namespace) -> int:
 
 def _cmd_dispatch(args: argparse.Namespace) -> int:
     with kb.connect() as conn:
-        res = kb.dispatch_once(
-            conn,
-            dry_run=args.dry_run,
-            max_spawn=args.max,
-            failure_limit=getattr(args, "failure_limit", kb.DEFAULT_SPAWN_FAILURE_LIMIT),
-        )
+        try:
+            res = kb.dispatch_once(
+                conn,
+                dry_run=args.dry_run,
+                max_spawn=args.max,
+                task_id=getattr(args, "task_id", None),
+                failure_limit=getattr(args, "failure_limit", kb.DEFAULT_SPAWN_FAILURE_LIMIT),
+            )
+        except ValueError as exc:
+            print(f"Dispatch refused: {exc}", file=sys.stderr)
+            return 2
     if getattr(args, "json", False):
         print(json.dumps({
             "reclaimed": res.reclaimed,
