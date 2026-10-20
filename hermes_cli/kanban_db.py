@@ -3478,9 +3478,9 @@ def _cleanup_workspace(conn: sqlite3.Connection, task_id: str) -> None:
                 wp,
             )
         elif wp.is_dir() or (
-            wp.parent == root and wp.name == task_id and not wp.exists()
-            and conn.execute(
-                "SELECT 1 FROM task_events WHERE task_id = ? AND kind = 'scratch_cleanup_failed' LIMIT 1",
+            not wp.exists() and conn.execute(
+                "SELECT 1 FROM task_events WHERE task_id = ? "
+                "AND kind IN ('scratch_cleanup_started', 'scratch_cleanup_failed') LIMIT 1",
                 (task_id,),
             ).fetchone()
         ):
@@ -3507,6 +3507,13 @@ def _cleanup_workspace(conn: sqlite3.Connection, task_id: str) -> None:
                 # paths after the final dependent has finished or archived.
                 _log.debug("Preserved advertised scratch artifacts for %s: %s", task_id, artifacts)
             else:
+                # Commit intent BEFORE irreversible deletion. If the failure or
+                # success receipt cannot commit, a later tick can still retry.
+                # If intent cannot commit, leave the workspace untouched.
+                with write_txn(conn):
+                    _append_event(conn, task_id, "scratch_cleanup_started", {
+                        "workspace_path": str(wp),
+                    })
                 try:
                     if wp.exists():
                         shutil.rmtree(wp)
@@ -3527,18 +3534,19 @@ def _cleanup_workspace(conn: sqlite3.Connection, task_id: str) -> None:
         # if the tmux session is now dead (worker process exited).
         _cleanup_worker_tmux(conn, task_id)
     except Exception:
-        pass  # best-effort — never block completion
+        _log.exception("Scratch workspace cleanup could not finish for %s", task_id)
+        # best-effort — never block completion
 
 
 def retry_failed_scratch_cleanup(conn: sqlite3.Connection, task_id: str) -> bool:
-    """Retry an outstanding cleanup receipt using the normal path/evidence guards."""
+    """Retry an outstanding cleanup intent using the normal path/evidence guards."""
     row = conn.execute(
         "SELECT kind FROM task_events WHERE task_id = ? "
-        "AND kind IN ('scratch_cleanup_failed', 'scratch_cleanup_succeeded') "
+        "AND kind IN ('scratch_cleanup_started', 'scratch_cleanup_failed', 'scratch_cleanup_succeeded') "
         "ORDER BY id DESC LIMIT 1", (task_id,),
     ).fetchone()
     task = get_task(conn, task_id)
-    if not row or row["kind"] != "scratch_cleanup_failed" or task is None:
+    if not row or row["kind"] not in ("scratch_cleanup_started", "scratch_cleanup_failed") or task is None:
         return False
     if task.status not in ("done", "archived") or task.workspace_kind != "scratch" or not task.workspace_path:
         return False
@@ -3549,6 +3557,46 @@ def retry_failed_scratch_cleanup(conn: sqlite3.Connection, task_id: str) -> bool
         "ORDER BY id DESC LIMIT 1", (task_id,),
     ).fetchone()
     return bool(latest and latest["kind"] == "scratch_cleanup_succeeded")
+
+
+_scratch_retry_cursor = ""
+
+
+def _retry_pending_scratch_cleanup(conn: sqlite3.Connection, *, limit: int = 16) -> None:
+    """Retry a bounded, rotating batch on normal board-wide ticks.
+
+    Includes completed scratch with no receipt when the pre-delete intent
+    could not commit. Receipt paths are never trusted: cleanup rechecks the
+    canonical workspace location, dependent ownership, and advertised artifacts.
+    """
+    global _scratch_retry_cursor
+    if limit <= 0:
+        return
+    rows = conn.execute(
+        "SELECT t.id FROM tasks t WHERE t.status IN ('done', 'archived') "
+        "AND t.workspace_kind = 'scratch' AND t.workspace_path IS NOT NULL "
+        "AND COALESCE((SELECT e.kind FROM task_events e WHERE e.task_id = t.id "
+        "AND e.kind IN ('scratch_cleanup_started', 'scratch_cleanup_failed', "
+        "'scratch_cleanup_succeeded') ORDER BY e.id DESC LIMIT 1), 'missing') "
+        "IN ('missing', 'scratch_cleanup_started', 'scratch_cleanup_failed') "
+        "ORDER BY (t.id > ?) DESC, t.id LIMIT ?", (_scratch_retry_cursor, limit),
+    ).fetchall()
+    for row in rows:
+        _scratch_retry_cursor = row["id"]
+        try:
+            if not retry_failed_scratch_cleanup(conn, row["id"]):
+                # No intent could be written at completion time. Only retry
+                # truly unreceipted rows; never re-open a succeeded cleanup.
+                receipt = conn.execute(
+                    "SELECT 1 FROM task_events WHERE task_id = ? AND "
+                    "kind IN ('scratch_cleanup_started', 'scratch_cleanup_failed', "
+                    "'scratch_cleanup_succeeded') LIMIT 1", (row["id"],),
+                ).fetchone()
+                task = get_task(conn, row["id"])
+                if not receipt and task and task.status in ("done", "archived"):
+                    _cleanup_workspace(conn, row["id"])
+        except Exception:
+            _log.exception("Scratch cleanup retry failed for %s", row["id"])
 
 
 def _cleanup_worker_tmux(conn: sqlite3.Connection, task_id: str) -> None:
@@ -5534,6 +5582,8 @@ def dispatch_once(
     # Selected dispatch must never run board-wide recovery or promotion.
     if task_id is not None and get_task(conn, task_id) is None:
         raise ValueError(f"unknown task ID: {task_id}")
+    if task_id is None and not dry_run:
+        _retry_pending_scratch_cleanup(conn)
 
     # Reap zombie children from previously spawned workers.
     # The gateway-embedded dispatcher is the parent of every worker spawned

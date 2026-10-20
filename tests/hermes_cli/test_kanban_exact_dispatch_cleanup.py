@@ -8,13 +8,15 @@ import pytest
 
 @pytest.fixture
 def board(tmp_path, monkeypatch):
-    for key in ("HERMES_KANBAN_HOME", "HERMES_KANBAN_DB", "HERMES_KANBAN_BOARD"):
+    for key in ("HERMES_KANBAN_HOME", "HERMES_KANBAN_DB", "HERMES_KANBAN_BOARD",
+                "HERMES_KANBAN_WORKSPACES_ROOT"):
         monkeypatch.delenv(key, raising=False)
     home = tmp_path / "hermes-home"
     monkeypatch.setenv("HERMES_HOME", str(home))
     kb = importlib.import_module("hermes_cli.kanban_db")
     resolved = kb.kanban_db_path().resolve()
     assert resolved.is_relative_to(home.resolve()), resolved
+    assert kb.workspaces_root().resolve().is_relative_to(home.resolve())
     kb.init_db()
     from hermes_cli import profiles
     monkeypatch.setattr(profiles, "profile_exists", lambda name: True)
@@ -100,3 +102,142 @@ def test_failed_scratch_delete_has_durable_receipt_and_retry(board, monkeypatch)
         assert not workspace.exists()
         assert any(e.kind == "scratch_cleanup_succeeded" for e in kb.list_events(conn, tid))
         assert not kb.retry_failed_scratch_cleanup(conn, tid)
+
+
+def test_delete_and_failure_receipt_fail_then_dispatch_recovers(board, monkeypatch, caplog):
+    kb, _ = board
+    with kb.connect() as conn:
+        tid = kb.create_task(conn, title="two failures")
+        workspace = kb.resolve_workspace(kb.get_task(conn, tid))
+        kb.set_workspace_path(conn, tid, workspace)
+        (workspace / "partial.txt").write_text("data")
+        original_delete, original_append = shutil.rmtree, kb._append_event
+
+        def fail_delete(path, *args, **kwargs):
+            if path == workspace:
+                (workspace / "partial.txt").unlink()
+                raise OSError("simulated partial delete")
+            return original_delete(path, *args, **kwargs)
+
+        def fail_receipt(conn, task_id, kind, *args, **kwargs):
+            if task_id == tid and kind == "scratch_cleanup_failed":
+                raise OSError("simulated receipt failure")
+            return original_append(conn, task_id, kind, *args, **kwargs)
+
+        with monkeypatch.context() as m:
+            m.setattr(shutil, "rmtree", fail_delete)
+            m.setattr(kb, "_append_event", fail_receipt)
+            assert kb.complete_task(conn, tid)
+        assert kb.get_task(conn, tid).status == "done"
+        assert workspace.exists()
+        assert [e.kind for e in kb.list_events(conn, tid) if e.kind.startswith("scratch_cleanup_")] == ["scratch_cleanup_started"]
+        assert "Scratch workspace cleanup could not finish" in caplog.text
+
+    with kb.connect() as conn:
+        kb.dispatch_once(conn, task_id=tid, dry_run=True)
+        assert workspace.exists()
+        kb.dispatch_once(conn, task_id=tid)
+        assert workspace.exists()
+        kb.dispatch_once(conn, dry_run=True)
+        assert workspace.exists()
+        kb.dispatch_once(conn)
+        assert not workspace.exists()
+        assert [e.kind for e in kb.list_events(conn, tid) if e.kind.startswith("scratch_cleanup_")] == [
+            "scratch_cleanup_started", "scratch_cleanup_started", "scratch_cleanup_succeeded",
+        ]
+        assert not kb.retry_failed_scratch_cleanup(conn, tid)
+
+
+def test_intent_write_failure_leaves_scratch_intact(board, monkeypatch, caplog):
+    kb, _ = board
+    with kb.connect() as conn:
+        tid = kb.create_task(conn, title="intent failure")
+        workspace = kb.resolve_workspace(kb.get_task(conn, tid))
+        kb.set_workspace_path(conn, tid, workspace)
+        (workspace / "keep.txt").write_text("data")
+        original = kb._append_event
+
+        def fail_intent(conn, task_id, kind, *args, **kwargs):
+            if task_id == tid and kind == "scratch_cleanup_started":
+                raise OSError("simulated intent failure")
+            return original(conn, task_id, kind, *args, **kwargs)
+
+        with monkeypatch.context() as m:
+            m.setattr(kb, "_append_event", fail_intent)
+            assert kb.complete_task(conn, tid)
+        assert workspace.exists()
+        assert kb.get_task(conn, tid).status == "done"
+        assert not kb.retry_failed_scratch_cleanup(conn, tid)
+        assert "Scratch workspace cleanup could not finish" in caplog.text
+        kb.dispatch_once(conn, dry_run=True)
+        assert workspace.exists()
+        kb.dispatch_once(conn)
+        assert not workspace.exists()
+        assert [e.kind for e in kb.list_events(conn, tid) if e.kind.startswith("scratch_cleanup_")] == [
+            "scratch_cleanup_started", "scratch_cleanup_succeeded",
+        ]
+
+
+def test_success_receipt_failure_after_delete_recovers_missing_path(board, monkeypatch):
+    kb, _ = board
+    with kb.connect() as conn:
+        tid = kb.create_task(conn, title="missing success receipt")
+        workspace = kb.resolve_workspace(kb.get_task(conn, tid))
+        kb.set_workspace_path(conn, tid, workspace)
+        (workspace / "data").write_text("payload")
+        original = kb._append_event
+
+        def fail_success(conn, task_id, kind, *args, **kwargs):
+            if task_id == tid and kind == "scratch_cleanup_succeeded":
+                raise OSError("simulated success receipt failure")
+            return original(conn, task_id, kind, *args, **kwargs)
+
+        with monkeypatch.context() as m:
+            m.setattr(kb, "_append_event", fail_success)
+            assert kb.complete_task(conn, tid)
+        assert not workspace.exists()
+        assert kb.retry_failed_scratch_cleanup(conn, tid)
+        assert not workspace.exists()
+        assert [e.kind for e in kb.list_events(conn, tid) if e.kind.startswith("scratch_cleanup_")] == [
+            "scratch_cleanup_started", "scratch_cleanup_started", "scratch_cleanup_succeeded",
+        ]
+
+
+def test_retry_batch_is_bounded_and_rotates(board, monkeypatch):
+    kb, _ = board
+    with kb.connect() as conn:
+        ids = []
+        for _ in range(3):
+            tid = kb.create_task(conn, title="pending cleanup")
+            workspace = kb.resolve_workspace(kb.get_task(conn, tid))
+            kb.set_workspace_path(conn, tid, workspace)
+            with kb.write_txn(conn):
+                conn.execute("UPDATE tasks SET status = 'done' WHERE id = ?", (tid,))
+                kb._append_event(conn, tid, "scratch_cleanup_started", {"workspace_path": str(workspace)})
+            ids.append(tid)
+        seen = []
+        monkeypatch.setattr(kb, "retry_failed_scratch_cleanup", lambda conn, tid: seen.append(tid) or True)
+        monkeypatch.setattr(kb, "_scratch_retry_cursor", "")
+        for _ in ids:
+            kb._retry_pending_scratch_cleanup(conn, limit=1)
+        assert set(seen) == set(ids)
+        assert len(seen) == len(ids)
+
+
+def test_retry_refuses_changed_or_unsafe_workspace_path(board):
+    kb, home = board
+    with kb.connect() as conn:
+        tid = kb.create_task(conn, title="unsafe retry")
+        workspace = kb.resolve_workspace(kb.get_task(conn, tid))
+        kb.set_workspace_path(conn, tid, workspace)
+        (workspace / "keep.txt").write_text("data")
+        outside = home / "unrelated"
+        outside.mkdir()
+        (outside / "keep.txt").write_text("safe")
+        with kb.write_txn(conn):
+            conn.execute("UPDATE tasks SET status = 'done', workspace_path = ? WHERE id = ?", (str(outside), tid))
+            kb._append_event(conn, tid, "scratch_cleanup_started", {"workspace_path": str(workspace)})
+        assert not kb.retry_failed_scratch_cleanup(conn, tid)
+        kb.dispatch_once(conn)
+        assert (outside / "keep.txt").read_text() == "safe"
+        assert workspace.exists()
