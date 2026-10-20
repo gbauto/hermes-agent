@@ -71,6 +71,7 @@ new locking.
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import json
 import os
 import re
@@ -659,6 +660,8 @@ class Task:
     # JSON array of skill names. None = use only the defaults; empty
     # list = explicitly no extra skills.
     skills: Optional[list] = None
+    # In-memory dispatch provenance; never persisted as an operator request.
+    _injected_review_skill: bool = False
     model_override: Optional[str] = None
     # Per-task override for the consecutive-failure circuit breaker.
     # The value is the failure count at which the breaker trips — e.g.
@@ -674,6 +677,7 @@ class Task:
     # set the env var. Lets clients render a per-session board without
     # relying on tenant + time-window heuristics.
     session_id: Optional[str] = None
+    prd_metadata: Optional[dict] = None
 
     @classmethod
     def from_row(cls, row: sqlite3.Row) -> "Task":
@@ -743,8 +747,9 @@ class Task:
             session_id=(
                 row["session_id"] if "session_id" in keys else None
             ),
+            prd_metadata=(json.loads(row["prd_metadata"])
+                          if "prd_metadata" in keys and row["prd_metadata"] else None),
         )
-
 
 @dataclass
 class Run:
@@ -880,7 +885,8 @@ CREATE TABLE IF NOT EXISTS tasks (
     -- for tasks created from the CLI, dashboard, or any path that doesn't
     -- set the env var. Indexed so per-session list queries stay cheap on
     -- larger boards.
-    session_id           TEXT
+    session_id           TEXT,
+    prd_metadata         TEXT
 );
 
 CREATE TABLE IF NOT EXISTS task_links (
@@ -1148,6 +1154,8 @@ def _migrate_add_optional_columns(conn: sqlite3.Connection) -> None:
     Called by ``init_db`` so opening an old DB is always safe.
     """
     cols = {row["name"] for row in conn.execute("PRAGMA table_info(tasks)")}
+    if "prd_metadata" not in cols:
+        _add_column_if_missing(conn, "tasks", "prd_metadata", "prd_metadata TEXT")
     if "tenant" not in cols:
         _add_column_if_missing(conn, "tasks", "tenant", "tenant TEXT")
     if "result" not in cols:
@@ -1664,6 +1672,132 @@ def get_task(conn: sqlite3.Connection, task_id: str) -> Optional[Task]:
     return Task.from_row(row) if row else None
 
 
+def reconcile_existing_prd_metadata(
+    conn: sqlite3.Connection, task_id: str, *, expected_status: str,
+    expected_run_count: int, prd_id: str, prd_path: str, actor: str, reason: str,
+    adoption_receipt_path: str,
+) -> dict[str, Any]:
+    """One-shot PRD stamp on an unrun descendant of the adopted plan root.
+
+    Refuses any prior stamp, any run (even ended runs), or an active claim.
+    Does not alter scheduling, task text, links or run records.
+    """
+    if expected_status not in {"todo", "blocked"}:
+        raise ValueError("expected_status must be todo or blocked")
+    if type(expected_run_count) is not int or expected_run_count != 0:
+        raise ValueError("expected_run_count must be 0")
+    for name, value in (("task_id", task_id), ("prd_id", prd_id),
+                        ("actor", actor), ("reason", reason)):
+        if not isinstance(value, str) or not value.strip() or len(value) > 1024:
+            raise ValueError(f"{name} must be non-empty and at most 1024 characters")
+    if (not isinstance(prd_path, str) or not prd_path.startswith("/")
+            or not prd_path.strip() or len(prd_path) > 4096 or "\x00" in prd_path):
+        raise ValueError("prd_path must be an absolute path of at most 4096 characters")
+    if not isinstance(adoption_receipt_path, str) or not adoption_receipt_path.startswith("/"):
+        raise ValueError("adoption_receipt_path must be absolute")
+    try:
+        receipt_file = Path(adoption_receipt_path).resolve(strict=True)
+        receipt = json.loads(receipt_file.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise ValueError("adoption receipt cannot be read") from exc
+    if not isinstance(receipt, dict):
+        raise ValueError("invalid adoption receipt identity")
+    artifacts = receipt.get("prd_artifacts")
+    links = receipt.get("kanban_dispatch_links")
+    if (receipt.get("schema_version") != "gbauto-plan-artifact-adoption.v1"
+            or receipt.get("ok") is not True or not isinstance(artifacts, dict)
+            or artifacts.get("schema_version") != "prd_artifacts.identity.v1"
+            or not isinstance(links, dict) or links.get("readback_ok") is not True
+            or links.get("schema_version") != "prd_kanban_dispatch_links.identity.v1"):
+        raise ValueError("invalid adoption receipt identity")
+    root_id = links.get("root_task_id")
+    digest = artifacts.get("canonical_plan_sha256")
+    relative = artifacts.get("canonical_plan_path")
+    if (not isinstance(root_id, str) or not root_id.startswith("t_")
+            or not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest)
+            or not isinstance(relative, str) or Path(relative).is_absolute()
+            or ".." in Path(relative).parts
+            or not isinstance(receipt.get("source"), dict)
+            or receipt["source"].get("sha256") != digest
+            or artifacts.get("prd_id") != prd_id):
+        raise ValueError("adoption receipt ID, path or hash mismatch")
+    # Receipt is under <repo>/artifacts/plan-renders/adopted-plans/.
+    repo = receipt_file.parent.parent.parent.parent
+    if receipt_file.parent != repo / "artifacts" / "plan-renders" / "adopted-plans":
+        raise ValueError("adoption receipt is outside its expected repository location")
+    try:
+        plan = (repo / relative).resolve(strict=True)
+        requested = Path(prd_path).resolve(strict=True)
+        actual_digest = hashlib.sha256(plan.read_bytes()).hexdigest()
+    except OSError as exc:
+        raise ValueError("canonical PRD cannot be read") from exc
+    if (plan != requested or prd_path != str(plan)
+            or not plan.is_relative_to(repo)
+            or actual_digest != digest):
+        raise ValueError("canonical PRD path or content does not match adoption receipt")
+    metadata = {"prd_id": prd_id, "prd_path": prd_path}
+    with write_txn(conn):
+        lineage = conn.execute(
+            """WITH RECURSIVE ancestors(id) AS (
+                 SELECT parent_id FROM task_links WHERE child_id = ?
+                 UNION SELECT task_links.parent_id FROM task_links
+                 JOIN ancestors ON task_links.child_id = ancestors.id
+               ) SELECT 1 FROM ancestors JOIN tasks ON tasks.id = ancestors.id
+               WHERE ancestors.id = ?""", (task_id, root_id),
+        ).fetchone()
+        if lineage is None:
+            raise ValueError("card is not descended from adoption receipt root task")
+        updated = conn.execute(
+            """UPDATE tasks SET prd_metadata = ?
+               WHERE id = ? AND status = ? AND prd_metadata IS NULL
+                 AND current_run_id IS NULL AND claim_lock IS NULL
+                 AND NOT EXISTS (SELECT 1 FROM task_runs WHERE task_id = tasks.id)""",
+            (json.dumps(metadata, ensure_ascii=False), task_id, expected_status),
+        )
+        if updated.rowcount != 1:
+            raise ValueError("card missing, status changed, already stamped, claimed, or has runs")
+        audit_payload = {
+            "prd_id": prd_id, "prd_path": prd_path, "actor": actor,
+            "reason": reason, "expected_status": expected_status,
+            "expected_run_count": expected_run_count,
+            "root_task_id": root_id, "canonical_plan_sha256": digest,
+            "adoption_receipt_path": str(receipt_file),
+        }
+        _append_event(conn, task_id, "prd_metadata_reconciled", audit_payload)
+        event_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+    # A new read-only connection, after write_txn has committed. Never issue
+    # a success receipt based solely on the writer's transaction snapshot.
+    db_file = conn.execute("PRAGMA database_list").fetchone()[2]
+    try:
+        with sqlite3.connect(Path(db_file).resolve().as_uri() + "?mode=ro", uri=True) as reader:
+            reader.row_factory = sqlite3.Row
+            task = get_task(reader, task_id)
+            event = reader.execute(
+                "SELECT kind, payload, run_id FROM task_events WHERE id = ? AND task_id = ?",
+                (event_id, task_id),
+            ).fetchone()
+            run_count = reader.execute(
+                "SELECT COUNT(*) FROM task_runs WHERE task_id = ?", (task_id,)
+            ).fetchone()[0]
+            event_count = reader.execute(
+                "SELECT COUNT(*) FROM task_events WHERE task_id = ? AND kind = 'prd_metadata_reconciled'",
+                (task_id,),
+            ).fetchone()[0]
+            if (task is None or task.status != expected_status
+                    or task.prd_metadata != metadata or run_count != 0 or event_count != 1
+                    or task.current_run_id is not None or task.claim_lock is not None
+                    or event is None or event["kind"] != "prd_metadata_reconciled"
+                    or event["run_id"] is not None or json.loads(event["payload"]) != audit_payload):
+                raise RuntimeError("post-commit PRD metadata readback failed")
+    except (sqlite3.Error, OSError, ValueError) as exc:
+        raise RuntimeError("post-commit PRD metadata readback failed") from exc
+    return {"task_id": task_id, "status": expected_status,
+            "run_count": run_count, "prd_metadata": metadata,
+            "event_id": event_id, "event_kind": "prd_metadata_reconciled",
+            "event_payload": audit_payload, "event_run_id": None,
+            "post_commit_readback_ok": True}
+
+
 # Canonical sort-order mappings for ``hermes kanban list --sort``.
 # Each value is a raw SQL fragment appended after ``ORDER BY``.
 VALID_SORT_ORDERS: dict[str, str] = {
@@ -2119,6 +2253,54 @@ def _has_sticky_block(conn: sqlite3.Connection, task_id: str) -> bool:
     return bool(row) and row["kind"] == "blocked"
 
 
+def _dependency_evidence_errors(conn: sqlite3.Connection, task_id: str) -> list[str]:
+    """Check parent receipts and declared local artifacts without inventing locations."""
+    errors: list[str] = []
+    rows = conn.execute(
+        "WITH RECURSIVE ancestors(id) AS ("
+        "SELECT parent_id FROM task_links WHERE child_id = ? UNION "
+        "SELECT l.parent_id FROM task_links l JOIN ancestors a ON l.child_id = a.id) "
+        "SELECT p.id, p.status FROM ancestors a JOIN tasks p ON p.id = a.id ORDER BY p.id",
+        (task_id,),
+    ).fetchall()
+    for row in rows:
+        if row["status"] not in ("done", "archived"):
+            continue
+        event = conn.execute(
+            "SELECT payload FROM task_events WHERE task_id = ? AND kind = 'completed' "
+            "ORDER BY id DESC LIMIT 1", (row["id"],),
+        ).fetchone()
+        if event is None and row["status"] == "archived":
+            continue  # Explicitly discarded work has no deliverable receipt.
+        if event is None:
+            errors.append(f"{row['id']}: missing completion receipt")
+            continue
+        try:
+            payload = json.loads(event["payload"])
+        except (TypeError, ValueError):
+            errors.append(f"{row['id']}: malformed completion receipt")
+            continue
+        if not isinstance(payload, dict):
+            errors.append(f"{row['id']}: malformed completion receipt")
+            continue
+        artifacts = _clean_artifact_items(payload.get("artifacts"))
+        for artifact in artifacts:
+            if isinstance(artifact, dict) and any(
+                isinstance(artifact.get(key), str) and artifact[key].startswith(("https://", "http://"))
+                for key in ("url", "href", "public_url")
+            ):
+                continue  # Published URL is not an incidental local path.
+            path = artifact if isinstance(artifact, str) else next(
+                (artifact[key] for key in ("path", "file", "file_path")
+                 if isinstance(artifact.get(key), str)), None
+            )
+            if path and not path.startswith(("https://", "http://")):
+                candidate = Path(path).expanduser()
+                if not candidate.is_absolute() or not candidate.is_file():
+                    errors.append(f"{row['id']}: unreadable declared artifact {path}")
+    return errors
+
+
 def recompute_ready(conn: sqlite3.Connection) -> int:
     """Promote ``todo`` tasks to ``ready`` when all parents are ``done`` or ``archived``.
 
@@ -2154,7 +2336,7 @@ def recompute_ready(conn: sqlite3.Connection) -> int:
                 "WHERE l.child_id = ?",
                 (task_id,),
             ).fetchall()
-            if all(p["status"] in ("done", "archived") for p in parents):
+            if all(p["status"] in ("done", "archived") for p in parents) and not _dependency_evidence_errors(conn, task_id):
                 # Blocked tasks also get their failure counters reset —
                 # this is effectively an auto-unblock (circuit-breaker
                 # recovery; worker-initiated blocks are skipped above).
@@ -2173,6 +2355,46 @@ def recompute_ready(conn: sqlite3.Connection) -> int:
                 _append_event(conn, task_id, "promoted", None)
                 promoted += 1
     return promoted
+
+
+def reconcile_task_state(conn: sqlite3.Connection, task_id: str, *, now: Optional[int] = None) -> dict[str, Any]:
+    """Task-local, non-dispatching diagnosis. Only repair a provably starved todo.
+
+    Stale claims and failures need an operator/worker policy decision; reporting
+    them here must not silently retry or reset a human gate.
+    """
+    instant = int(time.time()) if now is None else int(now)
+    with write_txn(conn):
+        row = conn.execute(
+            "SELECT status, claim_expires, consecutive_failures FROM tasks WHERE id = ?", (task_id,)
+        ).fetchone()
+        if row is None:
+            return {"task_id": task_id, "state": "missing", "changed": False}
+        status = row["status"]
+        parents = conn.execute(
+            "SELECT p.status FROM task_links l JOIN tasks p ON p.id = l.parent_id WHERE l.child_id = ?",
+            (task_id,),
+        ).fetchall()
+        errors = _dependency_evidence_errors(conn, task_id)
+        eligible = all(p["status"] in ("done", "archived") for p in parents) and not errors
+        state = status
+        changed = False
+        if status == "done" and not conn.execute(
+            "SELECT 1 FROM task_events WHERE task_id = ? AND kind = 'completed' LIMIT 1", (task_id,)
+        ).fetchone():
+            state = "done_without_receipt"
+        elif status == "running" and row["claim_expires"] is not None and row["claim_expires"] <= instant:
+            state = "stale_claim"
+        elif status == "blocked":
+            state = "human_blocked" if _has_sticky_block(conn, task_id) else "failed_blocked"
+        elif status == "todo" and eligible:
+            conn.execute("UPDATE tasks SET status = 'ready' WHERE id = ? AND status = 'todo'", (task_id,))
+            _append_event(conn, task_id, "promoted", {"source": "task_reconciliation"})
+            state, changed = "ready_starvation_repaired", True
+        elif status in ("todo", "ready") and errors:
+            state = "dependency_evidence_missing"
+        return {"task_id": task_id, "state": state, "changed": changed, "errors": errors,
+                "consecutive_failures": row["consecutive_failures"]}
 
 
 # ---------------------------------------------------------------------------
@@ -2219,6 +2441,11 @@ def claim_task(
                 conn, task_id, "claim_rejected",
                 {"reason": "parents_not_done"},
             )
+            return None
+        evidence_errors = _dependency_evidence_errors(conn, task_id)
+        if evidence_errors:
+            conn.execute("UPDATE tasks SET status = 'todo' WHERE id = ? AND status = 'ready'", (task_id,))
+            _append_event(conn, task_id, "claim_rejected", {"reason": "dependency_evidence_unreadable", "errors": evidence_errors})
             return None
         # Defensive: if a prior run somehow leaked (invariant violation from
         # an unknown code path), close it as 'reclaimed' so we don't strand
@@ -3166,12 +3393,55 @@ def complete_task(
     recompute_ready(conn)
     # Clean up the scratch workspace and any stale tmux session for the worker.
     _cleanup_workspace(conn, task_id)
+    # Release producer scratch only after every dependent has completed or
+    # archived. A missing dependent receipt never triggers early deletion.
+    _cleanup_ancestor_workspaces(conn, task_id)
     return True
 
 
 # ---------------------------------------------------------------------------
 # Workspace / tmux cleanup
 # ---------------------------------------------------------------------------
+
+def _cleanup_ancestor_workspaces(conn: sqlite3.Connection, task_id: str) -> None:
+    """Reconsider every producer whose evidence can be rolled up through this task."""
+    rows = conn.execute(
+        "WITH RECURSIVE ancestors(id) AS ("
+        "SELECT parent_id FROM task_links WHERE child_id = ? UNION "
+        "SELECT l.parent_id FROM task_links l JOIN ancestors a ON l.child_id = a.id) "
+        "SELECT id FROM ancestors ORDER BY id", (task_id,),
+    ).fetchall()
+    for row in rows:
+        _cleanup_workspace(conn, row["id"])
+
+
+def _advertised_scratch_artifacts(conn: sqlite3.Connection, task_id: str, workspace: Path) -> list[str]:
+    """Find local completion receipts in scratch that must outlive dependents."""
+    row = conn.execute(
+        "SELECT payload FROM task_events WHERE task_id = ? AND kind = 'completed' "
+        "ORDER BY id DESC LIMIT 1", (task_id,),
+    ).fetchone()
+    if not row:
+        return []
+    try:
+        payload = json.loads(row["payload"])
+    except (TypeError, ValueError):
+        # Never delete evidence when its receipt cannot be inspected.
+        return [str(workspace)]
+    if not isinstance(payload, dict):
+        return [str(workspace)]
+    paths = []
+    for item in _clean_artifact_items(payload.get("artifacts")):
+        path = item if isinstance(item, str) else (
+            item.get("path") or item.get("file") or item.get("file_path")
+        )
+        if not isinstance(path, str) or not path.strip() or path.startswith(("http://", "https://")):
+            continue
+        candidate = Path(path).expanduser()
+        if candidate.is_absolute() and candidate.resolve(strict=False).is_relative_to(workspace) and candidate.exists():
+            paths.append(str(candidate))
+    return paths
+
 
 def _cleanup_workspace(conn: sqlite3.Connection, task_id: str) -> None:
     """Remove a task's scratch workspace dir and kill its stale tmux session.
@@ -3183,10 +3453,20 @@ def _cleanup_workspace(conn: sqlite3.Connection, task_id: str) -> None:
     """
     try:
         row = conn.execute(
-            "SELECT workspace_kind, workspace_path FROM tasks WHERE id = ?",
+            "SELECT status, workspace_kind, workspace_path FROM tasks WHERE id = ?",
             (task_id,),
         ).fetchone()
         if not row:
+            return
+        # Archive can interrupt a running task. Archive alone is not proof of
+        # completion. Guard the deletion boundary, including ancestor cleanup
+        # and explicit retries, not just the board-wide retry selector.
+        if row["status"] != "done" and not (
+            row["status"] == "archived" and conn.execute(
+                "SELECT 1 FROM task_events WHERE task_id = ? AND kind = 'completed' LIMIT 1",
+                (task_id,),
+            ).fetchone()
+        ):
             return
         kind: Optional[str] = row["workspace_kind"]
         path: Optional[str] = row["workspace_path"]
@@ -3207,14 +3487,134 @@ def _cleanup_workspace(conn: sqlite3.Connection, task_id: str) -> None:
                 task_id,
                 wp,
             )
-        elif wp.is_dir():
-            shutil.rmtree(wp, ignore_errors=True)
-            _log.debug("Removed scratch workspace: %s", wp)
+        elif wp.is_dir() or (
+            not wp.exists() and conn.execute(
+                "SELECT 1 FROM task_events WHERE task_id = ? "
+                "AND kind IN ('scratch_cleanup_started', 'scratch_cleanup_failed') LIMIT 1",
+                (task_id,),
+            ).fetchone()
+        ):
+            # Preserve producer scratch only while a dependent owns the
+            # handoff. Standalone scratch has no owner and remains ephemeral.
+            owners = [row["id"] for row in conn.execute(
+                "WITH RECURSIVE descendants(id) AS ("
+                "SELECT child_id FROM task_links WHERE parent_id = ? UNION "
+                "SELECT l.child_id FROM task_links l JOIN descendants d ON l.parent_id = d.id) "
+                "SELECT d.id FROM descendants d JOIN tasks c ON c.id = d.id "
+                "WHERE c.status NOT IN ('done', 'archived') ORDER BY d.id",
+                (task_id,),
+            ).fetchall()]
+            artifacts = _advertised_scratch_artifacts(conn, task_id, wp)
+            if owners:
+                # The receipt identifies the exact dependent owners; once all
+                # finish, their completion triggers a final cleanup pass.
+                with write_txn(conn):
+                    _append_event(conn, task_id, "scratch_evidence_preserved", {
+                        "workspace_path": str(wp), "dependent_owners": owners,
+                    })
+            elif artifacts:
+                # Completion events and run metadata still advertise these
+                # paths after the final dependent has finished or archived.
+                _log.debug("Preserved advertised scratch artifacts for %s: %s", task_id, artifacts)
+            else:
+                # Commit intent BEFORE irreversible deletion. If the failure or
+                # success receipt cannot commit, a later tick can still retry.
+                # If intent cannot commit, leave the workspace untouched.
+                with write_txn(conn):
+                    _append_event(conn, task_id, "scratch_cleanup_started", {
+                        "workspace_path": str(wp),
+                    })
+                try:
+                    if wp.exists():
+                        shutil.rmtree(wp)
+                except OSError as exc:
+                    _log.warning("Scratch cleanup failed for %s: %s", task_id, exc)
+                    with write_txn(conn):
+                        _append_event(conn, task_id, "scratch_cleanup_failed", {
+                            "workspace_path": str(wp), "error": str(exc),
+                            "retry": "retry_failed_scratch_cleanup",
+                        })
+                else:
+                    with write_txn(conn):
+                        _append_event(conn, task_id, "scratch_cleanup_succeeded", {
+                            "workspace_path": str(wp),
+                        })
+                    _log.debug("Removed scratch workspace: %s", wp)
         # Also kill the tmux session for the worker that owned this task,
         # if the tmux session is now dead (worker process exited).
         _cleanup_worker_tmux(conn, task_id)
     except Exception:
-        pass  # best-effort — never block completion
+        _log.exception("Scratch workspace cleanup could not finish for %s", task_id)
+        # best-effort — never block completion
+
+
+def retry_failed_scratch_cleanup(conn: sqlite3.Connection, task_id: str) -> bool:
+    """Retry an outstanding cleanup intent using the normal path/evidence guards."""
+    row = conn.execute(
+        "SELECT kind FROM task_events WHERE task_id = ? "
+        "AND kind IN ('scratch_cleanup_started', 'scratch_cleanup_failed', 'scratch_cleanup_succeeded') "
+        "ORDER BY id DESC LIMIT 1", (task_id,),
+    ).fetchone()
+    task = get_task(conn, task_id)
+    if not row or row["kind"] not in ("scratch_cleanup_started", "scratch_cleanup_failed") or task is None:
+        return False
+    if task.status not in ("done", "archived") or task.workspace_kind != "scratch" or not task.workspace_path:
+        return False
+    if task.status == "archived" and not conn.execute(
+        "SELECT 1 FROM task_events WHERE task_id = ? AND kind = 'completed' LIMIT 1",
+        (task_id,),
+    ).fetchone():
+        return False
+    _cleanup_workspace(conn, task_id)
+    latest = conn.execute(
+        "SELECT kind FROM task_events WHERE task_id = ? "
+        "AND kind IN ('scratch_cleanup_failed', 'scratch_cleanup_succeeded') "
+        "ORDER BY id DESC LIMIT 1", (task_id,),
+    ).fetchone()
+    return bool(latest and latest["kind"] == "scratch_cleanup_succeeded")
+
+
+_scratch_retry_cursor = ""
+
+
+def _retry_pending_scratch_cleanup(conn: sqlite3.Connection, *, limit: int = 16) -> None:
+    """Retry a bounded, rotating batch on normal board-wide ticks.
+
+    Includes completed scratch with no receipt when the pre-delete intent
+    could not commit. Archive alone is not completion: archived candidates
+    require a durable completed event. Receipt paths are never trusted: cleanup
+    rechecks the canonical workspace, completion, ownership, and artifacts.
+    """
+    global _scratch_retry_cursor
+    if limit <= 0:
+        return
+    rows = conn.execute(
+        "SELECT t.id FROM tasks t WHERE (t.status = 'done' OR "
+        "(t.status = 'archived' AND EXISTS (SELECT 1 FROM task_events c "
+        "WHERE c.task_id = t.id AND c.kind = 'completed'))) "
+        "AND t.workspace_kind = 'scratch' AND t.workspace_path IS NOT NULL "
+        "AND COALESCE((SELECT e.kind FROM task_events e WHERE e.task_id = t.id "
+        "AND e.kind IN ('scratch_cleanup_started', 'scratch_cleanup_failed', "
+        "'scratch_cleanup_succeeded') ORDER BY e.id DESC LIMIT 1), 'missing') "
+        "IN ('missing', 'scratch_cleanup_started', 'scratch_cleanup_failed') "
+        "ORDER BY (t.id > ?) DESC, t.id LIMIT ?", (_scratch_retry_cursor, limit),
+    ).fetchall()
+    for row in rows:
+        _scratch_retry_cursor = row["id"]
+        try:
+            if not retry_failed_scratch_cleanup(conn, row["id"]):
+                # No intent could be written at completion time. Only retry
+                # truly unreceipted rows; never re-open a succeeded cleanup.
+                receipt = conn.execute(
+                    "SELECT 1 FROM task_events WHERE task_id = ? AND "
+                    "kind IN ('scratch_cleanup_started', 'scratch_cleanup_failed', "
+                    "'scratch_cleanup_succeeded') LIMIT 1", (row["id"],),
+                ).fetchone()
+                task = get_task(conn, row["id"])
+                if not receipt and task and task.status in ("done", "archived"):
+                    _cleanup_workspace(conn, row["id"])
+        except Exception:
+            _log.exception("Scratch cleanup retry failed for %s", row["id"])
 
 
 def _cleanup_worker_tmux(conn: sqlite3.Connection, task_id: str) -> None:
@@ -3892,6 +4292,7 @@ def archive_task(conn: sqlite3.Connection, task_id: str) -> bool:
     # Promote newly-unblocked dependents immediately instead of waiting
     # for a later dispatcher tick.
     recompute_ready(conn)
+    _cleanup_ancestor_workspaces(conn, task_id)
     return True
 
 
@@ -5165,6 +5566,7 @@ def dispatch_once(
     failure_limit: int = DEFAULT_SPAWN_FAILURE_LIMIT,
     stale_timeout_seconds: int = 0,
     board: Optional[str] = None,
+    task_id: Optional[str] = None,
 ) -> DispatchResult:
     """Run one dispatcher tick.
 
@@ -5173,9 +5575,10 @@ def dispatch_once(
       2. Reclaim stale running tasks (no recent heartbeat).
       3. Reclaim crashed running tasks (host-local PID no longer alive).
       3. Promote todo -> ready where all parents are done.
-      4. For each ready task with an assignee, atomically claim and call
-         ``spawn_fn(task, workspace_path, board) -> Optional[int]``. The
-         return value (if any) is recorded as ``worker_pid`` so subsequent
+      4. For each ready task with an assignee, run worker host/profile
+         readiness checks before any execution claim, then atomically claim
+         and call ``spawn_fn(task, workspace_path, board) -> Optional[int]``.
+         The return value (if any) is recorded as ``worker_pid`` so subsequent
          ticks can detect crashes before the TTL expires.
 
     Spawn failures are counted per-task. After ``failure_limit`` consecutive
@@ -5194,6 +5597,12 @@ def dispatch_once(
     ``board`` pins workspace/log/db resolution for this tick to a specific
     board. When omitted, the current-board resolution chain is used.
     """
+    # Selected dispatch must never run board-wide recovery or promotion.
+    if task_id is not None and get_task(conn, task_id) is None:
+        raise ValueError(f"unknown task ID: {task_id}")
+    if task_id is None and not dry_run:
+        _retry_pending_scratch_cleanup(conn)
+
     # Reap zombie children from previously spawned workers.
     # The gateway-embedded dispatcher is the parent of every worker spawned
     # via _default_spawn (start_new_session=True only detaches the
@@ -5214,7 +5623,7 @@ def dispatch_once(
     # called explicitly.  The kanban dispatcher discards the Popen handle
     # after spawn (``_default_spawn`` → abandon), so on Windows there's
     # nothing to reap here — skip the whole block.
-    if os.name != "nt":
+    if task_id is None and not dry_run and os.name != "nt":
         try:
             while True:
                 try:
@@ -5228,21 +5637,38 @@ def dispatch_once(
             pass
 
     result = DispatchResult()
-    result.reclaimed = release_stale_claims(conn)
-    result.stale = detect_stale_running(
-        conn, stale_timeout_seconds=stale_timeout_seconds,
-    )
-    result.crashed = detect_crashed_workers(conn)
+    if task_id is None:
+        result.reclaimed = release_stale_claims(conn)
+        result.stale = detect_stale_running(
+            conn, stale_timeout_seconds=stale_timeout_seconds,
+        )
+        result.crashed = detect_crashed_workers(conn)
     # detect_crashed_workers stashes protocol-violation auto-blocks on
     # itself so the public list-return stays stable. Pull them into the
     # DispatchResult here so telemetry / tests see the trip.
     _crash_auto_blocked = getattr(
         detect_crashed_workers, "_last_auto_blocked", []
-    )
+    ) if task_id is None else []
     if _crash_auto_blocked:
         result.auto_blocked.extend(_crash_auto_blocked)
-    result.timed_out = enforce_max_runtime(conn)
-    result.promoted = recompute_ready(conn)
+    if task_id is None:
+        result.timed_out = enforce_max_runtime(conn)
+    # Reconcile a bounded, deterministic slice of unclaimed todo cards before
+    # legacy promotion. Do not sweep blocked/running/done cards here: task-local
+    # reconciliation is not a retry or recovery policy. Keep the existing
+    # promotion path for remaining cards; the reconciliation workload itself
+    # must not grow with the entire todo queue.
+    if task_id is None:
+        for candidate in conn.execute(
+            "SELECT id FROM tasks WHERE status = 'todo' AND claim_lock IS NULL "
+            "ORDER BY priority DESC, created_at ASC, id ASC LIMIT 128"
+        ).fetchall():
+            result.promoted += int(reconcile_task_state(conn, candidate["id"])["changed"])
+        result.promoted += recompute_ready(conn)
+    elif not dry_run:
+        selected = get_task(conn, task_id)
+        if selected is not None and selected.status == "todo" and selected.claim_lock is None:
+            result.promoted += int(reconcile_task_state(conn, task_id)["changed"])
 
     # Count tasks already running so max_spawn enforces concurrency rather
     # than a per-tick spawn budget. See the docstring above for the full
@@ -5262,7 +5688,9 @@ def dispatch_once(
     ready_rows = conn.execute(
         "SELECT id, assignee FROM tasks "
         "WHERE status = 'ready' AND claim_lock IS NULL "
-        "ORDER BY priority DESC, created_at ASC"
+        + ("AND id = ? " if task_id is not None else "")
+        + "ORDER BY priority DESC, created_at ASC",
+        (task_id,) if task_id is not None else (),
     ).fetchall()
     # Honour kanban.max_in_progress: if the board already has enough running
     # tasks, skip spawning this tick so slow workers (local LLMs,
@@ -5348,22 +5776,27 @@ def dispatch_once(
                     continue
             result.spawned.append((row["id"], row["assignee"], ""))
             continue
-        claimed = claim_task(conn, row["id"], ttl_seconds=ttl_seconds)
-        if claimed is None:
+        task_for_preflight = get_task(conn, row["id"])
+        if task_for_preflight is None:
             continue
         from hermes_cli.profiles import normalize_profile_name
 
-        profile_arg = normalize_profile_name(claimed.assignee or "")
+        profile_arg = normalize_profile_name(task_for_preflight.assignee or "")
         try:
-            _worker_skill_preflight(
-                claimed,
+            _argv_skills, readiness_payload = _worker_skill_preflight(
+                task_for_preflight,
                 profile_arg=profile_arg,
                 hermes_home=_worker_profile_home(profile_arg),
             )
         except WorkerSkillReadinessError as exc:
-            _record_host_readiness_failure(conn, claimed.id, str(exc), exc.payload)
-            result.readiness_failed.append((claimed.id, str(exc)))
+            _record_host_readiness_failure(conn, row["id"], str(exc), exc.payload)
+            result.readiness_failed.append((row["id"], str(exc)))
             continue
+        _record_host_readiness_preflight(conn, task_for_preflight, readiness_payload)
+        claimed = claim_task(conn, row["id"], ttl_seconds=ttl_seconds)
+        if claimed is None:
+            continue
+        profile_arg = normalize_profile_name(claimed.assignee or "")
         try:
             workspace = resolve_workspace(claimed, board=board)
         except Exception as exc:
@@ -5424,7 +5857,9 @@ def dispatch_once(
     review_rows = conn.execute(
         "SELECT id, assignee FROM tasks "
         "WHERE status = 'review' AND claim_lock IS NULL "
-        "ORDER BY priority DESC, created_at ASC"
+        + ("AND id = ? " if task_id is not None else "")
+        + "ORDER BY priority DESC, created_at ASC",
+        (task_id,) if task_id is not None else (),
     ).fetchall()
     for row in review_rows:
         if max_spawn is not None and running_count + spawned >= max_spawn:
@@ -5442,7 +5877,7 @@ def dispatch_once(
         if dry_run:
             task_for_preflight = get_task(conn, row["id"])
             if task_for_preflight is not None:
-                task_for_preflight.skills = ["sdlc-review"]
+                _add_review_skill(task_for_preflight)
                 from hermes_cli.profiles import normalize_profile_name
 
                 profile_arg = normalize_profile_name(
@@ -5462,7 +5897,7 @@ def dispatch_once(
         claimed = claim_review_task(conn, row["id"], ttl_seconds=ttl_seconds)
         if claimed is None:
             continue
-        claimed.skills = ["sdlc-review"]
+        _add_review_skill(claimed)
         from hermes_cli.profiles import normalize_profile_name
 
         profile_arg = normalize_profile_name(claimed.assignee or "")
@@ -5516,6 +5951,15 @@ def dispatch_once(
             if auto:
                 result.auto_blocked.append(claimed.id)
     return result
+
+
+def _add_review_skill(task: Task) -> None:
+    """Inject the optional review default without dropping explicit requirements."""
+    skills = list(task.skills or [])
+    task._injected_review_skill = "sdlc-review" not in skills
+    if task._injected_review_skill:
+        skills.append("sdlc-review")
+    task.skills = skills
 
 
 def _positive_int(value: Any, default: int, *, minimum: int = 1) -> int:
@@ -5735,6 +6179,51 @@ def _worker_profile_home(profile_arg: str) -> Optional[str]:
         return os.environ.get("HERMES_HOME")
 
 
+def _worker_model_preflight(task: Task, hermes_home: Optional[str]) -> dict[str, Any]:
+    """Reject known-incompatible effective Codex models before claiming a run.
+
+    Offline catalogs include speculative forward-compatible slugs, so they
+    cannot establish account entitlement. This is deliberately a narrow
+    negative check, not a claim that other model names are accepted remotely.
+    """
+    payload: dict[str, Any] = {"check": "codex_model_override", "task_id": task.id}
+    model = (task.model_override or "").strip()
+    if not hermes_home:
+        return payload
+    config_path = Path(hermes_home) / "config.yaml"
+    if not config_path.is_file():
+        return payload
+    try:
+        import yaml
+        config = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
+        if not isinstance(config, dict):
+            raise ValueError("profile config must be a mapping")
+        model_config = config.get("model")
+        provider = (
+            model_config.get("provider") if isinstance(model_config, dict) else None
+        ) or config.get("provider")
+        if not model:
+            default_model = (
+                model_config.get("default") or model_config.get("model")
+                if isinstance(model_config, dict) else model_config
+            )
+            model = str(default_model or "").strip()
+    except Exception as exc:
+        raise WorkerSkillReadinessError(
+            "worker model readiness failed: cannot read profile provider",
+            {**payload, "error": type(exc).__name__},
+        ) from exc
+    payload["provider"] = provider
+    payload["effective_model"] = model
+    payload["model_source"] = "task_override" if task.model_override else "profile_default"
+    if provider == "openai-codex" and model in {"gpt-5.5"}:
+        raise WorkerSkillReadinessError(
+            f"worker model readiness failed: unsupported openai-codex model {model}",
+            payload,
+        )
+    return payload
+
+
 def _worker_skill_preflight(
     task: Task,
     *,
@@ -5744,18 +6233,22 @@ def _worker_skill_preflight(
     """Resolve profile-scoped worker skills before starting a subprocess.
 
     Built-in worker skills are best effort because their essential behavior is
-    also injected by the control plane. Skills explicitly forced on a task are
-    mandatory. Ambiguous names fail closed because the CLI must not guess.
+    also injected by the control plane. Explicitly forced skills are mandatory;
+    ambiguous implicit names must not be passed to the CLI.
     """
 
-    optional_skills = {"kanban-worker", "sdlc-review"}
+    model_readiness = _worker_model_preflight(task, hermes_home)
     requested: list[str] = ["kanban-worker"]
     task_skills = [
         str(skill).strip()
         for skill in (task.skills or [])
         if str(skill).strip()
     ]
-    forced = [skill for skill in task_skills if skill not in optional_skills]
+    # A review-column dispatch injects sdlc-review into an in-memory task;
+    # distinguish that default from an operator's explicitly requested skill.
+    forced = [skill for skill in task_skills if not (
+        skill == "sdlc-review" and getattr(task, "_injected_review_skill", False)
+    )]
     for skill in task_skills:
         if skill not in requested:
             requested.append(skill)
@@ -5781,6 +6274,7 @@ def _worker_skill_preflight(
 
     payload: dict[str, Any] = {
         "check": "profile_skill_import",
+        "model_preflight": model_readiness,
         "profile": profile_arg,
         "task_id": task.id,
         "hermes_home": hermes_home,
@@ -5804,14 +6298,14 @@ def _worker_skill_preflight(
             payload,
         )
 
-    argv_skills: list[str] = []
-    if "kanban-worker" in loaded_names:
-        argv_skills.append("kanban-worker")
     unresolved = (
         set(resolved.missing)
         | set(ambiguous_all)
         | set(resolved.errors)
     )
+    argv_skills: list[str] = []
+    if "kanban-worker" in loaded_names and "kanban-worker" not in unresolved:
+        argv_skills.append("kanban-worker")
     for skill in task_skills:
         # Keep the operator-requested identifier. The resolver may report a
         # canonical frontmatter name that differs from a qualified path or
@@ -5821,6 +6315,28 @@ def _worker_skill_preflight(
             argv_skills.append(skill)
     payload["argv_skills"] = list(argv_skills)
     return argv_skills, payload
+
+
+def _record_host_readiness_preflight(
+    conn: sqlite3.Connection,
+    task: Task,
+    payload: dict[str, Any],
+) -> None:
+    """Record a successful pre-claim readiness gate for repo-mutating work."""
+
+    if (task.workspace_kind or "scratch") != "worktree":
+        return
+    safe_payload = dict(payload)
+    safe_payload.update({
+        "schema_version": "host_readiness_preflight_gate.v1",
+        "task_id": task.id,
+        "workspace_kind": task.workspace_kind,
+        "claim_allowed": True,
+        "claim_prevented": False,
+        "retry_budget_consumed": False,
+    })
+    with write_txn(conn):
+        _append_event(conn, task.id, "host_readiness_preflight", safe_payload)
 
 
 def _record_host_readiness_failure(
@@ -5833,7 +6349,14 @@ def _record_host_readiness_failure(
 
     safe_error = error[:500]
     safe_payload = dict(payload)
-    safe_payload["error"] = safe_error
+    safe_payload.update({
+        "schema_version": "host_readiness_failure_event.v1",
+        "action": "block_before_claim",
+        "task_status_after": "blocked",
+        "claim_prevented": True,
+        "retry_budget_consumed": False,
+        "error": safe_error,
+    })
     with write_txn(conn):
         conn.execute(
             "UPDATE tasks SET status = 'blocked', claim_lock = NULL, "
@@ -6005,12 +6528,12 @@ def _default_spawn(
     # task-forced skills fail during preflight before this subprocess starts.
     for skill in argv_skills:
         cmd.extend(["--skills", skill])
+    cmd.append("chat")
+    # The chat subparser owns -m; placing it before `chat` is overwritten
+    # by the subparser's default and silently uses the profile model.
     if task.model_override:
         cmd.extend(["-m", task.model_override])
-    cmd.extend([
-        "chat",
-        "-q", prompt,
-    ])
+    cmd.extend(["-q", prompt])
     # Redirect output to a per-task log under <board-root>/logs/.
     # Anchored at the board root (not the shared kanban root), so
     # `hermes kanban log` on a specific board reads its own file and
