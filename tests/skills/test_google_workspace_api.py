@@ -176,6 +176,31 @@ def test_bridge_main_injects_token_env(bridge_module, tmp_path):
     assert captured["cmd"] == ["gws", "gmail", "+triage"]
 
 
+@pytest.mark.parametrize("use_gws", [False, True])
+@pytest.mark.parametrize("has_matches", [False, True])
+def test_api_gmail_search_always_returns_json_list(
+    api_module, monkeypatch, capsys, use_gws, has_matches
+):
+    """Polling clients can parse empty and populated searches on either backend."""
+    monkeypatch.setattr(api_module, "_gws_binary", lambda: "gws" if use_gws else None)
+    messages = [{"id": "message-1"}] if has_matches else []
+    message = {"id": "message-1", "threadId": "thread-1", "payload": {"headers": []}}
+    if use_gws:
+        responses = iter([{"messages": messages}, message])
+        monkeypatch.setattr(api_module, "_run_gws", lambda *a, **kw: next(responses))
+    else:
+        service = MagicMock()
+        service.users().messages().list().execute.return_value = {"messages": messages}
+        service.users().messages().get().execute.return_value = message
+        monkeypatch.setattr(api_module, "build_service", lambda *a: service)
+
+    api_module.gmail_search(api_module.argparse.Namespace(query="is:unread", max=10))
+
+    output = json.loads(capsys.readouterr().out)
+    assert isinstance(output, list)
+    assert [item["id"] for item in output] == [item["id"] for item in messages]
+
+
 def test_api_calendar_list_uses_events_list(api_module):
     """calendar_list calls _run_gws with events list + params."""
     captured = {}
