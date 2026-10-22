@@ -247,7 +247,7 @@ def gmail_search(args):
     ).execute()
     messages = results.get("messages", [])
     if not messages:
-        print("No messages found.")
+        print(json.dumps([]))
         return
 
     output = []
