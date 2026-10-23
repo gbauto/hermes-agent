@@ -803,6 +803,94 @@ def _interactive_strategy() -> None:
     print(f"Set {provider} strategy to: {strategy}")
 
 
+def auth_reconcile_shared_command(args) -> None:
+    """Report/repair shared auth metadata for Codex-configured profiles."""
+    provider = _normalize_provider(getattr(args, "provider", None) or "openai-codex")
+    if provider != "openai-codex":
+        raise SystemExit("Only openai-codex shared auth reconciliation is supported")
+    repair = bool(getattr(args, "repair", False))
+
+    from pathlib import Path
+    import yaml
+    from hermes_constants import get_default_hermes_root
+    from hermes_cli.profiles import list_profiles, get_profile_dir
+    from hermes_cli.auth import configure_profile_shared_provider_metadata
+
+    root = get_default_hermes_root()
+    root_config_path = root / "config.yaml"
+    try:
+        root_config = yaml.safe_load(root_config_path.read_text(encoding="utf-8")) or {}
+    except Exception:
+        root_config = {}
+    if not isinstance(root_config, dict):
+        root_config = {}
+    auth_config = root_config.get("auth") if isinstance(root_config.get("auth"), dict) else {}
+    consumers = auth_config.get("shared_provider_consumers") if isinstance(auth_config, dict) else {}
+    root_allowed_raw = consumers.get(provider) if isinstance(consumers, dict) else []
+    root_allowed = {
+        item.strip().lower() for item in root_allowed_raw
+        if isinstance(item, str) and item.strip()
+    } if isinstance(root_allowed_raw, list) else set()
+
+    codex_profiles: list[str] = []
+    profile_opted: set[str] = set()
+    malformed: list[str] = []
+    for info in list_profiles():
+        if info.name == "default":
+            continue
+        if str(info.provider or "").strip().lower() == provider:
+            codex_profiles.append(info.name)
+        profile_dir = Path(info.path)
+        try:
+            cfg = yaml.safe_load((profile_dir / "config.yaml").read_text(encoding="utf-8")) or {}
+        except Exception:
+            cfg = {}
+        auth = cfg.get("auth") if isinstance(cfg, dict) else None
+        shared = auth.get("shared_providers") if isinstance(auth, dict) else []
+        if isinstance(shared, list):
+            if provider in {str(item or "").strip().lower() for item in shared}:
+                profile_opted.add(info.name)
+        elif shared not in (None, []):
+            malformed.append(info.name)
+
+    codex = set(codex_profiles)
+    missing_profile_opt_in = sorted(codex - profile_opted)
+    missing_root_owner = sorted(codex - root_allowed)
+    stale_profile_opt_in = sorted(profile_opted - codex)
+    stale_root_owner = sorted(root_allowed - codex)
+
+    print("Shared Codex auth reconciliation")
+    print(f"  Provider: {provider}")
+    print(f"  Mode: {'repair' if repair else 'dry-run'}")
+    print(f"  Codex profiles: {len(codex_profiles)}")
+    print(f"  Missing profile opt-in: {missing_profile_opt_in or 'none'}")
+    print(f"  Missing root owner allowlist: {missing_root_owner or 'none'}")
+    print(f"  Stale profile opt-in: {stale_profile_opt_in or 'none'}")
+    print(f"  Stale root owner allowlist: {stale_root_owner or 'none'}")
+    print(f"  Malformed profile shared_providers: {malformed or 'none'}")
+
+    if repair:
+        repaired = []
+        for name in sorted(codex):
+            configure_profile_shared_provider_metadata(
+                get_profile_dir(name), name, provider, enabled=True
+            )
+            repaired.append(name)
+        for name in sorted((profile_opted | root_allowed) - codex):
+            if name == "default":
+                continue
+            profile_dir = get_profile_dir(name)
+            if profile_dir.exists():
+                configure_profile_shared_provider_metadata(
+                    profile_dir, name, provider, enabled=False
+                )
+            else:
+                auth_mod.update_shared_provider_consumer(name, provider, enabled=False)
+        print(f"  Repaired metadata for {len(repaired)} Codex profile(s).")
+    else:
+        print("  No changes made. Re-run with --repair to update metadata.")
+
+
 def auth_command(args) -> None:
     action = getattr(args, "auth_action", "")
     if action == "add":
@@ -825,6 +913,9 @@ def auth_command(args) -> None:
         return
     if action == "use-shared":
         auth_use_shared_command(args)
+        return
+    if action == "reconcile-shared":
+        auth_reconcile_shared_command(args)
         return
     if action == "spotify":
         auth_spotify_command(args)
