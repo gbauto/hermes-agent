@@ -14972,6 +14972,7 @@ class GatewayRunner:
         _api_key_fingerprint = hashlib.sha256(_api_key.encode()).hexdigest() if _api_key else ""
 
         _cache_keys_sorted = sorted((cache_keys or {}).items())
+        _auth_generation = runtime.get("auth_generation")
 
         blob = _j.dumps(
             [
@@ -14980,6 +14981,7 @@ class GatewayRunner:
                 runtime.get("base_url", ""),
                 runtime.get("provider", ""),
                 runtime.get("api_mode", ""),
+                _auth_generation if isinstance(_auth_generation, dict) else None,
                 sorted(enabled_toolsets) if enabled_toolsets else [],
                 # reasoning_config excluded — it's set per-message on the
                 # cached agent and doesn't affect system prompt or tools.

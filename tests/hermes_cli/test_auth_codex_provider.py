@@ -144,7 +144,7 @@ def test_save_codex_tokens_roundtrip(tmp_path, monkeypatch):
     assert data["tokens"]["refresh_token"] == "rt456"
 
 
-def test_import_codex_cli_tokens(tmp_path, monkeypatch):
+def test_import_codex_cli_tokens_never_copies_external_tokens(tmp_path, monkeypatch):
     codex_home = tmp_path / "codex-cli"
     codex_home.mkdir(parents=True, exist_ok=True)
     (codex_home / "auth.json").write_text(json.dumps({
@@ -152,10 +152,7 @@ def test_import_codex_cli_tokens(tmp_path, monkeypatch):
     }))
     monkeypatch.setenv("CODEX_HOME", str(codex_home))
 
-    tokens = _import_codex_cli_tokens()
-    assert tokens is not None
-    assert tokens["access_token"] == "cli-at"
-    assert tokens["refresh_token"] == "cli-rt"
+    assert _import_codex_cli_tokens() is None
 
 
 def test_import_codex_cli_tokens_missing(tmp_path, monkeypatch):
@@ -251,8 +248,10 @@ def test_refresh_parses_openai_nested_error_shape_refresh_token_reused(monkeypat
     err = exc_info.value
     assert err.code == "refresh_token_reused"
     assert err.relogin_required is True
-    # The existing dedicated branch should override the message with actionable guidance.
-    assert "already consumed by another client" in str(err)
+    # The dedicated branch should give profile-owned relogin guidance without
+    # implying that Hermes can recover by importing Codex CLI / IDE tokens.
+    assert "profile-owned Codex identity" in str(err)
+    assert "will not import tokens" in str(err)
 
 
 def test_refresh_parses_openai_nested_error_shape_generic_code(monkeypatch):
@@ -315,16 +314,16 @@ def test_refresh_falls_back_to_generic_message_on_unparseable_body(monkeypatch):
     assert "status 401" in str(err)
 
 
-def test_login_openai_codex_force_new_login_skips_existing_reuse_prompt(monkeypatch):
+def test_login_openai_codex_never_imports_codex_cli_tokens(monkeypatch):
     called = {"device_login": 0}
 
     monkeypatch.setattr(
         "hermes_cli.auth.resolve_codex_runtime_credentials",
-        lambda: {"base_url": DEFAULT_CODEX_BASE_URL},
+        lambda: (_ for _ in ()).throw(AuthError("missing", provider="openai-codex", code="missing")),
     )
     monkeypatch.setattr(
         "hermes_cli.auth._import_codex_cli_tokens",
-        lambda: {"access_token": "cli-at", "refresh_token": "cli-rt"},
+        lambda: (_ for _ in ()).throw(AssertionError("must not inspect or import Codex CLI tokens")),
     )
     monkeypatch.setattr(
         "hermes_cli.auth._codex_device_code_login",
@@ -351,3 +350,67 @@ def test_login_openai_codex_force_new_login_skips_existing_reuse_prompt(monkeypa
 
     assert called["device_login"] == 1
     assert called["tokens"]["access_token"] == "fresh-at"
+
+
+def test_save_codex_tokens_records_redacted_auth_generation(tmp_path, monkeypatch):
+    hermes_home = tmp_path / "hermes"
+    hermes_home.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setenv("HERMES_HOME", str(hermes_home))
+
+    _save_codex_tokens({"access_token": "secret-access", "refresh_token": "secret-refresh"})
+
+    payload = json.loads((hermes_home / "auth.json").read_text())
+    generation = payload["providers"]["openai-codex"]["auth_generation"]
+    assert generation["provider"] == "openai-codex"
+    assert generation["event"] == "auth_state_changed"
+    assert generation["has_access_token"] is True
+    assert generation["has_refresh_token"] is True
+    assert "secret-access" not in json.dumps(generation)
+    assert "secret-refresh" not in json.dumps(generation)
+
+
+def test_save_auth_store_interrupted_write_preserves_previous_auth_json(tmp_path, monkeypatch):
+    hermes_home = tmp_path / "hermes"
+    hermes_home.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setenv("HERMES_HOME", str(hermes_home))
+    auth_file = _setup_hermes_auth(hermes_home, access_token="old-access", refresh_token="old-refresh")
+    before = auth_file.read_text()
+
+    def _boom(_src, _dst):
+        raise OSError("simulated rename failure")
+
+    monkeypatch.setattr("hermes_cli.auth.atomic_replace", _boom)
+    with pytest.raises(OSError, match="simulated rename failure"):
+        _save_codex_tokens({"access_token": "new-access", "refresh_token": "new-refresh"})
+
+    assert auth_file.read_text() == before
+    assert list(hermes_home.glob("auth.json.tmp.*")) == []
+
+
+def test_get_codex_auth_status_reports_metadata_only(tmp_path, monkeypatch):
+    hermes_home = tmp_path / "hermes"
+    _setup_hermes_auth(hermes_home, access_token="secret-access", refresh_token="secret-refresh")
+    monkeypatch.setenv("HERMES_HOME", str(hermes_home))
+
+    status = get_codex_auth_status()
+
+    assert status["logged_in"] is True
+    assert "api_key" not in status
+    assert "secret-access" not in json.dumps(status)
+    assert "secret-refresh" not in json.dumps(status)
+
+
+def test_resolve_codex_runtime_exposes_redacted_auth_generation(tmp_path, monkeypatch):
+    hermes_home = tmp_path / "hermes"
+    _setup_hermes_auth(hermes_home, access_token="secret-access", refresh_token="secret-refresh")
+    monkeypatch.setenv("HERMES_HOME", str(hermes_home))
+
+    runtime = resolve_codex_runtime_credentials(refresh_if_expiring=False)
+
+    assert runtime["api_key"] == "secret-access"
+    generation = runtime["auth_generation"]
+    assert generation["provider"] == "openai-codex"
+    assert generation["has_access_token"] is True
+    dumped_generation = json.dumps(generation)
+    assert "secret-access" not in dumped_generation
+    assert "secret-refresh" not in dumped_generation

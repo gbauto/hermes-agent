@@ -1351,18 +1351,10 @@ def _resolve_xai_oauth_for_aux() -> Optional[Tuple[str, str]]:
 def _read_codex_access_token() -> Optional[str]:
     """Read a valid, non-expired Codex OAuth access token from Hermes auth store.
 
-    If a credential pool exists but currently has no selectable runtime entry
-    (for example all pool slots are marked exhausted), fall back to the
-    profile's auth.json token instead of hard-failing. This keeps explicit
-    fallback-to-Codex working when the pool state is stale but the stored OAuth
-    token is still valid.
+    Codex OAuth tokens are profile-owned and refresh-token rotation makes shared
+    pool entries unsafe.  Do not read Codex credentials from credential pools;
+    use the profile's own auth.json provider state only.
     """
-    pool_present, entry = _select_pool_entry("openai-codex")
-    if pool_present:
-        token = _pool_runtime_api_key(entry)
-        if token:
-            return token
-
     try:
         from hermes_cli.auth import _read_codex_tokens
         data = _read_codex_tokens()
@@ -2078,7 +2070,7 @@ _AUTO_PROVIDER_LABELS = {
     "_resolve_api_key_provider": "api-key",
 }
 
-_MAIN_RUNTIME_FIELDS = ("provider", "model", "base_url", "api_key", "api_mode", "auth_mode")
+_MAIN_RUNTIME_FIELDS = ("provider", "model", "base_url", "api_key", "api_mode", "auth_mode", "auth_generation")
 
 
 def _normalize_main_runtime(main_runtime: Optional[Dict[str, Any]]) -> Dict[str, Any]:
@@ -2098,6 +2090,9 @@ def _normalize_main_runtime(main_runtime: Optional[Dict[str, Any]]) -> Dict[str,
         # Preserve a callable api_key (Entra ID bearer provider) unchanged.
         if field == "api_key" and callable(value) and not isinstance(value, str):
             normalized[field] = value
+            continue
+        if field == "auth_generation" and isinstance(value, dict):
+            normalized[field] = dict(value)
             continue
         if isinstance(value, str) and value.strip():
             normalized[field] = value.strip()
@@ -3987,6 +3982,22 @@ _client_cache_lock = threading.Lock()
 _CLIENT_CACHE_MAX_SIZE = 64  # safety belt — evict oldest when exceeded
 
 
+def _client_cache_runtime_key(runtime: Dict[str, Any]) -> tuple:
+    import hashlib
+    import json
+
+    parts = []
+    for field in _MAIN_RUNTIME_FIELDS:
+        value = runtime.get(field, "")
+        if field == "api_key" and isinstance(value, str) and value:
+            parts.append(hashlib.sha256(value.encode()).hexdigest())
+        elif field == "auth_generation" and isinstance(value, dict):
+            parts.append(json.dumps(value, sort_keys=True, default=str))
+        else:
+            parts.append(value)
+    return tuple(parts)
+
+
 def _client_cache_key(
     provider: str,
     *,
@@ -3998,7 +4009,7 @@ def _client_cache_key(
     is_vision: bool = False,
 ) -> tuple:
     runtime = _normalize_main_runtime(main_runtime)
-    runtime_key = tuple(runtime.get(field, "") for field in _MAIN_RUNTIME_FIELDS) if provider == "auto" else ()
+    runtime_key = _client_cache_runtime_key(runtime) if provider == "auto" else ()
     pool_hint = _pool_cache_hint(provider, main_runtime=main_runtime)
     return (provider, async_mode, base_url or "", api_key or "", api_mode or "", runtime_key, is_vision, pool_hint)
 

@@ -28,6 +28,7 @@ from agent.auxiliary_client import (
     _resolve_auto,
     _resolve_xai_oauth_for_aux,
     _CodexCompletionsAdapter,
+    _client_cache_key,
 )
 
 
@@ -94,6 +95,31 @@ class TestNormalizeAuxProvider:
         assert _normalize_aux_provider("copilot-acp-agent") == "copilot-acp"
 
 
+class TestAuxiliaryClientCacheKey:
+    def test_auth_generation_change_evicts_stale_auto_child_credentials(self):
+        base = {
+            "provider": "openai-codex",
+            "model": "gpt-5.3-codex",
+            "base_url": "https://chatgpt.com/backend-api/codex",
+            "api_key": "same-access-token",
+            "api_mode": "codex_responses",
+            "auth_mode": "chatgpt",
+        }
+        key_before = _client_cache_key(
+            "auto",
+            async_mode=False,
+            main_runtime=dict(base, auth_generation={"changed_at": "2026-08-24T00:00:00Z"}),
+        )
+        key_after = _client_cache_key(
+            "auto",
+            async_mode=False,
+            main_runtime=dict(base, auth_generation={"changed_at": "2026-08-24T00:01:00Z"}),
+        )
+
+        assert key_before != key_after
+        assert "same-access-token" not in repr(key_before + key_after)
+
+
 class TestReadCodexAccessToken:
     def test_valid_auth_store(self, tmp_path, monkeypatch):
         hermes_home = tmp_path / "hermes"
@@ -110,18 +136,19 @@ class TestReadCodexAccessToken:
         result = _read_codex_access_token()
         assert result == "tok-123"
 
-    def test_pool_without_selected_entry_falls_back_to_auth_store(self, tmp_path, monkeypatch):
+    def test_ignores_credential_pool_and_reads_profile_auth_store(self, tmp_path, monkeypatch):
         hermes_home = tmp_path / "hermes"
         hermes_home.mkdir(parents=True, exist_ok=True)
         monkeypatch.setenv("HERMES_HOME", str(hermes_home))
 
-        valid_jwt = "eyJhbGciOiJSUzI1NiJ9.eyJleHAiOjk5OTk5OTk5OTl9.sig"
-        with patch("agent.auxiliary_client._select_pool_entry", return_value=(True, None)), \
+        valid_jwt = "eyJhbG...OTl9.sig"
+        with patch("agent.auxiliary_client._select_pool_entry", return_value=(True, MagicMock(api_key="pool-token"))) as select_pool, \
              patch("hermes_cli.auth._read_codex_tokens", return_value={
                  "tokens": {"access_token": valid_jwt, "refresh_token": "refresh"}
              }):
             result = _read_codex_access_token()
 
+        select_pool.assert_not_called()
         assert result == valid_jwt
 
     def test_missing_returns_none(self, tmp_path, monkeypatch):

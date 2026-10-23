@@ -98,6 +98,25 @@ class TestAgentConfigSignature:
         sig2 = GatewayRunner._agent_config_signature("claude-sonnet-4", runtime, ["hermes-telegram"], "")
         assert sig1 == sig2
 
+    def test_auth_generation_change_busts_cache_without_secret_material(self):
+        from gateway.run import GatewayRunner
+
+        base_runtime = {
+            "api_key": "stable-runtime-token",
+            "base_url": "https://chatgpt.com/backend-api/codex",
+            "provider": "openai-codex",
+            "api_mode": "codex_responses",
+        }
+        runtime_before = dict(base_runtime, auth_generation={"event": "auth_state_changed", "changed_at": "2026-08-24T00:00:00Z"})
+        runtime_after = dict(base_runtime, auth_generation={"event": "auth_state_changed", "changed_at": "2026-08-24T00:01:00Z"})
+
+        sig_before = GatewayRunner._agent_config_signature("gpt-5.3-codex", runtime_before, ["hermes-telegram"], "")
+        sig_after = GatewayRunner._agent_config_signature("gpt-5.3-codex", runtime_after, ["hermes-telegram"], "")
+
+        assert sig_before != sig_after
+        assert "stable-runtime-token" not in sig_before + sig_after
+
+
     # ---------------------------------------------------------------
     # cache_keys (compression/context config cache-busting)
     # ---------------------------------------------------------------
