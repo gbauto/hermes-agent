@@ -1,0 +1,14 @@
+{
+  "rows": [
+    {"client": "the-mall", "status": "shipped", "kind": "feature", "prd_type": "build", "priority": "P1", "tac_status": "done", "agent_team": "ECOM"},
+    {"client": "the-mall", "status": "shipped", "kind": "feature", "prd_type": "build", "priority": "P2", "tac_status": "done", "agent_team": "ECOM"},
+    {"client": "the-mall", "status": "in_progress", "kind": "bugfix", "prd_type": "fix", "priority": "P1", "tac_status": "running", "agent_team": "ECOM"},
+    {"client": "adjust-ai", "status": "draft", "kind": "feature", "prd_type": "build", "priority": "P2", "tac_status": "todo", "agent_team": "PLATFORM"},
+    {"client": "adjust-ai", "status": "shipped", "kind": "chore", "prd_type": "ops", "priority": "P3", "tac_status": "done", "agent_team": "PLATFORM"},
+    {"client": "smoke-client", "status": "shipped", "kind": "feature", "prd_type": "build", "priority": "P1", "tac_status": "done", "agent_team": "PLATFORM"},
+    {"client": "smoke-client", "status": "in_progress", "kind": "feature", "prd_type": "build", "priority": "P2", "tac_status": "running", "agent_team": "PLATFORM"},
+    {"client": "smoke-client", "status": "draft", "kind": "docs", "prd_type": "spec", "priority": "P3", "tac_status": "todo", "agent_team": "PLATFORM"},
+    {"client": "the-mall", "status": "shipped", "kind": "feature", "prd_type": "build", "priority": "P1", "tac_status": "done", "agent_team": "ECOM"},
+    {"client": "adjust-ai", "status": "in_progress", "kind": "bugfix", "prd_type": "fix", "priority": "P2", "tac_status": "running", "agent_team": "PLATFORM"}
+  ]
+}
